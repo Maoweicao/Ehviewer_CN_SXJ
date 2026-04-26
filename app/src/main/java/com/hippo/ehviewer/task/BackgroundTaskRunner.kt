@@ -24,7 +24,7 @@ object BackgroundTaskRunner {
             if (originalTidPriority > Process.THREAD_PRIORITY_DEFAULT) {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT)
                 priorityRestored = true
-                Log.d(TAG, "任务 ${task.taskId} 线程优先级从 $originalTidPriority 提升到 THREAD_PRIORITY_DEFAULT")
+                Log.d(TAG, "任务 ${task.getTaskId()} 线程优先级从 $originalTidPriority 提升到 THREAD_PRIORITY_DEFAULT")
             }
         } catch (_: Exception) {
         }
