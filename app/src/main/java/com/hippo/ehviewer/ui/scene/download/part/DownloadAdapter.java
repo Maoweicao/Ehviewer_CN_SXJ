@@ -83,6 +83,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 下载列表适配器
@@ -92,6 +94,13 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
     private static final String TAG = DownloadAdapter.class.getSimpleName();
     public static boolean DRAG_ENABLE = false;
+
+    /** 后台预加载线程池（单线程，避免竞争） */
+    private static final ExecutorService sPreloadExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "FolderMetaPreloader");
+        t.setPriority(Thread.MIN_PRIORITY);
+        return t;
+    });
 
     private final LayoutInflater mInflater;
     private final int mListThumbWidth;
@@ -423,28 +432,64 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         boolean showFolderSize = Settings.getShowDownloadCardFolderSize();
 
         if (showFolderTime) {
-            long folderTime = folderTimeCache.computeIfAbsent(info.gid,
-                    ignored -> DownloadGalleryMetaHelper.getGalleryDirectoryTimestamp(info));
-            String timeText = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.getDefault())
-                    .format(new Date(folderTime));
-            holder.folderTime.setText(mScene.getString(R.string.download_card_folder_time, timeText));
+            Long cached = folderTimeCache.get(info.gid);
+            if (cached != null) {
+                String timeText = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT, Locale.getDefault())
+                        .format(new Date(cached));
+                holder.folderTime.setText(mScene.getString(R.string.download_card_folder_time, timeText));
+            } else {
+                holder.folderTime.setText(null);
+            }
         }
 
         if (showFolderSize) {
-            long folderSize = folderSizeCache.computeIfAbsent(info.gid, ignored -> {
-                try {
-                    return DownloadedFileManager.getInstance().getGalleryFilesTotalSize(info.gid);
-                } catch (Exception e) {
-                    Log.w(TAG, "Failed to query folder size for gid=" + info.gid, e);
-                    return 0L;
-                }
-            });
-            String sizeText = com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(Math.max(folderSize, 0L), false);
-            holder.folderSize.setText(mScene.getString(R.string.download_card_folder_size, sizeText));
+            Long cached = folderSizeCache.get(info.gid);
+            if (cached != null) {
+                String sizeText = com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(Math.max(cached, 0L), false);
+                holder.folderSize.setText(mScene.getString(R.string.download_card_folder_size, sizeText));
+            } else {
+                holder.folderSize.setText(null);
+            }
         }
 
         holder.folderTime.setVisibility(showFolderTime ? View.VISIBLE : View.GONE);
         holder.folderSize.setVisibility(showFolderSize ? View.VISIBLE : View.GONE);
+    }
+
+    /**
+     * 在后台线程预加载所有文件夹元数据（时间、大小），避免 onBindViewHolder 中发生文件 I/O
+     */
+    public void preloadFolderMetaAsync() {
+        if (!Settings.getShowDownloadCardFolderTime() && !Settings.getShowDownloadCardFolderSize()) {
+            return;
+        }
+        sPreloadExecutor.execute(() -> {
+            List<DownloadInfo> list = mCallback.getList();
+            if (list == null) return;
+            boolean needTime = Settings.getShowDownloadCardFolderTime();
+            boolean needSize = Settings.getShowDownloadCardFolderSize();
+            boolean changed = false;
+            for (DownloadInfo info : list) {
+                if (needTime && !folderTimeCache.containsKey(info.gid)) {
+                    long time = DownloadGalleryMetaHelper.getGalleryDirectoryTimestamp(info);
+                    folderTimeCache.put(info.gid, time);
+                    changed = true;
+                }
+                if (needSize && !folderSizeCache.containsKey(info.gid)) {
+                    try {
+                        long size = DownloadedFileManager.getInstance().getGalleryFilesTotalSize(info.gid);
+                        folderSizeCache.put(info.gid, size);
+                    } catch (Exception e) {
+                        Log.w(TAG, "Failed to preload folder size for gid=" + info.gid, e);
+                    }
+                    changed = true;
+                }
+            }
+            if (changed) {
+                // 通知主线程刷新 UI
+                mScene.runOnUiThreadIfNotStopped(() -> notifyDataSetChanged());
+            }
+        });
     }
 
 

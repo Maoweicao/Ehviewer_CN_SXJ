@@ -1155,6 +1155,17 @@ public class Settings {
         putBoolean(KEY_INCREMENTAL_DOWNLOAD_UPDATE, value);
     }
 
+    public static final String KEY_MERGE_ON_DOWNLOAD = "merge_on_download";
+    private static final boolean DEFAULT_MERGE_ON_DOWNLOAD = false;
+
+    public static boolean getMergeOnDownload() {
+        return getBoolean(KEY_MERGE_ON_DOWNLOAD, DEFAULT_MERGE_ON_DOWNLOAD);
+    }
+
+    public static void putMergeOnDownload(boolean value) {
+        putBoolean(KEY_MERGE_ON_DOWNLOAD, value);
+    }
+
     public static final String KEY_SHOW_DOWNLOAD_CARD_FOLDER_TIME = "show_download_card_folder_time";
     private static final boolean DEFAULT_SHOW_DOWNLOAD_CARD_FOLDER_TIME = false;
 

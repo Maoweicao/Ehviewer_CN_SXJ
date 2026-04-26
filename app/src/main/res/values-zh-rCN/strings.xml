@@ -698,6 +698,10 @@
     <string name="settings_download_show_folder_time_summary">在每个下载卡片中显示文件夹时间。</string>
     <string name="settings_download_show_folder_size">在下载卡片显示文件夹大小</string>
     <string name="settings_download_show_folder_size_summary">在每个下载卡片中显示文件夹大小。</string>
+    <string name="settings_download_merge_on_download">下载时合并相同画廊</string>
+    <string name="settings_download_merge_on_download_summary">下载完成后自动扫描并合并同名的重复画廊文件夹</string>
+    <string name="merge_duplicate_gallery_single_title">合并画廊</string>
+    <string name="merge_duplicate_gallery_single_summary">下载后合并同名画廊</string>
     <string name="settings_download_merge_duplicate_gallery">合并重复的画廊</string>
     <string name="settings_download_merge_duplicate_gallery_summary">扫描并合并重复画廊，实现版本演进。</string>
     <string name="merge_duplicate_gallery_title">合并重复画廊</string>

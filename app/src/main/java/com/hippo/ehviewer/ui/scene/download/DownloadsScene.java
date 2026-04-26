@@ -1754,9 +1754,13 @@ public class DownloadsScene extends ToolbarScene
         if (mAdapter != null) {
             if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
                 refreshDownloadListAfterDelete();
+                mOriginalAdapter.preloadFolderMetaAsync();
             } else {
                 android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-                mainHandler.post(() -> refreshDownloadListAfterDelete());
+                mainHandler.post(() -> {
+                    refreshDownloadListAfterDelete();
+                    mOriginalAdapter.preloadFolderMetaAsync();
+                });
             }
         }
     }

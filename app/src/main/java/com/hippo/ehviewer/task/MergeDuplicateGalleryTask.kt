@@ -34,7 +34,9 @@ import kotlin.coroutines.coroutineContext
 
 class MergeDuplicateGalleryTask @JvmOverloads constructor(
     context: Context,
-    private val taskId: String = "merge_duplicate_gallery_${System.currentTimeMillis()}"
+    private val taskId: String = "merge_duplicate_gallery_${System.currentTimeMillis()}",
+    /** 指定只扫描并合并单个画廊（gid），-1L 表示扫描全部 */
+    private val targetGid: Long = -1L
 ) : BaseBackgroundTask(context) {
 
     private val galleryGroups = mutableListOf<GalleryGroup>()
@@ -48,20 +50,71 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
     private var errorCount = 0
     private var lastError = ""
 
+    /** 是否为单画廊合并模式 */
+    private val isSingleMode: Boolean get() = targetGid >= 0L
+
     override fun getTaskId(): String = taskId
 
-    override fun getTaskName(): String = context.getString(R.string.settings_download_merge_duplicate_gallery)
+    override fun getTaskName(): String = if (isSingleMode) {
+        context.getString(R.string.merge_duplicate_gallery_single_title)
+    } else {
+        context.getString(R.string.settings_download_merge_duplicate_gallery)
+    }
 
-    override fun getTaskDescription(): String = context.getString(R.string.settings_download_merge_duplicate_gallery_summary)
+    override fun getTaskDescription(): String = if (isSingleMode) {
+        context.getString(R.string.merge_duplicate_gallery_single_summary)
+    } else {
+        context.getString(R.string.settings_download_merge_duplicate_gallery_summary)
+    }
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.MERGE
 
-    override fun isUniqueTask(): Boolean = true
+    override fun isUniqueTask(): Boolean = !isSingleMode
 
-    override fun isPersistable(): Boolean = true
+    override fun isPersistable(): Boolean = !isSingleMode
 
     override fun getTaskPersistData(): String {
         return JSONObject().toString()
+    }
+
+    companion object {
+        private const val TAG = "MergeDuplicateGalleryTask"
+
+        const val STEP_SCAN = 0
+        const val STEP_ANALYZE = 1
+        const val STEP_MERGE = 2
+        const val STEP_BACKUP = 3
+
+        private const val SCAN_WEIGHT = 20
+        private const val ANALYZE_WEIGHT = 20
+        private const val BACKUP_WEIGHT = 10
+        private const val MERGE_WEIGHT = 50
+        private const val HASH_SIMILARITY_THRESHOLD = 0.75f
+
+        private val IMAGE_EXTENSIONS = setOf(
+            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"
+        )
+
+        @JvmStatic
+        fun restore(context: Context, taskId: String, persistData: String?): MergeDuplicateGalleryTask? {
+            if (persistData == null) {
+                return null
+            }
+            return try {
+                MergeDuplicateGalleryTask(context, taskId)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        /**
+         * 为单个已下载完成的画廊创建合并任务，只扫描与其同名的其他画廊目录
+         */
+        @JvmStatic
+        fun mergeForGallery(context: Context, gid: Long): MergeDuplicateGalleryTask {
+            val taskId = "merge_single_${gid}_${System.currentTimeMillis()}"
+            return MergeDuplicateGalleryTask(context, taskId, gid)
+        }
     }
 
     override suspend fun execute(): Result<Unit> {
@@ -205,9 +258,31 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 infos = Collections.emptyList()
             }
 
+            // 单画廊模式：先找到目标画廊，只扫描与之同名的其他文件夹
+            val targetCleanName: String? = if (isSingleMode) {
+                val targetInfo = infos.find { it.gid == targetGid }
+                if (targetInfo == null) {
+                    lastError = "未找到目标下载记录: gid=$targetGid"
+                    logError(lastError)
+                    return false
+                }
+                val targetDir = SpiderDen.getGalleryDownloadDir(targetInfo)
+                if (targetDir == null || !targetDir.exists() || !targetDir.isDirectory) {
+                    lastError = "目标下载目录不存在: gid=$targetGid"
+                    logError(lastError)
+                    return false
+                }
+                val targetName = targetDir.name ?: targetInfo.gid.toString()
+                removeIdPrefix(targetName).also {
+                    logInfo("单画廊模式: 目标画廊已清理名称=\"$it\" (gid=$targetGid)")
+                }
+            } else {
+                null
+            }
+
             val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
             val total = infos.size
-            logInfo("扫描到 $total 个下载记录")
+            logInfo("扫描到 $total 个下载记录${if (isSingleMode) "（单画廊模式）" else ""}")
             for (i in infos.indices) {
                 ensureNotCancelled()
                 val info = infos[i]
@@ -227,11 +302,23 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                     ehMeta = parseEhviewerMeta(dir)
                 )
 
-                logInfo(
-                    "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-                )
-
                 val cleanName = removeIdPrefix(folder.name)
+
+                // 单画廊模式：只处理与目标同名的文件夹
+                if (isSingleMode) {
+                    if (cleanName != targetCleanName) {
+                        dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+                        continue
+                    }
+                    logInfo(
+                        "扫描到匹配的下载目录: ${folder.name} (gid=${info.gid})，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+                    )
+                } else {
+                    logInfo(
+                        "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+                    )
+                }
+
                 buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
                 dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
             }
@@ -249,7 +336,11 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 )
             }
 
-            logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+            if (isSingleMode && galleryGroups.isEmpty()) {
+                logInfo("单画廊模式: 未发现目标画廊的重复，无需合并")
+            } else {
+                logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+            }
             true
         } catch (t: Throwable) {
             lastError = t.message ?: "扫描失败"
@@ -962,36 +1053,5 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         PARTIAL_OVERLAP,
         NO_OVERLAP,
         NO_EHVIEWER
-    }
-
-    companion object {
-        private const val TAG = "MergeDuplicateGalleryTask"
-
-        const val STEP_SCAN = 0
-        const val STEP_ANALYZE = 1
-        const val STEP_MERGE = 2
-        const val STEP_BACKUP = 3
-
-        private const val SCAN_WEIGHT = 20
-        private const val ANALYZE_WEIGHT = 20
-        private const val BACKUP_WEIGHT = 10
-        private const val MERGE_WEIGHT = 50
-        private const val HASH_SIMILARITY_THRESHOLD = 0.75f
-
-        private val IMAGE_EXTENSIONS = setOf(
-            ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp"
-        )
-
-        @JvmStatic
-        fun restore(context: Context, taskId: String, persistData: String?): MergeDuplicateGalleryTask? {
-            if (persistData == null) {
-                return null
-            }
-            return try {
-                MergeDuplicateGalleryTask(context, taskId)
-            } catch (_: Exception) {
-                null
-            }
-        }
     }
 }

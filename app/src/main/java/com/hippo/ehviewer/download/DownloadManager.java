@@ -47,6 +47,7 @@ import com.hippo.ehviewer.dao.GalleryVersionMap;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
+import com.hippo.ehviewer.task.MergeDuplicateGalleryTask;
 import com.hippo.ehviewer.cache.GalleryCacheManager;
 import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.EhEngine;
@@ -140,10 +141,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private final Runnable mDownloadStateSyncRunnable = new Runnable() {
         @Override
         public void run() {
-            checkCurrentDownloadDatabaseState();
-            if (mCurrentTask != null && mCurrentDownloadTaskId != null) {
-                mMainHandler.postDelayed(this, DOWNLOAD_STATE_SYNC_INTERVAL_MS);
-            }
+            // 在后台线程检查数据库状态，避免主线程 I/O
+            ExecutorManager.getBackgroundExecutor().execute(() -> {
+                checkCurrentDownloadDatabaseState();
+                if (mCurrentTask != null && mCurrentDownloadTaskId != null) {
+                    mMainHandler.postDelayed(this, DOWNLOAD_STATE_SYNC_INTERVAL_MS);
+                }
+            });
         }
     };
 
@@ -289,15 +293,18 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
             if (mCurrentTask != null) {
                 mCurrentTask.state = DownloadInfo.STATE_FINISH;
-                if (mDownloadListener != null) {
-                    mDownloadListener.onFinish(mCurrentTask);
-                }
-                List<DownloadInfo> list = getInfoListForLabel(mCurrentTask.label);
-                if (list != null) {
-                    for (DownloadInfoListener l : mDownloadInfoListeners) {
-                        l.onUpdate(mCurrentTask, list, mWaitList);
+                // 在主线程通知监听器
+                mMainHandler.post(() -> {
+                    if (mDownloadListener != null) {
+                        mDownloadListener.onFinish(mCurrentTask);
                     }
-                }
+                    List<DownloadInfo> list = getInfoListForLabel(mCurrentTask.label);
+                    if (list != null) {
+                        for (DownloadInfoListener l : mDownloadInfoListeners) {
+                            l.onUpdate(mCurrentTask, list, mWaitList);
+                        }
+                    }
+                });
             }
 
             mCurrentDownloadTaskId = null;
@@ -2131,6 +2138,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         mCurrentDownloadTaskDescription = null;
                     }
                     
+                    // 如果下载成功且开启了"下载时合并相同画廊"选项，启动单画廊合并任务
+                    if (info.legacy == 0 && Settings.getMergeOnDownload() && info.gid >= 0) {
+                        Log.d(TAG, "[FINISH] 触发下载后合并: " + galleryTitle + " (gid=" + info.gid + ")");
+                        MergeDuplicateGalleryTask mergeTask = MergeDuplicateGalleryTask.mergeForGallery(mContext, info.gid);
+                        mBackgroundTaskManager.submitBackgroundTask(mergeTask);
+                    }
+
                     // Start next download
                     requestEnsureDownload();
                     Log.d(TAG, "[FINISH] 确保下一个下载开始: " + galleryTitle);
@@ -2302,16 +2316,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      * 提高用户体验
      */
     public void onAppForeground() {
-        Log.d(TAG, "应用进入前台，可以优化下载性能");
-        if (mCurrentSpider != null) {
-            try {
-                // 允许系统优化线程优先级
-                Process.setThreadPriority(Process.getThreadPriority(Process.THREAD_PRIORITY_BACKGROUND), Process.THREAD_PRIORITY_DEFAULT);
-                Log.d(TAG, "前台下载线程优先级已优化");
-            } catch (Exception e) {
-                Log.w(TAG, "无法优化前台下载优先级", e);
-            }
-        }
+        Log.d(TAG, "应用进入前台，下载线程保持正常优先级");
+        // 前台时下载线程保持 THREAD_PRIORITY_DEFAULT 即可
+        // SpiderQueen 工作线程已自主管理优先级
     }
 
     /**
@@ -2319,10 +2326,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      * 这很重要，否则后台下载可能会变得非常慢
      */
     public void onAppBackground() {
-        Log.d(TAG, "应用进入后台，维持下载优先级");
+        Log.d(TAG, "应用进入后台，维持下载线程优先级");
         if (mCurrentSpider != null && mCurrentTask != null) {
             Log.d(TAG, "正在下载: " + mCurrentTask.title + ", 保持优先级避免速度下降");
-            // Ensure foreground notification stays alive while app is backgrounded
+            // 确保前台通知存活，防止系统调度降低进程优先级
             if (mDownloadListener != null) {
                 mDownloadListener.onDownload(mCurrentTask);
             }

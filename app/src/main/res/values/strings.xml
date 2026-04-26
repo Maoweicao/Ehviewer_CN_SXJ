@@ -678,6 +678,10 @@
     <string name="settings_download_show_folder_time_summary">Display folder time in each download card.</string>
     <string name="settings_download_show_folder_size">Show folder size on download card</string>
     <string name="settings_download_show_folder_size_summary">Display folder size in each download card.</string>
+    <string name="settings_download_merge_on_download">Merge duplicates on download</string>
+    <string name="settings_download_merge_on_download_summary">After download completes, automatically scan and merge same-name galleries to consolidate</string>
+    <string name="merge_duplicate_gallery_single_title">Merge gallery</string>
+    <string name="merge_duplicate_gallery_single_summary">Merge same-name galleries after download</string>
     <string name="settings_download_merge_duplicate_gallery">Merge duplicate galleries</string>
     <string name="settings_download_merge_duplicate_gallery_summary">Scan and merge duplicate galleries with version progression</string>
     <string name="merge_duplicate_gallery_title">Merge Duplicate Galleries</string>
