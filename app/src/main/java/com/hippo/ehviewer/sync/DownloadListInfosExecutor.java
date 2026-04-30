@@ -820,8 +820,8 @@ public class DownloadListInfosExecutor {
     }
 
     // 新增方法：执行高级搜索
-    public void executeAdvancedSearch(String keyword, int searchOption, Set<Integer> categories) {
-        Log.d("DownloadListInfos", "executeAdvancedSearch: 开始, keyword=" + keyword + ", searchOption=" + searchOption + ", categories=" + categories);
+    public void executeAdvancedSearch(String keyword, int searchOption, Set<Integer> categories, int sortId) {
+        Log.d("DownloadListInfos", "executeAdvancedSearch: 开始, keyword=" + keyword + ", searchOption=" + searchOption + ", categories=" + categories + ", sortId=" + sortId);
         Log.d("DownloadListInfos", "executeAdvancedSearch: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
@@ -840,7 +840,15 @@ public class DownloadListInfosExecutor {
                 Log.d("DownloadListInfos", "executeAdvancedSearch: 关键词搜索完成，列表大小=" + filteredList.size());
             }
             
-            resultList = filteredList;
+            // 最后应用排序
+            if (sortId != R.id.sort_by_default) {
+                List<DownloadInfo> originalList = this.mList;
+                this.mList = filteredList;
+                resultList = sortByType(sortId);
+                this.mList = originalList;
+            } else {
+                resultList = filteredList;
+            }
 
             handler.post(() -> {
                 if (mDownloadSearchCallback == null) {

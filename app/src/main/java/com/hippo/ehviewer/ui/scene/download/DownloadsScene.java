@@ -1011,9 +1011,13 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private void gotoSearch(Context context) {
-        if (mSearchDialog != null) {
+        if (mSearchDialog != null && mSearchDialog.isShowing()) {
             mSearchDialog.show();
             return;
+        }
+        if (mSearchDialog != null) {
+            mSearchDialog.dismiss();
+            mSearchDialog = null;
         }
         
         // 创建增强的搜索对话框
@@ -1024,6 +1028,66 @@ public class DownloadsScene extends ToolbarScene
         mSearchBar = searchBar; // 供回调使用，避免空指�?
         AdvanceSearchTable advanceSearchTable = dialogView.findViewById(R.id.advance_search_table);
         DownloadCategoryTable categoryTable = dialogView.findViewById(R.id.category_table);
+        RecyclerView searchSortRecyclerView = dialogView.findViewById(R.id.search_sort_recycler_view);
+        View advanceSearchToggleRow = dialogView.findViewById(R.id.advance_search_toggle_row);
+        TextView advanceSearchToggleIcon = dialogView.findViewById(R.id.advance_search_toggle_icon);
+        View advanceSearchContentContainer = dialogView.findViewById(R.id.advance_search_content_container);
+        View categoryFilterToggleRow = dialogView.findViewById(R.id.category_filter_toggle_row);
+        TextView categoryFilterToggleIcon = dialogView.findViewById(R.id.category_filter_toggle_icon);
+        View categoryFilterContentContainer = dialogView.findViewById(R.id.category_filter_content_container);
+        Button resetButton = dialogView.findViewById(R.id.reset_button);
+        Button searchButton = dialogView.findViewById(R.id.search_button);
+
+        // 高级搜索选项和分类过滤默认折叠
+        setSectionExpanded(advanceSearchContentContainer, advanceSearchToggleIcon, false);
+        setSectionExpanded(categoryFilterContentContainer, categoryFilterToggleIcon, false);
+        advanceSearchToggleRow.setOnClickListener(v -> toggleSection(advanceSearchContentContainer, advanceSearchToggleIcon));
+        categoryFilterToggleRow.setOnClickListener(v -> toggleSection(categoryFilterContentContainer, categoryFilterToggleIcon));
+
+        int spanCount = context.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 2 : 1;
+        searchSortRecyclerView.setLayoutManager(new GridLayoutManager(context, spanCount));
+        searchSortRecyclerView.setNestedScrollingEnabled(false);
+
+        List<String> sortItems = new ArrayList<>();
+        List<Integer> sortIds = new ArrayList<>();
+        sortItems.add(getString(R.string.default_sort));
+        sortIds.add(R.id.sort_by_default);
+        sortItems.add(getString(R.string.sort_by_gallery_id_asc));
+        sortIds.add(R.id.sort_by_gallery_id_asc);
+        sortItems.add(getString(R.string.sort_by_gallery_id_desc));
+        sortIds.add(R.id.sort_by_gallery_id_desc);
+        sortItems.add(getString(R.string.sort_by_create_time_asc));
+        sortIds.add(R.id.sort_by_create_time_asc);
+        sortItems.add(getString(R.string.sort_by_create_time_desc));
+        sortIds.add(R.id.sort_by_create_time_desc);
+        sortItems.add(getString(R.string.sort_by_rating_asc));
+        sortIds.add(R.id.sort_by_rating_asc);
+        sortItems.add(getString(R.string.sort_by_rating_desc));
+        sortIds.add(R.id.sort_by_rating_desc);
+        sortItems.add(getString(R.string.sort_by_name_asc));
+        sortIds.add(R.id.sort_by_name_asc);
+        sortItems.add(getString(R.string.sort_by_name_desc));
+        sortIds.add(R.id.sort_by_name_desc);
+        sortItems.add(getString(R.string.sort_by_file_size_asc));
+        sortIds.add(R.id.sort_by_file_size_asc);
+        sortItems.add(getString(R.string.sort_by_file_size_desc));
+        sortIds.add(R.id.sort_by_file_size_desc);
+
+        CheckboxAdapter searchSortAdapter = new CheckboxAdapter(sortItems, sortIds);
+        searchSortAdapter.setMutuallyExclusive(true);
+        if (mSelectedSorts.isEmpty()) {
+            mSelectedSorts.add(R.id.sort_by_default);
+        }
+        searchSortRecyclerView.setAdapter(searchSortAdapter);
+        dialogView.post(() -> searchSortAdapter.setSelectedItems(mSelectedSorts));
+        searchSortAdapter.setOnSelectionChangedListener(selectedItems -> {
+            mSelectedSorts.clear();
+            mSelectedSorts.addAll(selectedItems);
+            if (mSelectedSorts.isEmpty()) {
+                mSelectedSorts.add(R.id.sort_by_default);
+                dialogView.post(() -> searchSortAdapter.setSelectedItems(mSelectedSorts));
+            }
+        });
         
         // 设置SearchBar
         searchBar.setHelper(this);
@@ -1054,48 +1118,50 @@ public class DownloadsScene extends ToolbarScene
         defaultCategories.add(EhUtils.ALL_CATEGORY);
         categoryTable.setSelectedCategories(defaultCategories);
         
+        resetButton.setOnClickListener(v -> {
+            searchBar.setText("");
+            searchBar.setTitle(R.string.download_search_hint);
+            advanceSearchTable.setAdvanceSearch(AdvanceSearchTable.SNAME | AdvanceSearchTable.STAGS);
+
+            Set<Integer> resetCategories = new HashSet<>();
+            resetCategories.add(EhUtils.ALL_CATEGORY);
+            categoryTable.setSelectedCategories(resetCategories);
+
+            mSelectedSorts.clear();
+            mSelectedSorts.add(R.id.sort_by_default);
+            dialogView.post(() -> searchSortAdapter.setSelectedItems(mSelectedSorts));
+            searchBar.hideSuggestionsList();
+        });
+
+        searchButton.setOnClickListener(v -> {
+            Editable editable = searchBar.mEditText.getText();
+            searchKey = editable != null ? editable.toString() : null;
+
+            int searchOption = advanceSearchTable.getAdvanceSearch();
+            Set<Integer> selectedCategories = categoryTable.getSelectedCategories();
+            int selectedSort = mSelectedSorts.isEmpty() ? R.id.sort_by_default : mSelectedSorts.iterator().next();
+
+            searchBar.hideSuggestionsList();
+            performAdvancedSearch(searchKey, searchOption, selectedCategories, selectedSort);
+            mSearchDialog.dismiss();
+        });
+
         mSearchDialog = new AlertDialog.Builder(context)
                 .setView(dialogView)
                 .setCancelable(true)
-                .setOnDismissListener(this::onSearchDialogDismiss)
-                .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
-                    // 取消搜索，不执行任何搜索操作
-                    searchKey = null;
-                    // 隐藏建议列表
-                    searchBar.hideSuggestionsList();
-                    dialog.dismiss();
-                })
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    // 获取搜索关键�?
-                    Editable editable = searchBar.mEditText.getText();
-                    searchKey = editable != null ? editable.toString() : null;
-                    
-                    // 获取高级搜索选项
-                    int searchOption = advanceSearchTable.getAdvanceSearch();
-                    
-                    // 获取选中的分�?
-                    Set<Integer> selectedCategories = categoryTable.getSelectedCategories();
-                    
-                    // 隐藏建议列表
-                    searchBar.hideSuggestionsList();
-                    
-                    // 执行搜索
-                    performAdvancedSearch(searchKey, searchOption, selectedCategories);
-                    dialog.dismiss();
-                })
-                .setOnDismissListener(dialog -> {
-                    // 对话框关闭时隐藏建议列表
-                    if (searchBar != null) {
-                        searchBar.hideSuggestionsList();
-                    }
-                    onSearchDialogDismiss(dialog);
-                })
-                .show();
+                .create();
+        mSearchDialog.setOnDismissListener(dialog -> {
+            if (searchBar != null) {
+                searchBar.hideSuggestionsList();
+            }
+            onSearchDialogDismiss(dialog);
+        });
+        mSearchDialog.show();
     }
     
     // 新增方法：执行高级搜�?
-    private void performAdvancedSearch(String keyword, int searchOption, Set<Integer> categories) {
-        Log.d("DownloadsScene", "performAdvancedSearch: keyword=" + keyword + ", searchOption=" + searchOption + ", categories=" + categories);
+    private void performAdvancedSearch(String keyword, int searchOption, Set<Integer> categories, int sortId) {
+        Log.d("DownloadsScene", "performAdvancedSearch: keyword=" + keyword + ", searchOption=" + searchOption + ", categories=" + categories + ", sortId=" + sortId);
         
         isFilteringOrSearching = true;  // 标记进入搜索状�?
         mProgressView.setVisibility(View.VISIBLE);
@@ -1106,12 +1172,23 @@ public class DownloadsScene extends ToolbarScene
         // 创建执行器并执行搜索
         DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
         executor.setDownloadSearchingListener(this);
-        executor.executeAdvancedSearch(keyword, searchOption, categories);
+        executor.executeAdvancedSearch(keyword, searchOption, categories, sortId);
     }
 
     private void onSearchDialogDismiss(DialogInterface dialog) {
         mSearchMode = false;
+        mSearchDialog = null;
         mSearchBar = null; // 释放引用，避免后续回调访问空对象
+    }
+
+    private void setSectionExpanded(@NonNull View sectionContent, @NonNull TextView indicatorView, boolean expanded) {
+        sectionContent.setVisibility(expanded ? View.VISIBLE : View.GONE);
+        indicatorView.setText(expanded ? "-" : "+");
+    }
+
+    private void toggleSection(@NonNull View sectionContent, @NonNull TextView indicatorView) {
+        boolean shouldExpand = sectionContent.getVisibility() != View.VISIBLE;
+        setSectionExpanded(sectionContent, indicatorView, shouldExpand);
     }
 
     private void enterSearchMode(boolean animation) {
@@ -2691,6 +2768,13 @@ public class DownloadsScene extends ToolbarScene
 
         // 创建弹窗视图 - 使用新的布局
         View dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_sort_filter_v2, null);
+        View advancedFilterToggleRow = dialogView.findViewById(R.id.advanced_filter_toggle_row);
+        TextView advancedFilterToggleIcon = dialogView.findViewById(R.id.advanced_filter_toggle_icon);
+        View advancedFilterContentContainer = dialogView.findViewById(R.id.advanced_filter_content_container);
+
+        // 高级筛选面板默认折叠
+        setSectionExpanded(advancedFilterContentContainer, advancedFilterToggleIcon, false);
+        advancedFilterToggleRow.setOnClickListener(v -> toggleSection(advancedFilterContentContainer, advancedFilterToggleIcon));
         
         // 获取CategoryTable
         DownloadCategoryTable categoryTable = dialogView.findViewById(R.id.category_table);
