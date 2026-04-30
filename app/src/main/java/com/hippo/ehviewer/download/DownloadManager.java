@@ -23,6 +23,7 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
 import android.util.Log;
@@ -47,6 +48,7 @@ import com.hippo.ehviewer.dao.GalleryVersionMap;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
+import com.hippo.ehviewer.network.NetworkLogger;
 import com.hippo.ehviewer.task.MergeDuplicateGalleryTask;
 import com.hippo.ehviewer.cache.GalleryCacheManager;
 import com.hippo.ehviewer.client.EhUrl;
@@ -119,7 +121,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private final List<DownloadInfoListener> mDownloadInfoListeners;
 
     @Nullable
-    private DownloadInfo mCurrentTask;
+    private volatile DownloadInfo mCurrentTask;
     @Nullable
     private SpiderQueen mCurrentSpider;
     
@@ -176,7 +178,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         mLabelList = labels;
 
         // Create list for each label
-        HashMap<String, LinkedList<DownloadInfo>> map = new HashMap<>();
+        HashMap<String, LinkedList<DownloadInfo>> map = new HashMap<>(32);
         mMap = map;
         for (DownloadLabel label : labels) {
             map.put(label.getLabel(), new LinkedList<>());
@@ -224,7 +226,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             list.add(info);
         }
 
-        mLabelCountMap = new HashMap<>();
+        mLabelCountMap = new HashMap<>(16);
 
         for (Map.Entry<String, LinkedList<DownloadInfo>> entry : map.entrySet()) {
             mLabelCountMap.put(entry.getKey(), (long) entry.getValue().size());
@@ -1852,6 +1854,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     @Override
     public void onPageDownload(int index, long contentLength, long receivedSize, int bytesRead) {
+        // 实时在下载回调线程累计速度数据，避免主线程消息延迟导致速度显示长期归零。
+        mSpeedReminder.onDownload(index, contentLength, receivedSize, bytesRead);
         NotifyTask task = mNotifyTaskPool.pop();
         if (task == null) {
             task = new NotifyTask();
@@ -2025,7 +2029,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     break;
                 }
                 case TYPE_ON_PAGE_DOWNLOAD: {
-                    mSpeedReminder.onDownload(mIndex, mContentLength, mReceivedSize, mBytesRead);
+                    // 速度统计已在 onPageDownload() 回调线程中即时处理。
                     break;
                 }
                 case TYPE_ON_PAGE_SUCCESS: {
@@ -2167,60 +2171,88 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         private final SparseIJArray mContentLengthMap = new SparseIJArray();
         private final SparseIJArray mReceivedSizeMap = new SparseIJArray();
 
-        public void start() {
+        /** 独立计时线程，避免因主线程调度延迟导致速度归零 */
+        private HandlerThread mSpeedThread;
+        private Handler mSpeedHandler;
+
+        public synchronized void start() {
             if (mStop) {
                 mStop = false;
-                SimpleHandler.getInstance().post(this);
+                mSpeedThread = new HandlerThread("SpeedReminder", Process.THREAD_PRIORITY_BACKGROUND);
+                mSpeedThread.start();
+                mSpeedHandler = new Handler(mSpeedThread.getLooper());
+                mSpeedHandler.post(this);
             }
         }
 
-        public void stop() {
+        public synchronized void stop() {
             if (!mStop) {
                 mStop = true;
                 mBytesRead = 0;
                 oldSpeed = -1;
                 mContentLengthMap.clear();
                 mReceivedSizeMap.clear();
-                SimpleHandler.getInstance().removeCallbacks(this);
+                Handler h = mSpeedHandler;
+                HandlerThread t = mSpeedThread;
+                mSpeedHandler = null;
+                mSpeedThread = null;
+                if (h != null) h.removeCallbacks(this);
+                if (t != null) t.quitSafely();
             }
         }
 
-        public void onDownload(int index, long contentLength, long receivedSize, int bytesRead) {
+        public synchronized void onDownload(int index, long contentLength, long receivedSize, int bytesRead) {
             mContentLengthMap.put(index, contentLength);
             mReceivedSizeMap.put(index, receivedSize);
             mBytesRead += bytesRead;
         }
 
-        public void onDone(int index) {
+        public synchronized void onDone(int index) {
             mContentLengthMap.delete(index);
             mReceivedSizeMap.delete(index);
         }
 
-        public void onFinish() {
+        public synchronized void onFinish() {
             mContentLengthMap.clear();
             mReceivedSizeMap.clear();
         }
-        
-        public int getSpeed() {
+
+        public synchronized int getSpeed() {
             return oldSpeed > 0 ? (int) (oldSpeed / 1024) : 0; // 返回KB/s
         }
 
         @Override
         public void run() {
-            DownloadInfo info = mCurrentTask;
-            if (info != null) {
+            // 在 SpeedReminder HandlerThread 上执行，不阻塞主线程
+            final DownloadInfo capturedInfo;
+            final long capturedSpeed;
+
+            synchronized (this) {
+                if (mStop) return;
+
+                capturedInfo = mCurrentTask;
+                if (capturedInfo == null) {
+                    mBytesRead = 0;
+                    if (mSpeedHandler != null) {
+                        mSpeedHandler.postDelayed(this, 500);
+                    }
+                    return;
+                }
+
                 long newSpeed = mBytesRead / 2;
+                mBytesRead = 0;
                 if (oldSpeed != -1) {
                     newSpeed = (long) MathUtils.lerp(oldSpeed, newSpeed, 0.75f);
                 }
                 oldSpeed = newSpeed;
-                info.speed = newSpeed;
+                capturedSpeed = newSpeed;
+                capturedInfo.speed = capturedSpeed;
 
                 // Calculate remaining
-                if (info.total <= 0) {
-                    info.remaining = -1;
-                } else if (newSpeed == 0) {
-                    info.remaining = 300L * 24L * 60L * 60L * 1000L; // 300 days
+                if (capturedInfo.total <= 0) {
+                    capturedInfo.remaining = -1;
+                } else if (capturedSpeed == 0) {
+                    capturedInfo.remaining = 300L * 24L * 60L * 60L * 1000L; // 300 days
                 } else {
                     int downloadingCount = 0;
                     long downloadingContentLengthSum = 0;
@@ -2233,25 +2265,32 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         totalSize += contentLength - receivedSize;
                     }
                     if (downloadingCount != 0) {
-                        totalSize += downloadingContentLengthSum * (info.total - info.downloaded - downloadingCount) / downloadingCount;
-                        info.remaining = totalSize / newSpeed * 1000;
-                    }
-                }
-                if (mDownloadListener != null) {
-                    mDownloadListener.onDownload(info);
-                }
-                List<DownloadInfo> list = getInfoListForLabel(info.label);
-                if (list != null) {
-                    for (DownloadInfoListener l : mDownloadInfoListeners) {
-                        l.onUpdate(info, list, mWaitList);
+                        totalSize += downloadingContentLengthSum * (capturedInfo.total - capturedInfo.downloaded - downloadingCount) / downloadingCount;
+                        capturedInfo.remaining = totalSize / capturedSpeed * 1000;
                     }
                 }
             }
 
-            mBytesRead = 0;
+            // 记录速度日志（在 synchronized 块外，避免持锁写 IO）
+            NetworkLogger.INSTANCE.logSpeed(capturedInfo.gid + " | " + (capturedSpeed / 1024) + " KB/s");
 
-            if (!mStop) {
-                SimpleHandler.getInstance().postDelayed(this, 500);
+            // UI 更新回调投递到主线程
+            SimpleHandler.getInstance().post(() -> {
+                if (mDownloadListener != null) {
+                    mDownloadListener.onDownload(capturedInfo);
+                }
+                List<DownloadInfo> list = getInfoListForLabel(capturedInfo.label);
+                if (list != null) {
+                    for (DownloadInfoListener l : mDownloadInfoListeners) {
+                        l.onUpdate(capturedInfo, list, mWaitList);
+                    }
+                }
+            });
+
+            synchronized (this) {
+                if (!mStop && mSpeedHandler != null) {
+                    mSpeedHandler.postDelayed(this, 500);
+                }
             }
         }
     }
@@ -2312,28 +2351,28 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     /**
-     * 当应用进入前台时调用，可以恢复下载优先级
-     * 提高用户体验
-     */
-    public void onAppForeground() {
-        Log.d(TAG, "应用进入前台，下载线程保持正常优先级");
-        // 前台时下载线程保持 THREAD_PRIORITY_DEFAULT 即可
-        // SpiderQueen 工作线程已自主管理优先级
-    }
-
-    /**
      * 当应用进入后台时调用，维持下载优先级以保证下载速度
      * 这很重要，否则后台下载可能会变得非常慢
      */
     public void onAppBackground() {
-        Log.d(TAG, "应用进入后台，维持下载线程优先级");
+        Log.d(TAG, "应用进入后台，提升下载线程优先级");
+        // 通知 SpiderQueen 切到后台模式，后续 SpiderWorker 将使用更高线程优先级
+        SpiderQueen.notifyAppForegroundState(false);
         if (mCurrentSpider != null && mCurrentTask != null) {
-            Log.d(TAG, "正在下载: " + mCurrentTask.title + ", 保持优先级避免速度下降");
+            Log.d(TAG, "正在下载: " + mCurrentTask.title + ", 已启用后台高性能模式");
             // 确保前台通知存活，防止系统调度降低进程优先级
             if (mDownloadListener != null) {
                 mDownloadListener.onDownload(mCurrentTask);
             }
         }
+    }
+
+    /**
+     * 当应用进入前台时调用
+     */
+    public void onAppForeground() {
+        Log.d(TAG, "应用进入前台，恢复正常下载线程优先级");
+        SpiderQueen.notifyAppForegroundState(true);
     }
 
     /**

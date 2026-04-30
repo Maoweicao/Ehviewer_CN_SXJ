@@ -245,6 +245,8 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
                 } else {
                     status = mContext.getString(R.string.task_status_completed);
                 }
+            } else if (taskInfo.isQueued()) {
+                status = mContext.getString(R.string.task_status_pending);
             } else if (taskInfo.isPaused()) {
                 status = mContext.getString(R.string.task_status_paused);
             } else {

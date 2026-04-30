@@ -38,6 +38,7 @@ import com.hippo.ehviewer.dao.DownloadedFile;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.GetText;
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.network.NetworkLogger;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhRequestBuilder;
@@ -177,6 +178,87 @@ public final class SpiderQueen implements Runnable {
     private final int downloadTimeout;
 
     private long receiveBytesBefore;
+    
+    /** 用于标记应用是否在前台，后台时下载线程应使用更高优先级 */
+    private static volatile boolean sIsAppInForeground = true;
+    
+    /** 网络保活定时器 - 后台时每2分钟做一次轻量网络请求，防止连接被内核断开 */
+    private static Timer sKeepAliveTimer;
+    private static final Object sKeepAliveLock = new Object();
+
+    /**
+     * 由外部(DownloadManager)调用，通知SpiderQueen应用前后台状态变化
+     */
+    public static void notifyAppForegroundState(boolean isForeground) {
+        sIsAppInForeground = isForeground;
+        Log.d(TAG, "App foreground state changed: " + (isForeground ? "foreground" : "background"));
+        NetworkLogger.INSTANCE.logBackground(
+            "App state: " + (isForeground ? "FOREGROUND" : "BACKGROUND") +
+            " | WiFi: " + (isForeground ? "normal" : "keep-alive active")
+        );
+        
+        // 后台时启动网络保活，前台时停止
+        if (!isForeground) {
+            startKeepAlive();
+        } else {
+            stopKeepAlive();
+        }
+    }
+
+    /**
+     * 由外部(DownloadService/NetworkCallback)调用，通知网络已切换
+     * 重启网络保活以适应新网络接口
+     */
+    public static void notifyNetworkChanged() {
+        Log.i(TAG, "Network changed - restarting keepalive");
+        NetworkLogger.INSTANCE.logBackground("Network changed - restarting keepalive timer");
+        // 停止旧保活，重新开始（适应新网络接口）
+        stopKeepAlive();
+        if (!sIsAppInForeground) {
+            startKeepAlive();
+        }
+    }
+    
+    /**
+     * 启动网络保活 - 周期性解析域名，防止 HyperOS 内核级限速导致连接断开
+     */
+    private static void startKeepAlive() {
+        synchronized (sKeepAliveLock) {
+            if (sKeepAliveTimer != null) return;
+            sKeepAliveTimer = new Timer("EhViewer-KeepAlive", true);
+            sKeepAliveTimer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    try {
+                        // 做一次轻量的 DNS 解析，保持网络路径活跃
+                        // 这比 HTTP 请求更轻量，但足以防止内核将链路标记为空闲
+                        java.net.InetAddress.getByName("e-hentai.org");
+                        if (DEBUG_LOG) {
+                            Log.d(TAG, "Network keepalive ping successful");
+                        }
+                    } catch (Throwable ignored) {
+                        // DNS 失败不影响，说明网络本身有问题
+                    }
+                }
+            }, 120000, 120000); // 首次延迟2分钟，之后每2分钟一次
+            Log.i(TAG, "Network keepalive started (every 2 min)");
+            NetworkLogger.INSTANCE.logBackground("Network keepalive timer started (interval=2min, target=e-hentai.org)");
+        }
+    }
+    
+    /**
+     * 停止网络保活
+     */
+    private static void stopKeepAlive() {
+        synchronized (sKeepAliveLock) {
+            if (sKeepAliveTimer != null) {
+                sKeepAliveTimer.cancel();
+                sKeepAliveTimer = null;
+                Log.i(TAG, "Network keepalive stopped");
+                NetworkLogger.INSTANCE.logBackground("Network keepalive timer stopped");
+            }
+        }
+    }
 
     private SpiderQueen(EhApplication application, @NonNull GalleryInfo galleryInfo) {
         mHttpClient = EhApplication.getOkHttpClient(application);
@@ -200,10 +282,11 @@ public final class SpiderQueen implements Runnable {
             mDecodeIndexArray[i] = GalleryPageView.INVALID_INDEX;
         }
 
-        // Use default priority to avoid aggressive throttling when app moves to background
+        // 使用 THREAD_PRIORITY_MORE_FAVORABLE 确保后台下载时不被过度降速
+        // SpiderWorker.run() 中会进一步根据前后台状态动态调整
         mWorkerPoolExecutor = new ThreadPoolExecutor(mWorkerMaxCount, mWorkerMaxCount,
             0, TimeUnit.SECONDS, new LinkedBlockingDeque<>(),
-            new PriorityThreadFactory(SpiderWorker.class.getSimpleName(), Process.THREAD_PRIORITY_DEFAULT));
+            new PriorityThreadFactory(SpiderWorker.class.getSimpleName(), Process.THREAD_PRIORITY_MORE_FAVORABLE));
         mDownloadDelay = Settings.getDownloadDelay();
         downloadTimeout = Settings.getDownloadTimeout();
     }
@@ -2002,14 +2085,20 @@ public final class SpiderQueen implements Runnable {
                 Log.i(TAG, Thread.currentThread().getName() + ": start");
             }
 
-            // 为下载线程设置更高的优先级，确保后台下载速度不会因应用后台而降低
-            // 将线程优先级从 THREAD_PRIORITY_BACKGROUND 提升到 THREAD_PRIORITY_DEFAULT
-            // 这样即使应用进入后台，下载线程仍能保持较好的性能
+            // 动态提升下载线程优先级，防止后台限速
+            // 前台时使用 MORE_FAVORABLE(-1)，后台时使用 URGENT_DISPLAY(-8)
             try {
-                Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT);
-                Log.d(TAG, "SpiderWorker thread priority raised to THREAD_PRIORITY_DEFAULT for better download performance");
+                if (!sIsAppInForeground) {
+                    // 应用在后台，使用较高优先级对抗系统限速
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_URGENT_DISPLAY);
+                    if (DEBUG_LOG) {
+                        Log.d(TAG, "SpiderWorker priority: URGENT_DISPLAY (background mode)");
+                    }
+                } else {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE);
+                }
             } catch (SecurityException e) {
-                Log.w(TAG, "Failed to set thread priority, falling back to default", e);
+                Log.w(TAG, "Failed to set thread priority", e);
             }
 
             while (mSpiderDen.isReady() && !Thread.currentThread().isInterrupted() && runInternal())

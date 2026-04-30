@@ -34,6 +34,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,6 +48,7 @@ public class BackgroundTaskManager {
     private static final String TAG = BackgroundTaskManager.class.getSimpleName();
     private static final String CHANNEL_ID = "eh_background_tasks";
     private static final int NOTIFICATION_ID = 1001;
+    private static final int IO_TASK_QUEUE_CAPACITY = 500;
     
     private static BackgroundTaskManager sInstance;
     
@@ -62,7 +64,8 @@ public class BackgroundTaskManager {
     private final ExecutorService mDbExecutor;
     
     // IO密集型任务线程池（用于网络或文件IO）
-    private final ExecutorService mIoExecutor;
+    private final ThreadPoolExecutor mIoExecutor;
+    private volatile int mBackgroundConcurrentTasks;
     
     // 网络线程池（专门用于与Eh交互）
     private final ExecutorService mNetworkExecutor;
@@ -131,16 +134,20 @@ public class BackgroundTaskManager {
             String className = info.getTaskClassName();
             String persistData = info.getTaskPersistData();
             if (persistData == null || className == null) {
+                mTaskStatusManager.markTaskError(info.getTaskId(), mContext.getString(R.string.background_task_not_recoverable));
                 continue;
             }
             BackgroundTaskFactory factory = mTaskFactoryMap.get(className);
             if (factory == null) {
+                mTaskStatusManager.markTaskError(info.getTaskId(), mContext.getString(R.string.background_task_not_recoverable));
                 continue;
             }
             BackgroundTask task = factory.create(mContext, info.getTaskId(), persistData);
             if (task != null) {
                 mTaskStatusManager.removeTask(info.getTaskId());
                 submitBackgroundTask(task);
+            } else {
+                mTaskStatusManager.markTaskError(info.getTaskId(), mContext.getString(R.string.background_task_not_recoverable));
             }
         }
     }
@@ -182,14 +189,13 @@ public class BackgroundTaskManager {
         });
         
         // IO线程池：用于文件IO、网络请求等
-        // 对于重建下载记录等IO密集型任务，使用更多线程
-        int ioCorePoolSize = Math.max(4, cpuCount);
-        int ioMaxPoolSize = cpuCount * 3;
+        // 使用可配置并发和有界队列，避免后台任务无限堆积导致资源耗尽
+        mBackgroundConcurrentTasks = Settings.getBackgroundConcurrentTasks();
         mIoExecutor = new ThreadPoolExecutor(
-                ioCorePoolSize,
-                ioMaxPoolSize,
+            mBackgroundConcurrentTasks,
+            mBackgroundConcurrentTasks,
                 60L, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<>(),
+            new LinkedBlockingQueue<>(IO_TASK_QUEUE_CAPACITY),
                 r -> {
                     Thread thread = new Thread(r, "BackgroundTaskManager-IO");
                     thread.setPriority(Thread.NORM_PRIORITY - 1); // 稍微降低优先级
@@ -294,6 +300,33 @@ public class BackgroundTaskManager {
         return mIoExecutor.submit(task);
     }
 
+    private boolean canAcceptIoTask() {
+        if (mIoExecutor.getActiveCount() < mBackgroundConcurrentTasks) {
+            return true;
+        }
+        return mIoExecutor.getQueue().remainingCapacity() > 0;
+    }
+
+    public synchronized void applyBackgroundConcurrentTaskSetting() {
+        int newConcurrent = Settings.getBackgroundConcurrentTasks();
+        int oldConcurrent = mBackgroundConcurrentTasks;
+        if (newConcurrent == oldConcurrent) {
+            return;
+        }
+
+        // ThreadPoolExecutor 要求 corePoolSize <= maximumPoolSize，调整顺序要根据增减方向处理。
+        if (newConcurrent > oldConcurrent) {
+            mIoExecutor.setMaximumPoolSize(newConcurrent);
+            mIoExecutor.setCorePoolSize(newConcurrent);
+        } else {
+            mIoExecutor.setCorePoolSize(newConcurrent);
+            mIoExecutor.setMaximumPoolSize(newConcurrent);
+        }
+
+        mBackgroundConcurrentTasks = newConcurrent;
+        Log.i(TAG, "Apply background concurrent tasks: " + oldConcurrent + " -> " + newConcurrent);
+    }
+
     /**
      * 提交已有的FutureTask到IO线程池
      */
@@ -338,6 +371,15 @@ public class BackgroundTaskManager {
         final String taskName = task.getTaskName();
         final String taskDescription = task.getTaskDescription();
 
+        if (!canAcceptIoTask()) {
+            String rejectedTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, null,
+                    task.getTaskType(), task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
+            if (rejectedTaskId != null) {
+                mTaskStatusManager.markTaskError(rejectedTaskId, mContext.getString(R.string.background_task_queue_full));
+            }
+            return new TaskHandle(taskId, createNoOpFuture());
+        }
+
         if (task.isUniqueTask() && task.getTaskType() != BackgroundTask.TaskType.DOWNLOAD) {
             BackgroundTaskInfo activeUnique = mTaskStatusManager.getActiveUniqueNonDownloadTask();
             if (activeUnique != null) {
@@ -371,6 +413,7 @@ public class BackgroundTaskManager {
         });
 
         java.util.concurrent.FutureTask<?> futureTask = new java.util.concurrent.FutureTask<>(() -> {
+            mTaskStatusManager.markTaskRunning(taskId);
             startForegroundTask(taskName, taskDescription);
             try {
                 Throwable error = BackgroundTaskRunner.runBlockingExecute(task);
@@ -390,7 +433,13 @@ public class BackgroundTaskManager {
         if (registeredTaskId == null) {
             return new TaskHandle(taskId, createNoOpFuture());
         }
-        submitIoFutureTask(futureTask);
+        mTaskStatusManager.markTaskQueued(registeredTaskId, null);
+        try {
+            submitIoFutureTask(futureTask);
+        } catch (RejectedExecutionException e) {
+            mTaskStatusManager.markTaskError(registeredTaskId, mContext.getString(R.string.background_task_queue_full));
+            return new TaskHandle(taskId, createNoOpFuture());
+        }
 
         return new TaskHandle(taskId, futureTask);
     }
@@ -676,7 +725,8 @@ public class BackgroundTaskManager {
             return createNoOpFuture();
         }
         
-        return submitIoTask(() -> {
+        java.util.concurrent.FutureTask<?> futureTask = new java.util.concurrent.FutureTask<>(() -> {
+            mTaskStatusManager.markTaskRunning(taskId);
             startForegroundTask(taskName, taskDescription);
             
             try {
@@ -743,7 +793,17 @@ public class BackgroundTaskManager {
                 });
                 throw e; // 重新抛出异常，以便Future能够捕获
             }
+            return null;
         });
+
+        mTaskStatusManager.markTaskQueued(taskId, null);
+        try {
+            submitIoFutureTask(futureTask);
+        } catch (RejectedExecutionException e) {
+            mTaskStatusManager.markTaskError(taskId, mContext.getString(R.string.background_task_queue_full));
+            return createNoOpFuture();
+        }
+        return futureTask;
     }
     
     /**
@@ -764,28 +824,40 @@ public class BackgroundTaskManager {
     public Future<?> submitLongRunningTask(String taskName, String taskDescription, Runnable task,
                                            @Nullable String existingTaskId, @NonNull BackgroundTask.TaskType taskType,
                                            boolean uniqueTask) {
-        // 添加到任务状态管理器（如果未提供现有任务ID）
-        final String taskId = existingTaskId != null ? existingTaskId :
-                mTaskStatusManager.addTask(taskName, taskDescription, null, taskType, uniqueTask);
-        if (taskId == null) {
-            Log.d(TAG, "Skip task, unique task running: " + taskName);
-            return createNoOpFuture();
-        }
-        
-        return submitIoTask(() -> {
+        String candidateTaskId = existingTaskId != null ? existingTaskId : java.util.UUID.randomUUID().toString();
+        java.util.concurrent.FutureTask<?> futureTask = new java.util.concurrent.FutureTask<>(() -> {
+            mTaskStatusManager.markTaskRunning(candidateTaskId);
             startForegroundTask(taskName, taskDescription);
             try {
                 task.run();
                 // 标记任务完成
-                mTaskStatusManager.markTaskCompleted(taskId);
+                mTaskStatusManager.markTaskCompleted(candidateTaskId);
             } catch (Exception e) {
                 // 标记任务出错
-                mTaskStatusManager.markTaskError(taskId, e.getMessage());
+                mTaskStatusManager.markTaskError(candidateTaskId, e.getMessage());
                 throw e;
             } finally {
                 endForegroundTask(taskName);
             }
+            return null;
         });
+
+        final String taskId = existingTaskId != null ? existingTaskId :
+                mTaskStatusManager.addTask(candidateTaskId, taskName, taskDescription, futureTask,
+                        taskType, uniqueTask, BackgroundTask.class.getName(), null);
+        if (taskId == null) {
+            Log.d(TAG, "Skip task, unique task running: " + taskName);
+            return createNoOpFuture();
+        }
+
+        mTaskStatusManager.markTaskQueued(taskId, null);
+        try {
+            submitIoFutureTask(futureTask);
+        } catch (RejectedExecutionException e) {
+            mTaskStatusManager.markTaskError(taskId, mContext.getString(R.string.background_task_queue_full));
+            return createNoOpFuture();
+        }
+        return futureTask;
     }
     
     /**

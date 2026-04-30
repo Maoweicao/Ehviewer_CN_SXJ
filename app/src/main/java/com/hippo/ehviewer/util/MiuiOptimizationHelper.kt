@@ -19,6 +19,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import java.io.BufferedReader
@@ -35,54 +36,122 @@ object MiuiOptimizationHelper {
     private const val KEY_MIUI_VERSION_CODE = "ro.miui.ui.version.code"
     private const val KEY_MIUI_VERSION_NAME = "ro.miui.ui.version.name"
     private const val KEY_MIUI_INTERNAL_STORAGE = "ro.miui.internal.storage"
+    // HyperOS 检测属性
+    private const val KEY_HYPEROS_VERSION = "ro.mi.os.version"
+    
+    /** 缓存设备检测结果，避免重复反射调用 */
+    private var sIsMiuiDevice: Boolean? = null
+    private var sIsHyperOsDevice: Boolean? = null
+    private var sMiuiVersion: Int? = null
     
     /**
      * 检测是否为小米/Redmi/POCO设备
      */
     fun isMiuiDevice(): Boolean {
-        return Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true) ||
+        if (sIsMiuiDevice != null) return sIsMiuiDevice!!
+        sIsMiuiDevice = Build.MANUFACTURER.equals("Xiaomi", ignoreCase = true) ||
                 Build.MANUFACTURER.equals("Redmi", ignoreCase = true) ||
                 Build.MANUFACTURER.equals("POCO", ignoreCase = true) ||
-                !getSystemProperty(KEY_MIUI_VERSION_CODE).isNullOrEmpty()
+                !getSystemProperty(KEY_MIUI_VERSION_CODE).isNullOrEmpty() ||
+                !getSystemProperty(KEY_MIUI_INTERNAL_STORAGE).isNullOrEmpty()
+        return sIsMiuiDevice!!
     }
     
     /**
      * 检测是否为澎湃系统（HyperOS）
+     * HyperOS 检测策略（按优先级）：
+     * 1. 读取 ro.mi.os.version 属性（HyperOS 特有）
+     * 2. 读取 ro.miui.ui.version.name 是否包含 "OS"（HyperOS使用 OS2.0.xxx 格式）
+     * 3. Build.DISPLAY 或 Build.VERSION.INCREMENTAL 是否包含 "HyperOS" 或 "OS2"
+     * 4. MIUI版本 >= 14 且 Android >= 14 判定为 HyperOS
      */
     fun isHyperOsDevice(): Boolean {
+        if (sIsHyperOsDevice != null) return sIsHyperOsDevice!!
+        if (!isMiuiDevice()) {
+            sIsHyperOsDevice = false
+            return false
+        }
+        
+        // 策略1: HyperOS 特有的系统属性
+        val hyperOsVersion = getSystemProperty(KEY_HYPEROS_VERSION)
+        if (!hyperOsVersion.isNullOrEmpty()) {
+            Log.i(TAG, "HyperOS detected via ro.mi.os.version: $hyperOsVersion")
+            sIsHyperOsDevice = true
+            return true
+        }
+        
+        // 策略2: 检查版本名是否包含 OS 格式 (HyperOS 使用 OS2.0.x 而非 Vxxx)
+        val versionName = getSystemProperty(KEY_MIUI_VERSION_NAME)
+        if (!versionName.isNullOrEmpty()) {
+            if (versionName.contains("OS", ignoreCase = true)) {
+                Log.i(TAG, "HyperOS detected via version name: $versionName")
+                sIsHyperOsDevice = true
+                return true
+            }
+        }
+        
+        // 策略3: 检查 Build 信息
+        val display = Build.DISPLAY ?: ""
+        val incremental = Build.VERSION.INCREMENTAL ?: ""
+        if (display.contains("HyperOS", ignoreCase = true) ||
+            display.contains("OS2.", ignoreCase = true) ||
+            incremental.contains("HyperOS", ignoreCase = true) ||
+            incremental.contains("OS2.", ignoreCase = true)) {
+            Log.i(TAG, "HyperOS detected via Build info: display=$display, incremental=$incremental")
+            sIsHyperOsDevice = true
+            return true
+        }
+        
+        // 策略4: MIUI 14+ 且 Android 14+ 大概率已升级 HyperOS
         val miuiVersion = getMiuiVersion()
-        // HyperOS 通常从 MIUI 14+ 开始或标识为 HyperOS
-        return isMiuiDevice() && (miuiVersion >= 14 || 
-                Build.DISPLAY.contains("HyperOS", ignoreCase = true))
+        if (miuiVersion >= 14 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            Log.i(TAG, "HyperOS inferred: MIUI $miuiVersion + Android 14+")
+            sIsHyperOsDevice = true
+            return true
+        }
+        
+        sIsHyperOsDevice = false
+        return false
     }
     
     /**
      * 获取MIUI版本号
+     * HyperOS 仍然沿用 MIUI 版本号体系
      */
     fun getMiuiVersion(): Int {
+        if (sMiuiVersion != null) return sMiuiVersion!!
         if (!isMiuiDevice()) {
+            sMiuiVersion = -1
             return -1
         }
         
         try {
             val versionName = getSystemProperty(KEY_MIUI_VERSION_NAME)
             if (!versionName.isNullOrEmpty()) {
-                // 例如: "V14", "V13", "V816" -> 提取数字
-                val match = Regex("V(\\d+)").find(versionName)
-                if (match != null) {
-                    return match.groupValues[1].toInt()
+                // MIUI: "V14", "V13" 格式; HyperOS: "OS2.0.xxx" 格式
+                val matchV = Regex("V(\\d+)").find(versionName)
+                if (matchV != null) {
+                    sMiuiVersion = matchV.groupValues[1].toInt()
+                    return sMiuiVersion!!
+                }
+                val matchOS = Regex("OS(\\d+)\\.?(\\d*)").find(versionName)
+                if (matchOS != null) {
+                    sMiuiVersion = matchOS.groupValues[1].toInt()
+                    return sMiuiVersion!!
                 }
             }
             
             // 尝试从 version code 获取
             val versionCode = getSystemProperty(KEY_MIUI_VERSION_CODE)
             if (!versionCode.isNullOrEmpty()) {
-                return versionCode.toIntOrNull() ?: -1
+                sMiuiVersion = versionCode.toIntOrNull() ?: -1
+                return sMiuiVersion!!
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to get MIUI version", e)
         }
         
+        sMiuiVersion = -1
         return -1
     }
     
@@ -223,6 +292,120 @@ object MiuiOptimizationHelper {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to open MIUI power save settings", e)
             return false
+        }
+    }
+    
+    /**
+     * 请求电池优化豁免
+     * HyperOS/MIUI 会默认限制后台应用的电池使用，需要通过此方法请求豁免
+     */
+    fun requestBatteryOptimizationExemption(context: Context): Boolean {
+        if (!needsAggressiveOptimization()) {
+            return false
+        }
+        
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+                if (powerManager != null && powerManager.isIgnoringBatteryOptimizations(context.packageName)) {
+                    Log.i(TAG, "Already exempted from battery optimization")
+                    return true
+                }
+                
+                // 尝试直接请求豁免
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                Log.i(TAG, "Requested battery optimization exemption")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to request battery optimization exemption", e)
+        }
+        
+        return false
+    }
+    
+    /**
+     * 检查是否已获得电池优化豁免
+     */
+    fun isBatteryOptimizationExempted(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+            return powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: false
+        }
+        return true
+    }
+    
+    /**
+     * 打开 HyperOS 后台联网管理设置
+     * 这是最重要的设置 - HyperOS 默认禁止后台应用使用数据网络
+     */
+    fun openHyperOsNetworkSettings(context: Context): Boolean {
+        if (!isHyperOsDevice()) {
+            return false
+        }
+        
+        val intents = listOf(
+            // HyperOS 联网控制 (主要入口)
+            Intent().apply {
+                setClassName(
+                    "com.miui.securitycenter",
+                    "com.miui.network.NetworkRestrictActivity"
+                )
+                putExtra("extra_pkgname", context.packageName)
+            },
+            // 备用：通过应用详情页
+            Intent().apply {
+                action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                data = android.net.Uri.fromParts("package", context.packageName, null)
+            }
+        )
+        
+        for (intent in intents) {
+            try {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(intent)
+                Log.i(TAG, "Opened HyperOS network settings")
+                return true
+            } catch (e: Exception) {
+                Log.d(TAG, "Failed to open HyperOS network settings: ${e.message}")
+            }
+        }
+        
+        return false
+    }
+    
+    /**
+     * 获取 HyperOS 后台下载优化指南文本
+     */
+    fun getHyperOsOptimizationGuide(): String {
+        return buildString {
+            appendLine("=== HyperOS 后台下载优化指南 ===")
+            appendLine()
+            appendLine("1. 【最重要】允许后台联网：")
+            appendLine("   设置 → 应用设置 → EHViewer → 联网控制")
+            appendLine("   → 确保 WLAN 和移动数据的「后台联网」都已开启")
+            appendLine()
+            appendLine("2. 关闭省电限制：")
+            appendLine("   设置 → 应用设置 → EHViewer → 省电策略")
+            appendLine("   → 选择「无限制」")
+            appendLine()
+            appendLine("3. 允许自启动：")
+            appendLine("   安全中心 → 自启动管理 → 允许 EHViewer")
+            appendLine()
+            appendLine("4. 锁定后台：")
+            appendLine("   进入最近任务 → 长按 EHViewer 卡片")
+            appendLine("   → 点击锁图标锁定")
+            appendLine()
+            appendLine("5. 关闭 WiFi 省电模式：")
+            appendLine("   设置 → WLAN → 高级设置")
+            appendLine("   → 关闭「WLAN 省电模式」")
+            appendLine()
+            appendLine("注意：HyperOS 对后台网络管控非常严格，")
+            appendLine("以上步骤缺一不可。")
         }
     }
     

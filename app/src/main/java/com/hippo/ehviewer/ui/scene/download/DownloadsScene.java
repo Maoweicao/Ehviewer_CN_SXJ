@@ -268,7 +268,10 @@ public class DownloadsScene extends ToolbarScene
 
     private MyPageChangeListener myPageChangeListener;
 
-    private final Map<Long, SpiderInfo> mSpiderInfoMap = new HashMap<>();
+    private final Map<Long, SpiderInfo> mSpiderInfoMap = new HashMap<>(64);
+    
+    // 缓存的 MainLooper Handler，避免重复创建
+    private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     
     // 添加页码切换标志位，避免与进度更新冲�?
     private volatile boolean isPageChanging = false;
@@ -645,8 +648,7 @@ public class DownloadsScene extends ToolbarScene
                 
                 // 页码切换时，延迟更新列表以避免与进度更新冲突
                 if (mAdapter != null) {
-                    android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-                    mainHandler.postDelayed(() -> {
+                    mMainHandler.postDelayed(() -> {
                         try {
                             mAdapter.notifyDataSetChanged();
                             // 重置页码切换标志
@@ -912,12 +914,12 @@ public class DownloadsScene extends ToolbarScene
                     return false;
                 }
                 
-                startAllDownloads();
+                DownloadService.startAllDownloads(activity);
                 return true;
             }
             case R.id.action_stop_all: {
-                if (null != mDownloadManager) {
-                    mDownloadManager.stopAllDownload();
+                if (activity != null) {
+                    DownloadService.stopAllDownloads(activity);
                 }
                 return true;
             }
@@ -1672,10 +1674,9 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, LinkedList<DownloadInfo> mWaitList) {
-        // 如果正在页码切换，延迟处理进度更�?
+        // 如果正在页码切换，延迟处理进度更新
         if (isPageChanging) {
-            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-            mainHandler.postDelayed(() -> onUpdate(info, list, mWaitList), 200);
+            mMainHandler.postDelayed(() -> onUpdate(info, list, mWaitList), 200);
             return;
         }
         
@@ -1738,8 +1739,7 @@ public class DownloadsScene extends ToolbarScene
                 mAdapter.notifyDataSetChanged();
             } else {
                 // 在后台线程中，使用Handler切换到主线程
-                android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-                mainHandler.post(() -> {
+                mMainHandler.post(() -> {
                     if (mAdapter != null) {
                         mAdapter.notifyDataSetChanged();
                     }
@@ -1756,8 +1756,7 @@ public class DownloadsScene extends ToolbarScene
                 refreshDownloadListAfterDelete();
                 mOriginalAdapter.preloadFolderMetaAsync();
             } else {
-                android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-                mainHandler.post(() -> {
+                mMainHandler.post(() -> {
                     refreshDownloadListAfterDelete();
                     mOriginalAdapter.preloadFolderMetaAsync();
                 });
@@ -1774,8 +1773,7 @@ public class DownloadsScene extends ToolbarScene
             updateView();
         } else {
             // 在后台线程中，使用Handler切换到主线程
-            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-            mainHandler.post(() -> {
+            mMainHandler.post(() -> {
                 updateForLabel();
                 updateView();
             });
@@ -1795,8 +1793,7 @@ public class DownloadsScene extends ToolbarScene
             updateView();
         } else {
             // 在后台线程中，使用Handler切换到主线程
-            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-            mainHandler.post(() -> {
+            mMainHandler.post(() -> {
                 updateForLabel();
                 updateView();
             });
@@ -1815,8 +1812,7 @@ public class DownloadsScene extends ToolbarScene
                 updateView();
             } else {
                 // 在后台线程中，使用Handler切换到主线程
-                android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-                mainHandler.post(() -> {
+                mMainHandler.post(() -> {
                     if (mAdapter != null) {
                         mAdapter.notifyItemRemoved(listIndexInPage(position));
                     }

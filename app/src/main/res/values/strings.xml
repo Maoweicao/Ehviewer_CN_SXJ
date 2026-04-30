@@ -1285,6 +1285,7 @@
     <string name="task_progress_indeterminate">Indeterminate</string>
     <string name="task_running_time">Running time: %1$s</string>
     <string name="task_status_running">Running</string>
+    <string name="task_status_pending">Pending</string>
     <string name="task_status_completed">Completed</string>
     <string name="task_status_failed">Failed</string>
     <string name="task_status_cancelled">Cancelled</string>
@@ -1297,6 +1298,8 @@
     <string name="task_resumed">Task resumed</string>
     <string name="task_cancelling">Task is being cancelled...</string>
     <string name="background_task_submitted">Background task submitted</string>
+    <string name="background_task_queue_full">Background task queue is full, please retry later</string>
+    <string name="background_task_not_recoverable">Task cannot be recovered after app restart</string>
     <string name="task_progress_detail_label">Progress detail</string>
     <string name="task_log_label">Task log</string>
     <string name="task_log_empty">No log entries yet</string>
@@ -1304,6 +1307,9 @@
     <string name="task_log_file_missing">Log file unavailable</string>
     <string name="settings_advanced_background_tasks">Background Tasks</string>
     <string name="settings_advanced_background_tasks_summary">View and manage running background tasks</string>
+    <string name="settings_advanced_background_concurrent_tasks">Background concurrent tasks</string>
+    <string name="settings_advanced_background_concurrent_tasks_summary">Limit how many non-download background tasks run at once. Extra tasks wait in queue.</string>
+    <string name="settings_advanced_background_concurrent_tasks_applied">Background concurrency updated</string>
     <string name="settings_transfer_summary">Manage data transfer settings</string>
     <string name="task_state_pending">Pending</string>
     <string name="task_state_running">Running</string>
@@ -1329,6 +1335,8 @@
     <string name="task_no_error">No error</string>
     <string name="settings_advanced_network_diagnostic">Network Diagnostic</string>
     <string name="settings_advanced_network_diagnostic_summary">Test site connectivity and network status</string>
+    <string name="settings_advanced_network_log_enabled">Record network activity logs</string>
+    <string name="settings_advanced_network_log_enabled_summary">Log all HTTP requests, keep-alive, lock management activities into categorized log files (network_okhttp.log, network_download.log, network_background.log, network_error.log) under the same directory as logcat exports</string>
     <string name="network_diagnostic_title">Network Connectivity Diagnostic</string>
     <string name="network_status_connected">Connected</string>
     <string name="network_status_disconnected">Disconnected</string>

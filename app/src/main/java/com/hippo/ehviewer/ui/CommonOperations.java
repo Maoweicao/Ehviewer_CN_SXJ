@@ -216,7 +216,7 @@ public final class CommonOperations {
                 }
 
                 if (!toStart.isEmpty()) {
-                    dm.startRangeDownload(toStart);
+                    DownloadService.startRangeDownload(activity, toStart);
                 }
 
                 if (toAdd.isEmpty()) {
@@ -342,6 +342,8 @@ public final class CommonOperations {
                 activity.showTip(R.string.added_to_download_list, BaseScene.LENGTH_SHORT);
             }
         });
+
+        DownloadService.ensureRunning(activity);
     }
 
     private static boolean isActivityAlive(@Nullable Activity activity) {

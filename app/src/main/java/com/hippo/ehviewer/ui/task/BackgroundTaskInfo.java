@@ -36,6 +36,7 @@ public class BackgroundTaskInfo {
     private volatile boolean isCompleted;
     private volatile boolean isCancelled;
     private volatile boolean isPaused;
+    private volatile boolean isQueued;
     private volatile String errorMessage;
     private volatile File logFile;
     private final List<String> logMessages;
@@ -60,6 +61,7 @@ public class BackgroundTaskInfo {
         this.isCompleted = false;
         this.isCancelled = false;
         this.isPaused = false;
+        this.isQueued = false;
         this.errorMessage = null;
         this.logFile = null;
         this.logMessages = Collections.synchronizedList(new ArrayList<>());
@@ -155,6 +157,14 @@ public class BackgroundTaskInfo {
 
     public void setPaused(boolean paused) {
         isPaused = paused;
+    }
+
+    public boolean isQueued() {
+        return isQueued;
+    }
+
+    public void setQueued(boolean queued) {
+        isQueued = queued;
     }
 
     @Nullable

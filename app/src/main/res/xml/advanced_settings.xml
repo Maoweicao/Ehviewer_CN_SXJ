@@ -191,6 +191,16 @@
         android:title="@string/settings_advanced_background_tasks"
         app:allowDividerAbove="true" />
 
+    <com.hippo.ehviewer.preference.SliderPreference
+        android:defaultValue="10"
+        android:key="background_concurrent_tasks"
+        android:summary="@string/settings_advanced_background_concurrent_tasks_summary"
+        android:title="@string/settings_advanced_background_concurrent_tasks"
+        app:minValue="1"
+        app:maxValue="32"
+        app:stepSize="1"
+        app:showValue="true" />
+
     <Preference
         android:key="transfer_service"
         android:summary="@string/settings_transfer_summary"
@@ -201,6 +211,13 @@
         android:key="network_diagnostic"
         android:summary="@string/settings_advanced_network_diagnostic_summary"
         android:title="@string/settings_advanced_network_diagnostic"
+        app:allowDividerAbove="true" />
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="network_log_enabled"
+        android:summary="@string/settings_advanced_network_log_enabled_summary"
+        android:title="@string/settings_advanced_network_log_enabled"
         app:allowDividerAbove="true" />
 
     <com.hippo.ehviewer.preference.DatabaseViewerPreference

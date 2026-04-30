@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" /> <!-- Android 14+ 前台服务类型 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" /> <!-- 后台下载保活用 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" /> <!-- 请求电池优化豁免，防止后台被限制 -->
     <uses-permission android:name="android.permission.CAMERA" /> <!-- 用于获取wifi状态 -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" /> <!-- 使用系统自带下载器 -->
     <uses-permission android:name="android.permission.ACCESS_DOWNLOAD_MANAGER" /> <!-- 自动安装apk -->
@@ -316,7 +318,7 @@
 
         <service
             android:name=".download.DownloadService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="dataSync|specialUse"
             android:label="@string/download_service_label" />
 
         <provider

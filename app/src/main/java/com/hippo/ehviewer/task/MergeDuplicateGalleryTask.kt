@@ -53,10 +53,18 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
     /** 是否为单画廊合并模式 */
     private val isSingleMode: Boolean get() = targetGid >= 0L
 
+    /** 单画廊模式下缓存的画廊标题，用于任务名 */
+    private var singleTitle: String? = null
+
     override fun getTaskId(): String = taskId
 
     override fun getTaskName(): String = if (isSingleMode) {
-        context.getString(R.string.merge_duplicate_gallery_single_title)
+        val title = singleTitle
+        if (title != null) {
+            context.getString(R.string.merge_duplicate_gallery_single_title) + " - $title"
+        } else {
+            context.getString(R.string.merge_duplicate_gallery_single_title)
+        }
     } else {
         context.getString(R.string.settings_download_merge_duplicate_gallery)
     }
@@ -79,6 +87,40 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "MergeDuplicateGalleryTask"
+
+        /**
+         * 合并扫描结果缓存，1 小时内共享扫描结果避免重复解析文件元数据。
+         * 定义在 companion object 内以便访问私有的 GalleryFolder 类型。
+         */
+        object MergeScanCache {
+            private const val CACHE_TTL_MS = 60 * 60 * 1000L
+
+            @Volatile
+            private var scanTime: Long = 0L
+            @Volatile
+            private var cachedBuckets: Map<String, List<GalleryFolder>>? = null
+
+            @Synchronized
+            fun get(): Map<String, List<GalleryFolder>>? {
+                return if (System.currentTimeMillis() - scanTime < CACHE_TTL_MS) {
+                    cachedBuckets
+                } else {
+                    null
+                }
+            }
+
+            @Synchronized
+            fun put(buckets: Map<String, List<GalleryFolder>>) {
+                scanTime = System.currentTimeMillis()
+                cachedBuckets = buckets
+            }
+
+            @Synchronized
+            fun invalidate() {
+                scanTime = 0L
+                cachedBuckets = null
+            }
+        }
 
         const val STEP_SCAN = 0
         const val STEP_ANALYZE = 1
@@ -113,7 +155,14 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         @JvmStatic
         fun mergeForGallery(context: Context, gid: Long): MergeDuplicateGalleryTask {
             val taskId = "merge_single_${gid}_${System.currentTimeMillis()}"
-            return MergeDuplicateGalleryTask(context, taskId, gid)
+            val task = MergeDuplicateGalleryTask(context, taskId, gid)
+            // 预先加载标题用于任务名
+            val info = EhDB.getDownloadInfo(gid)
+            if (info != null) {
+                val title = com.hippo.ehviewer.client.EhUtils.getSuitableTitle(info)
+                task.singleTitle = title
+            }
+            return task
         }
     }
 
@@ -253,12 +302,19 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
 
     private suspend fun scanDownloadedGalleries(): Boolean {
         return try {
+            // 0. 尝试使用已有缓存（1小时内有效）
+            val cachedBuckets = MergeScanCache.get()
+            if (cachedBuckets != null) {
+                logInfo("使用缓存扫描结果（${cachedBuckets.size} 组）")
+                return rebuildFromCache(cachedBuckets)
+            }
+
             var infos = EhDB.getAllDownloadInfo()
             if (infos == null) {
                 infos = Collections.emptyList()
             }
 
-            // 单画廊模式：先找到目标画廊，只扫描与之同名的其他文件夹
+            // 单画廊模式：先找到目标画廊及其清理后的名字，只扫描匹配的文件夹
             val targetCleanName: String? = if (isSingleMode) {
                 val targetInfo = infos.find { it.gid == targetGid }
                 if (targetInfo == null) {
@@ -283,6 +339,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
             val total = infos.size
             logInfo("扫描到 $total 个下载记录${if (isSingleMode) "（单画廊模式）" else ""}")
+
             for (i in infos.indices) {
                 ensureNotCancelled()
                 val info = infos[i]
@@ -292,35 +349,38 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                     continue
                 }
 
+                val name = dir.name ?: info.gid.toString()
+                val cleanName = removeIdPrefix(name)
+
+                // 单画廊模式：提前过滤非匹配目录，避免昂贵的元数据解析
+                if (isSingleMode && cleanName != targetCleanName) {
+                    dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+                    continue
+                }
+
+                // 只对匹配的目录进行完整的元数据解析
                 val folder = GalleryFolder(
                     info = info,
                     dir = dir,
-                    name = dir.name ?: info.gid.toString(),
-                    id = extractIdFromFolderName(dir.name ?: info.gid.toString()),
+                    name = name,
+                    id = extractIdFromFolderName(name),
                     modifiedAt = maxOf(dir.lastModified(), 0L),
                     fileCount = countFiles(dir),
                     ehMeta = parseEhviewerMeta(dir)
                 )
 
-                val cleanName = removeIdPrefix(folder.name)
-
-                // 单画廊模式：只处理与目标同名的文件夹
-                if (isSingleMode) {
-                    if (cleanName != targetCleanName) {
-                        dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
-                        continue
-                    }
-                    logInfo(
-                        "扫描到匹配的下载目录: ${folder.name} (gid=${info.gid})，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-                    )
-                } else {
-                    logInfo(
-                        "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-                    )
-                }
+                logInfo(
+                    "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+                )
 
                 buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
                 dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+            }
+
+            // 存入缓存供 1 小时内其他任务复用
+            if (!isSingleMode) {
+                MergeScanCache.put(HashMap(buckets))
+                logInfo("全量扫描结果已缓存至 MergeScanCache")
             }
 
             galleryGroups.clear()
@@ -347,6 +407,60 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             logError("扫描失败: ${t.message}")
             false
         }
+    }
+
+    /**
+     * 从缓存的全量 buckets 中重建 galleryGroups。
+     * 单画廊模式：只提取目标画廊所在组；全量模式：提取所有 >=2 的组。
+     */
+    private fun rebuildFromCache(cachedBuckets: Map<String, List<GalleryFolder>>): Boolean {
+        galleryGroups.clear()
+
+        if (isSingleMode) {
+            // 先找到目标 gid 对应的 cleanName
+            val targetCleanName = findTargetCleanNameInCache(cachedBuckets)
+            if (targetCleanName == null) {
+                logInfo("单画廊模式: 缓存中未找到目标画廊 gid=$targetGid，重新扫描")
+                MergeScanCache.invalidate()
+                return false
+            }
+            val folders = cachedBuckets[targetCleanName]
+            if (folders == null || folders.size < 2) {
+                logInfo("单画廊模式: 缓存中目标画廊 \"$targetCleanName\" 无重复，无需合并")
+                return true
+            }
+            galleryGroups.add(
+                GalleryGroup(
+                    cleanedName = targetCleanName,
+                    folders = folders.toMutableList()
+                )
+            )
+            logInfo("从缓存提取分组: ${galleryGroups[0].cleanedName} (${galleryGroups[0].folders.size} 个目录)")
+        } else {
+            for ((key, value) in cachedBuckets) {
+                if (value.size < 2) continue
+                galleryGroups.add(
+                    GalleryGroup(
+                        cleanedName = key,
+                        folders = value.toMutableList()
+                    )
+                )
+            }
+            logInfo("从缓存重建 ${galleryGroups.size} 组候选重复画廊")
+        }
+        return true
+    }
+
+    /** 在缓存 buckets 中查找包含目标 gid 的分组 key */
+    private fun findTargetCleanNameInCache(buckets: Map<String, List<GalleryFolder>>): String? {
+        for ((key, folders) in buckets) {
+            for (f in folders) {
+                if (f.info.gid == targetGid) {
+                    return key
+                }
+            }
+        }
+        return null
     }
 
     private suspend fun analyzeDuplicateGalleries(): Boolean {
@@ -1023,7 +1137,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         var reason: String = ""
     )
 
-    private data class GalleryFolder(
+    data class GalleryFolder(
         val info: DownloadInfo,
         val dir: UniFile,
         val name: String,
@@ -1033,7 +1147,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         val ehMeta: EhviewerMeta?
     )
 
-    private class EhviewerMeta {
+    class EhviewerMeta {
         var gid: String = ""
         var token: String = ""
         val files: MutableMap<Int, String> = HashMap()

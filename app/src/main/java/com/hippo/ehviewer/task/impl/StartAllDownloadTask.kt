@@ -3,6 +3,7 @@ package com.hippo.ehviewer.task.impl
 import android.content.Context
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.download.DownloadManager
+import com.hippo.ehviewer.download.DownloadService
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.task.BackgroundTask
 import com.hippo.ehviewer.task.TaskState
@@ -50,6 +51,8 @@ class StartAllDownloadTask(context: Context) : BaseBackgroundTask(context) {
             updateProgress(5, context.getString(R.string.start_all_download_starting, totalCount))
             delay(500)
             
+            DownloadService.startAllDownloads(context)
+
             // 使用 DownloadManager 的 startAllDownload 方法，并提供监听器
             var isCompleted = false
             downloadManager.startAllDownload(object : DownloadManager.StartAllDownloadListener {

@@ -113,6 +113,7 @@ public class BackgroundTaskStatusManager {
 
         BackgroundTaskInfo taskInfo = new BackgroundTaskInfo(taskId, taskName, taskDescription, future, taskType,
                 uniqueTask, taskClassName, taskPersistData, System.currentTimeMillis());
+        taskInfo.setQueued(future != null);
         File logFile = createTaskLogFile(taskId);
         if (logFile != null) {
             taskInfo.setLogFile(logFile);
@@ -178,6 +179,7 @@ public class BackgroundTaskStatusManager {
     public void markTaskCompleted(@NonNull String taskId) {
         BackgroundTaskInfo taskInfo = mActiveTasks.remove(taskId);
         if (taskInfo != null) {
+            taskInfo.setQueued(false);
             taskInfo.setCompleted(true);
 
             // 添加到已完成任务列表
@@ -199,6 +201,7 @@ public class BackgroundTaskStatusManager {
     public void markTaskCancelled(@NonNull String taskId) {
         BackgroundTaskInfo taskInfo = mActiveTasks.remove(taskId);
         if (taskInfo != null) {
+            taskInfo.setQueued(false);
             taskInfo.setCancelled(true);
 
             // 添加到已完成任务列表
@@ -220,6 +223,7 @@ public class BackgroundTaskStatusManager {
     public void markTaskError(@NonNull String taskId, @Nullable String errorMessage) {
         BackgroundTaskInfo taskInfo = mActiveTasks.remove(taskId);
         if (taskInfo != null) {
+            taskInfo.setQueued(false);
             taskInfo.setErrorMessage(errorMessage);
 
             // 添加到已完成任务列表
@@ -243,9 +247,30 @@ public class BackgroundTaskStatusManager {
         if (taskInfo == null || taskInfo.isCompleted() || taskInfo.isCancelled()) {
             return false;
         }
+        taskInfo.setQueued(false);
         taskInfo.setPaused(true);
         savePersistedTasksAsync();
         return true;
+    }
+
+    public void markTaskRunning(@NonNull String taskId) {
+        BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
+        if (taskInfo != null) {
+            taskInfo.setQueued(false);
+            taskInfo.setPaused(false);
+            savePersistedTasksAsync();
+        }
+    }
+
+    public void markTaskQueued(@NonNull String taskId, @Nullable String detail) {
+        BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
+        if (taskInfo != null) {
+            taskInfo.setQueued(true);
+            if (detail != null) {
+                taskInfo.setProgressDetail(detail);
+            }
+            savePersistedTasksAsync();
+        }
     }
 
     /**
@@ -409,6 +434,7 @@ public class BackgroundTaskStatusManager {
             object.put("startTime", info.getStartTime());
             object.put("isCompleted", info.isCompleted());
             object.put("isCancelled", info.isCancelled());
+            object.put("isQueued", info.isQueued());
             object.put("errorMessage", info.getErrorMessage());
             object.put("taskClassName", info.getTaskClassName());
             object.put("taskPersistData", info.getTaskPersistData());
@@ -474,6 +500,7 @@ public class BackgroundTaskStatusManager {
             taskInfo.setProgressDetail(object.optString("progressDetail", taskInfo.getProgressDetail()));
             taskInfo.setCompleted(object.optBoolean("isCompleted", false));
             taskInfo.setCancelled(object.optBoolean("isCancelled", false));
+            taskInfo.setQueued(object.optBoolean("isQueued", false));
             taskInfo.setErrorMessage(object.optString("errorMessage", null));
             String logFileName = object.optString("logFileName", null);
             if (logFileName != null) {

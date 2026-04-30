@@ -92,6 +92,7 @@ public class Settings {
         migrateIntToString(KEY_THUMB_SIZE, String.valueOf(DEFAULT_THUMB_SIZE));
         migrateIntToString(KEY_PRELOAD_IMAGE, String.valueOf(DEFAULT_PRELOAD_IMAGE));
         migrateIntToString(KEY_MULTI_THREAD_DOWNLOAD, String.valueOf(DEFAULT_MULTI_THREAD_DOWNLOAD));
+        migrateIntToString(KEY_BACKGROUND_CONCURRENT_TASKS, String.valueOf(DEFAULT_BACKGROUND_CONCURRENT_TASKS));
         migrateIntToString(KEY_LOCAL_GALLERY_CACHE_EXPIRE_DAYS, String.valueOf(DEFAULT_LOCAL_GALLERY_CACHE_EXPIRE_DAYS));
     }
 
@@ -1199,6 +1200,18 @@ public class Settings {
         putIntToStr(KEY_MULTI_THREAD_DOWNLOAD, value);
     }
 
+    private static final String KEY_BACKGROUND_CONCURRENT_TASKS = "background_concurrent_tasks";
+    private static final int DEFAULT_BACKGROUND_CONCURRENT_TASKS = 10;
+
+    public static int getBackgroundConcurrentTasks() {
+        int value = getIntFromStr(KEY_BACKGROUND_CONCURRENT_TASKS, DEFAULT_BACKGROUND_CONCURRENT_TASKS);
+        return MathUtils.clamp(value, 1, 32);
+    }
+
+    public static void putBackgroundConcurrentTasks(int value) {
+        putIntToStr(KEY_BACKGROUND_CONCURRENT_TASKS, MathUtils.clamp(value, 1, 32));
+    }
+
     private static final String KEY_PRELOAD_IMAGE = "preload_image";
     private static final int DEFAULT_PRELOAD_IMAGE = 5;
 
@@ -1962,5 +1975,16 @@ public class Settings {
 
     public static void putDownloadLoggingEnabled(boolean value) {
         putBoolean(KEY_DOWNLOAD_LOGGING_ENABLED, value);
+    }
+
+    public static final String KEY_NETWORK_LOG_ENABLED = "network_log_enabled";
+    private static final boolean DEFAULT_NETWORK_LOG_ENABLED = false;
+
+    public static boolean getNetworkLogEnabled() {
+        return getBoolean(KEY_NETWORK_LOG_ENABLED, DEFAULT_NETWORK_LOG_ENABLED);
+    }
+
+    public static void putNetworkLogEnabled(boolean value) {
+        putBoolean(KEY_NETWORK_LOG_ENABLED, value);
     }
 }

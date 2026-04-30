@@ -3,6 +3,7 @@ package com.hippo.ehviewer.task.impl
 import android.content.Context
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.download.DownloadManager
+import com.hippo.ehviewer.download.DownloadService
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.task.BackgroundTask
 import com.hippo.ehviewer.task.TaskState
@@ -71,9 +72,8 @@ class StartRangeDownloadTask(context: Context, private val gidList: LongList) : 
             updateProgress(10, context.getString(R.string.start_range_download_processing, validCount))
             delay(500)
             
-            // 使用 DownloadManager 的 startRangeDownload 方法
-            // 这个方法会处理实际的下载逻辑
-            downloadManager.startRangeDownload(validGidList)
+            // 统一通过 DownloadService 拉起前台服务，再由服务驱动下载
+            DownloadService.startRangeDownload(context, validGidList)
             
             // 等待一段时间让下载状态更新
             delay(1000)

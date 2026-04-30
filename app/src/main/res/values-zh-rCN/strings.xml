@@ -783,6 +783,8 @@
     <string name="settings_privacy_pattern_protection_set">图案保护已设置完成。</string>
     <string name="settings_advanced_network_diagnostic">网络诊断</string>
     <string name="settings_advanced_network_diagnostic_summary">测试站点连通性与网络状态</string>
+    <string name="settings_advanced_network_log_enabled">记录网络活动日志</string>
+    <string name="settings_advanced_network_log_enabled_summary">将所有网络请求、后台保活、锁管理等活动按分类记录到 logcat 同目录下的日志文件中，文件包括 network_okhttp.log、network_download.log、network_background.log、network_error.log</string>
     <string name="network_diagnostic_title">网络连接诊断</string>
     <string name="network_status_connected">已连接</string>
     <string name="network_status_disconnected">已断开连接</string>
@@ -1134,10 +1136,13 @@ SSID: %1$s
     <string name="task_progress_indeterminate">不确定</string>
     <string name="task_running_time">运行时间：%1$s</string>
     <string name="task_status_running">运行中</string>
+    <string name="task_status_pending">排队中</string>
     <string name="task_status_completed">已完成</string>
     <string name="task_status_failed">失败</string>
     <string name="task_status_cancelled">已取消</string>
     <string name="task_status_paused">已暂停</string>
+    <string name="background_task_queue_full">后台任务队列已满，请稍后重试</string>
+    <string name="background_task_not_recoverable">该任务在应用重启后不可恢复</string>
     <string name="task_pause">暂停</string>
     <string name="task_resume">恢复</string>
     <string name="task_cancel">取消</string>
@@ -1154,6 +1159,9 @@ SSID: %1$s
     <string name="task_log_file_missing">日志文件不可用</string>
     <string name="settings_advanced_background_tasks">后台任务</string>
     <string name="settings_advanced_background_tasks_summary">查看和管理正在运行的后台任务</string>
+    <string name="settings_advanced_background_concurrent_tasks">后台并发任务数</string>
+    <string name="settings_advanced_background_concurrent_tasks_summary">限制非下载类后台任务的同时运行数量，超出任务进入等待队列</string>
+    <string name="settings_advanced_background_concurrent_tasks_applied">后台并发已更新</string>
     <string name="settings_transfer_summary">管理数据传输设置</string>
     <string name="download_selected_confirm">您确定要下载选中的%1$d个画廊吗？</string>
     <string name="download_selected_result">已成功下载 %1$d/%2$d 个画廊</string>

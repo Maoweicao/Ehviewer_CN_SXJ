@@ -34,9 +34,11 @@ import androidx.preference.Preference;
 
 import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.network.NetworkLogger;
 import com.hippo.ehviewer.ui.DirPickerActivity;
 import com.hippo.unifile.UniFile;
 import com.hippo.ehviewer.ui.wifi.WiFiClientActivity;
@@ -77,6 +79,8 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private static final String KEY_USER_AGENT = "user_agent";
     private static final String KEY_LOCAL_GALLERY = "local_gallery";
     private static final String KEY_RECYCLE_BIN = "recycle_bin";
+    private static final String KEY_NETWORK_LOG = "network_log_enabled";
+    private static final String KEY_BACKGROUND_CONCURRENT_TASKS = "background_concurrent_tasks";
 
     public static final int REQUEST_CODE_PICK_EXPORT_DIR = 10;
     private static final String TAG = "AdvancedFragment";
@@ -104,6 +108,8 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         Preference userAgent = findPreference(KEY_USER_AGENT);
         Preference localGallery = findPreference(KEY_LOCAL_GALLERY);
         Preference recycleBin = findPreference(KEY_RECYCLE_BIN);
+        Preference networkLog = findPreference(KEY_NETWORK_LOG);
+        Preference backgroundConcurrentTasks = findPreference(KEY_BACKGROUND_CONCURRENT_TASKS);
 
         dumpLogcat.setOnPreferenceClickListener(this);
         if (exportDatabase != null) {
@@ -130,6 +136,12 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         }
 
         appLanguage.setOnPreferenceChangeListener(this);
+        if (networkLog != null) {
+            networkLog.setOnPreferenceChangeListener(this);
+        }
+        if (backgroundConcurrentTasks != null) {
+            backgroundConcurrentTasks.setOnPreferenceChangeListener(this);
+        }
     }
 
     @Override
@@ -345,6 +357,26 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         String key = preference.getKey();
         if (KEY_APP_LANGUAGE.equals(key)) {
             ((EhApplication) getActivity().getApplication()).recreate();
+            return true;
+        }
+        if (KEY_NETWORK_LOG.equals(key)) {
+            NetworkLogger.INSTANCE.onSettingChanged();
+            return true;
+        }
+        if (KEY_BACKGROUND_CONCURRENT_TASKS.equals(key)) {
+            int concurrentTasks;
+            try {
+                concurrentTasks = Integer.parseInt(String.valueOf(newValue));
+            } catch (Exception e) {
+                return false;
+            }
+
+            Settings.putBackgroundConcurrentTasks(concurrentTasks);
+            try {
+                BackgroundTaskManager.getInstance().applyBackgroundConcurrentTaskSetting();
+            } catch (IllegalStateException ignored) {
+            }
+            Toast.makeText(getContext(), R.string.settings_advanced_background_concurrent_tasks_applied, Toast.LENGTH_SHORT).show();
             return true;
         }
         return false;
