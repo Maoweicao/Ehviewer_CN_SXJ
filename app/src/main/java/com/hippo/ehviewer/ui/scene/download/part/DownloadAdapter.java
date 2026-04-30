@@ -486,8 +486,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 }
             }
             if (changed) {
-                // 通知主线程刷新 UI
-                mScene.runOnUiThreadIfNotStopped(() -> notifyDataSetChanged());
+                // 通知主线程刷新 UI（runOnUiThread 内部已做 activity null 检查）
+                mScene.runOnUiThread(() -> notifyDataSetChanged());
             }
         });
     }
