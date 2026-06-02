@@ -13,11 +13,11 @@ An E-Hentai Application for Android.
 点击前往下载：
 
 [//]: # (- [Appteka]&#40;https://appteka.store/app/acdr168648&#41;)
-- [百度云](https://pan.baidu.com/s/1koygBtTteJtDHZTQYL8wXQ) 提取码：iqev
-- [夸克网盘](https://pan.quark.cn/s/b41421a61e70) 提取码：MrnK
-- [蓝奏云](https://wwbfg.lanzouu.com/iNSBF3m1jveb)，电脑端可正常下载 提取码：i4f8
+- [百度云](https://pan.baidu.com/s/1hFLjNrU-_c1u8iugt82d6g) 提取码：wz2h
+- [夸克网盘](https://pan.quark.cn/s/133080ed0571) 提取码：ekzT
+- [蓝奏云](https://wwbfg.lanzouu.com/i1hv53qtvjba)，电脑端可正常下载 提取码：eg80
 - [GitHub](https://github.com/xiaojieonly/Ehviewer_CN_SXJ/releases)
-- Torrent链接:magnet:?xt=urn:btih:8488a933608f5b3901de8a2bedc669e20ff94839&xt=urn:btmh:1220dbe6fffcb6aff255e089e3bb0cefeb33940c27d82e37163252abe4813c987e33&dn=EhViewer-2.0.1.6.apk&xl=27702785
+- Torrent链接:magnet:?xt=urn:btih:a14acab7edec4b1c5f10d291296fda3e19449a0d&xt=urn:btmh:1220f25dba401d5db2cfb2d864114728418c1e7bf746679182a3155ef3e1714539cb&dn=EhViewer-2.0.1.8.apk&xl=27739161
 
 
 点击前往赏饭：
@@ -28,7 +28,43 @@ An E-Hentai Application for Android.
 Telegram群: https://t.me/+WyclP8pPlk-JfbwS    
 Telegram通知群: https://t.me/Ehviewer_xiaojieonly_channel
 
+
 # Changelog
+
+## 2026/06/01 祝大家六一儿童节快乐~
+### 新版发布2.0.1.8
+
+- 将 jsoup 从 1.18.1 降级到 1.15.4，以避免在某些 Android 环境中出现 NoClassDefFoundError
+- 在 EhDB 中添加了空检查，以防止快速搜索操作期间潜在的 NullPointerExceptions
+- 增强了 EhEngine 中 TopListParser 的错误处理，以在运行时错误上引发更具描述性的 ParseException
+- 重构SpiderDen，确保访问下载目录时的线程安全
+- 改进了 ArchiverDownloadDialog 中的文件名处理，以防止非法路径和长文件名
+- 添加了 ArchiverDownloadCompleter 来处理存档器任务的下载完成和状态检查
+- 在 EhApplication 中集成挂起的下载恢复
+- 增强设置，提供管理待处理存档下载的方法
+- 更新了 ArchiverDownloadDialog 以利用 ArchiverDownloadCompleter 进行下载处理
+- 改进了 ArchiverDownloadProgress 中的下载进度跟踪
+- 确保在 SpiderDen 中创建下载目录
+- 猫尾草：添加小米系统优化助手，优化后台下载和通知管理
+- 猫尾草：add gradle wrapper jar and properties for CI build
+- Cololi：沉浸式底部导航栏 (#2597)
+
+## 2026/05/01 祝大家五一劳动节快乐~
+### 新版发布2.0.1.7
+
+- 修复SpiderInfo读取时的OOM风险并升级JDK至21
+- 修复图片搜索无法使用的问题
+- orbisai0security：the vendored giflib library performs multiple m... in gifalloc.c
+- 增加对 WebView/CookieManager 初始化失败的异常处理
+- En：修复了已下载项目的按标签搜索功能
+- 猫尾草：restore gradle wrapper jar and properties
+- 升级Gradle至9.3.1及Android插件至9.1.1
+- [百度云](https://pan.baidu.com/s/17a5zwo0HeTp_Iqh9P2QwXQ) 提取码：7y92
+- [夸克网盘](https://pan.quark.cn/s/036dd4d5f09d) 提取码：B6J6
+- [蓝奏云](https://wwbfg.lanzouu.com/iFc783oecgmh)，电脑端可正常下载 提取码：dfg8
+- [GitHub](https://github.com/xiaojieonly/Ehviewer_CN_SXJ/releases)
+- Torrent链接:magnet:?xt=urn:btih:c3aab1194eb843bac7274b87873dc94041310e52&xt=urn:btmh:1220c3640ed2ef7f588376f7dadeffc99463d764608b577beb038378788996fc1ad5&dn=EhViewer-2.0.1.7.apk&xl=27705830
+
 
 ## 2026/04/01 祝大家愚人节伤心
 ### 新版发布2.0.1.6
@@ -45,6 +81,12 @@ Telegram通知群: https://t.me/Ehviewer_xiaojieonly_channel
 - miki sayaga：新增一个多标签搜索组合页面（未完成）
 - 修复部分多标签搜索组合页面bug
 - 将部分代码从java迁移到kotlin
+- [百度云](https://pan.baidu.com/s/1koygBtTteJtDHZTQYL8wXQ) 提取码：iqev
+- [夸克网盘](https://pan.quark.cn/s/b41421a61e70) 提取码：MrnK
+- [蓝奏云](https://wwbfg.lanzouu.com/iNSBF3m1jveb)，电脑端可正常下载 提取码：i4f8
+- [GitHub](https://github.com/xiaojieonly/Ehviewer_CN_SXJ/releases)
+- Torrent链接:magnet:?xt=urn:btih:8488a933608f5b3901de8a2bedc669e20ff94839&xt=urn:btmh:1220dbe6fffcb6aff255e089e3bb0cefeb33940c27d82e37163252abe4813c987e33&dn=EhViewer-2.0.1.6.apk&xl=27702785
+
 
 ## 2026/03/01 提前祝大家元宵节快乐
 ### 新版发布2.0.1.5
