@@ -26,6 +26,8 @@ import android.app.Activity;
 import android.app.DatePickerDialog;
 import android.app.TimePickerDialog;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Handler;
 import android.text.TextUtils;
 import android.widget.ProgressBar;
@@ -1029,19 +1031,14 @@ public class DownloadsScene extends ToolbarScene
         AdvanceSearchTable advanceSearchTable = dialogView.findViewById(R.id.advance_search_table);
         DownloadCategoryTable categoryTable = dialogView.findViewById(R.id.category_table);
         RecyclerView searchSortRecyclerView = dialogView.findViewById(R.id.search_sort_recycler_view);
-        View advanceSearchToggleRow = dialogView.findViewById(R.id.advance_search_toggle_row);
-        TextView advanceSearchToggleIcon = dialogView.findViewById(R.id.advance_search_toggle_icon);
-        View advanceSearchContentContainer = dialogView.findViewById(R.id.advance_search_content_container);
         View categoryFilterToggleRow = dialogView.findViewById(R.id.category_filter_toggle_row);
         TextView categoryFilterToggleIcon = dialogView.findViewById(R.id.category_filter_toggle_icon);
         View categoryFilterContentContainer = dialogView.findViewById(R.id.category_filter_content_container);
         Button resetButton = dialogView.findViewById(R.id.reset_button);
         Button searchButton = dialogView.findViewById(R.id.search_button);
 
-        // 高级搜索选项和分类过滤默认折叠
-        setSectionExpanded(advanceSearchContentContainer, advanceSearchToggleIcon, false);
+        // 分类过滤默认折叠
         setSectionExpanded(categoryFilterContentContainer, categoryFilterToggleIcon, false);
-        advanceSearchToggleRow.setOnClickListener(v -> toggleSection(advanceSearchContentContainer, advanceSearchToggleIcon));
         categoryFilterToggleRow.setOnClickListener(v -> toggleSection(categoryFilterContentContainer, categoryFilterToggleIcon));
 
         int spanCount = context.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 2 : 1;
@@ -1336,10 +1333,46 @@ public class DownloadsScene extends ToolbarScene
             setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED, Gravity.LEFT);
             setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED, Gravity.RIGHT);
             mActionFabDrawable.setDelete(ANIMATE_TIME);
+            updatePipFabVisibility();
         } else {
             setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED, Gravity.LEFT);
             setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED, Gravity.RIGHT);
             mActionFabDrawable.setAdd(ANIMATE_TIME);
+        }
+    }
+
+    private void updatePipFabVisibility() {
+        if (mFabLayout == null || mRecyclerView == null || mList == null) {
+            return;
+        }
+        FloatingActionButton pipFab = mFabLayout.getSecondaryFabAt(9);
+        if (pipFab == null) {
+            return;
+        }
+
+        // Only show PiP when exactly 1 FINISHED download is selected
+        SparseBooleanArray checked = mRecyclerView.getCheckedItemPositions();
+        int selectedCount = 0;
+        DownloadInfo selectedInfo = null;
+        for (int i = 0, n = checked.size(); i < n; i++) {
+            if (checked.valueAt(i)) {
+                int pos = positionInList(checked.keyAt(i));
+                if (pos >= 0 && pos < mList.size()) {
+                    selectedInfo = mList.get(pos);
+                    selectedCount++;
+                }
+            }
+        }
+
+        boolean pipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && getEHContext() != null
+                && getEHContext().getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE);
+
+        if (pipSupported && selectedCount == 1 && selectedInfo != null
+                && selectedInfo.state == DownloadInfo.STATE_FINISH) {
+            pipFab.setVisibility(View.VISIBLE);
+        } else {
+            pipFab.setVisibility(View.GONE);
         }
     }
 
@@ -1472,6 +1505,20 @@ public class DownloadsScene extends ToolbarScene
                 case 8: //Refresh
                     refreshCurrentPage();
                     break;
+                case 9: { // PiP play
+                    if (downloadInfoList != null && downloadInfoList.size() == 1) {
+                        DownloadInfo info = downloadInfoList.get(0);
+                        if (info.state == DownloadInfo.STATE_FINISH) {
+                            Intent pipIntent = new Intent(activity, GalleryActivity.class);
+                            pipIntent.setAction(GalleryActivity.ACTION_EH);
+                            pipIntent.putExtra(GalleryActivity.KEY_GALLERY_INFO, info);
+//                            pipIntent.putExtra(GalleryActivity.KEY_ENTER_PIP, true);
+                            galleryActivityLauncher.launch(pipIntent);
+                            recyclerView.outOfCustomChoiceMode();
+                        }
+                    }
+                    break;
+                }
             }
         }
     }
@@ -1505,7 +1552,8 @@ public class DownloadsScene extends ToolbarScene
             getString(R.string.random_download),
             getString(R.string.drag_mode),
             getString(R.string.compress_selected_galleries),
-            getString(R.string.refresh_current_page)
+            getString(R.string.refresh_current_page),
+            getString(R.string.pip_play)
         };
         
         for (int i = 0; i < mFabLayout.getSecondaryFabCount() && i < labels.length; i++) {
@@ -2772,8 +2820,8 @@ public class DownloadsScene extends ToolbarScene
         TextView advancedFilterToggleIcon = dialogView.findViewById(R.id.advanced_filter_toggle_icon);
         View advancedFilterContentContainer = dialogView.findViewById(R.id.advanced_filter_content_container);
 
-        // 高级筛选面板默认折叠
-        setSectionExpanded(advancedFilterContentContainer, advancedFilterToggleIcon, false);
+        // 高级筛选面板默认展开
+        setSectionExpanded(advancedFilterContentContainer, advancedFilterToggleIcon, true);
         advancedFilterToggleRow.setOnClickListener(v -> toggleSection(advancedFilterContentContainer, advancedFilterToggleIcon));
         
         // 获取CategoryTable

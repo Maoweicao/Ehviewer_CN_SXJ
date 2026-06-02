@@ -33,50 +33,11 @@
                 android:layout_marginBottom="12dp"
                 android:hint="@string/download_search_hint" />
 
-            <LinearLayout
-                android:id="@+id/advance_search_toggle_row"
+            <com.hippo.ehviewer.widget.AdvanceSearchTable
+                android:id="@+id/advance_search_table"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_border_rounded"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="44dp"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="8dp">
-
-                <TextView
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/dialog_search_options_label"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:id="@+id/advance_search_toggle_icon"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="+"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:id="@+id/advance_search_content_container"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="12dp"
-                android:orientation="vertical"
-                android:visibility="gone">
-
-                <com.hippo.ehviewer.widget.AdvanceSearchTable
-                    android:id="@+id/advance_search_table"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content" />
-            </LinearLayout>
+                android:layout_marginBottom="12dp" />
 
             <LinearLayout
                 android:id="@+id/category_filter_toggle_row"

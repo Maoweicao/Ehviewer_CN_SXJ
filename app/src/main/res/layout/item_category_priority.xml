@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Category priority drag item: chip tag (colored bg + white text) matching gallery tag style -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:paddingStart="16dp"
+    android:paddingEnd="16dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:minHeight="52dp"
+        android:background="?attr/contentColorPrimary"
+        android:paddingStart="16dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:clickable="false"
+        android:focusable="false">
+
+        <!-- 分类名称 Chip（矩形彩色背景 + 白色文字，与画廊标签一致） -->
+        <TextView
+            android:id="@+id/category_name"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:textSize="@dimen/text_little_small"
+            android:textColor="@android:color/white"
+            android:fontFamily="sans-serif-medium"
+            android:paddingLeft="10dp"
+            android:paddingRight="10dp"
+            android:paddingTop="3dp"
+            android:paddingBottom="3dp"
+            android:background="@drawable/category_chip_bg"
+            android:singleLine="true"
+            android:ellipsize="end"
+            android:clickable="false"
+            android:focusable="false" />
+
+        <!-- 弹性间距 -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- 拖拽手柄 -->
+        <ImageView
+            android:id="@+id/drag_handler"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:padding="8dp"
+            android:contentDescription="@string/category_priority_dialog_drag_hint"
+            android:alpha="0.40"
+            android:clickable="false"
+            android:focusable="false"
+            app:srcCompat="@drawable/v_reorder_x24" />
+
+    </LinearLayout>
+
+</FrameLayout>

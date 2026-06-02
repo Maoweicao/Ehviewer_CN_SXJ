@@ -161,6 +161,59 @@
     <!--        android:summary="@string/settings_advanced_url_replace_summary"-->
     <!--        android:title="@string/settings_advanced_url_replace_title" />-->
 
+    <!-- ========== 高级下载排序 ========== -->
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="advanced_download_sort_enabled"
+        android:summary="@string/settings_advanced_advanced_download_sort_summary"
+        android:title="@string/settings_advanced_advanced_download_sort"
+        app:allowDividerAbove="true" />
+
+    <com.hippo.preference.ListPreference
+        android:defaultValue="0"
+        android:key="download_queue_order"
+        android:summary="@string/settings_download_download_queue_order_summary"
+        android:title="@string/settings_download_download_queue_order"
+        app:entries="@array/download_queue_order_entries"
+        app:entryValues="@array/download_queue_order_entry_values"
+        app:iconSpaceReserved="false" />
+
+    <com.hippo.ehviewer.preference.CategoryPriorityDialogPreference
+        android:key="download_category_priority_order"
+        android:summary="@string/settings_advanced_download_category_priority_order_summary"
+        android:title="@string/settings_advanced_download_category_priority_order" />
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="download_treat_removed_as_complete"
+        android:summary="@string/settings_advanced_download_treat_removed_as_complete_summary"
+        android:title="@string/settings_advanced_download_treat_removed_as_complete" />
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="true"
+        android:key="download_prefetch_pages_enabled"
+        android:summary="@string/settings_advanced_download_prefetch_pages_summary"
+        android:title="@string/settings_advanced_download_prefetch_pages" />
+
+    <com.hippo.ehviewer.preference.SliderPreference
+        android:defaultValue="5"
+        android:key="download_prefetch_pages_concurrency"
+        android:title="@string/settings_advanced_download_prefetch_pages_concurrency"
+        android:dependency="download_prefetch_pages_enabled"
+        app:minValue="1"
+        app:maxValue="10"
+        app:stepSize="1"
+        app:showValue="true" />
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="true"
+        android:key="download_inherit_pages"
+        android:summary="@string/settings_advanced_download_inherit_pages_summary"
+        android:title="@string/settings_advanced_download_inherit_pages" />
+
+    <!-- ========== 高级下载排序 END ========== -->
+
     <com.hippo.ehviewer.preference.ExportDataPreference
         android:key="export_data"
         android:summary="@string/settings_advanced_export_data_summary"

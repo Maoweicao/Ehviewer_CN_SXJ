@@ -22,6 +22,7 @@ import com.hippo.ehviewer.download.DownloadLogger;
 import com.hippo.ehviewer.task.BackgroundTask;
 import com.hippo.ehviewer.task.BackgroundTaskRunner;
 import com.hippo.ehviewer.task.MergeDuplicateGalleryTask;
+import com.hippo.ehviewer.service.BackgroundTaskService;
 import com.hippo.ehviewer.ui.task.BackgroundTaskInfo;
 import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager;
 
@@ -458,11 +459,14 @@ public class BackgroundTaskManager {
         Log.d(TAG, "Start foreground task: " + taskName + ", active tasks: " + activeCount);
         
         if (activeCount == 1) {
-            // 第一个前台任务，显示通知
+            // 第一个前台任务，启动 BackgroundTaskService 持有 WakeLock 防休眠
+            BackgroundTaskService.start(mContext, taskName, 1);
+            // 同时显示通知
             showForegroundNotification(taskName, taskDescription);
         } else {
-            // 更新现有通知
+            // 更新通知和 Service
             updateForegroundNotification(taskName, taskDescription);
+            updateService(taskName, activeCount);
         }
     }
     
@@ -475,9 +479,12 @@ public class BackgroundTaskManager {
         
         if (activeCount <= 0) {
             mActiveTaskCount.set(0);
+            // 所有任务完成，停止 BackgroundTaskService 释放 WakeLock
+            BackgroundTaskService.stop(mContext);
             showIdleNotification();
         } else {
             updateForegroundNotification(null, null);
+            updateService(taskName, activeCount);
         }
     }
     
@@ -691,11 +698,23 @@ public class BackgroundTaskManager {
     }
 
     /**
+     * 更新 BackgroundTaskService（传当前任务数供通知显示）
+     */
+    private void updateService(@Nullable String taskName, int activeCount) {
+        try {
+            BackgroundTaskService.start(mContext, taskName, activeCount);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to update BackgroundTaskService", e);
+        }
+    }
+
+    /**
      * 强力停止并清空所有后台任务
      */
     public void forceStopAllTasks() {
         mTaskStatusManager.clearAllTasks();
         mActiveTaskCount.set(0);
+        BackgroundTaskService.stop(mContext);
         hideForegroundNotification();
     }
 

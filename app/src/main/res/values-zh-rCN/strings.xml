@@ -672,7 +672,8 @@
     <string name="settings_download_download_queue_order_summary">设置下载任务的队列顺序策略</string>
     <string name="download_queue_order_default">默认（按添加顺序）</string>
     <string name="download_queue_order_fewest_first">最少图像优先</string>
-    <string name="download_queue_order_most_first">大多数图像首先</string>
+    <string name="download_queue_order_most_first">最多图像优先</string>
+    <string name="download_queue_order_category_priority">按画廊类型优先级</string>
     <string name="settings_download_download_list_pagination">分页列表</string>
     <string name="settings_download_download_list_pagination_summary">分页功能仅在列表长度大于500时生效</string>
     <string name="settings_download_download_origin_image_summary">这很危险！您可能会遇到509错误。</string>
@@ -745,6 +746,20 @@
     <string name="settings_download_rebuild_confirm">您确定要从下载路径重建下载记录吗？此操作将扫描所有文件夹，并将有效的画廊添加到下载列表中。没有.ehviewer文件的文件夹将被创建为本地画廊记录。</string>
     <string name="settings_download_rebuild_download_records_started">重建任务已启动，请查看任务管理器以了解进度。</string>
     <string name="settings_download_clean_redundancy_started">清理冗余任务已启动，请查看任务管理器以了解进度。</string>
+    <string name="settings_advanced_advanced_download_sort">高级下载排序</string>
+    <string name="settings_advanced_advanced_download_sort_summary">启用下载队列高级排序功能，包括按画廊类型优先级排序</string>
+    <string name="settings_advanced_download_category_priority_order">画廊类型优先级排序</string>
+    <string name="settings_advanced_download_category_priority_order_summary">拖拽排序画廊类型，最顶上的最先开始下载</string>
+    <string name="settings_advanced_download_treat_removed_as_complete">将被移除的画廊视为已完成</string>
+    <string name="settings_advanced_download_treat_removed_as_complete_summary">若画廊已被源站移除，则自动标记为下载完成</string>
+    <string name="settings_advanced_download_prefetch_pages">排序前预取页数</string>
+    <string name="settings_advanced_download_prefetch_pages_summary">排序前从网络获取页面数量，确保排序顺序准确</string>
+    <string name="settings_advanced_download_prefetch_pages_concurrency">预取页数并发上限</string>
+    <string name="settings_advanced_download_prefetch_pages_concurrency_summary">获取页面数量时的最大同时网络请求数</string>
+    <string name="settings_advanced_download_inherit_pages">从来源继承页面数量</string>
+    <string name="settings_advanced_download_inherit_pages_summary">添加下载时从画廊详情/列表复制页面数量信息</string>
+    <string name="category_priority_dialog_title">按优先级排序画廊类型</string>
+    <string name="category_priority_dialog_drag_hint">长按并拖拽以重新排序。越靠上优先级越高。</string>
     <string name="settings_advanced">高级</string>
     <string name="settings_advanced_save_parse_error_body">解析错误时保存HTML内容</string>
     <string name="settings_advanced_save_parse_error_body_summary">HTML内容可能涉及隐私敏感信息</string>
@@ -1492,4 +1507,10 @@ SSID: %1$s
     <string name="settings_advanced_export_database_summary">为除错导出当前正在使用的数据库</string>
     <string name="settings_advanced_export_database_to">数据库已被导出在%1$s</string>
     <string name="settings_advanced_export_database_failed">导出数据库失败</string>
+    <!-- Picture-in-Picture -->
+    <string name="pip_play">小窗播放</string>
+    <string name="pip_enter">进入小窗</string>
+    <string name="pip_restore">还原</string>
+    <string name="pip_prev">上一页</string>
+    <string name="pip_next">下一页</string>
     </resources>

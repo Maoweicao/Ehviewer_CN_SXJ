@@ -667,6 +667,7 @@
     <string name="download_queue_order_default">Default (by add order)</string>
     <string name="download_queue_order_fewest_first">Fewest images first</string>
     <string name="download_queue_order_most_first">Most images first</string>
+    <string name="download_queue_order_category_priority">By gallery type priority</string>
     <string name="settings_download_download_list_pagination">Pagination List</string>
     <string name="settings_download_download_list_pagination_summary">The paging function will only take effect when the list length is greater than 500</string>
     <string name="settings_download_download_origin_image_summary">It is dangerous! You may get 509 error</string>
@@ -720,6 +721,20 @@
     <string name="settings_download_rebuild_confirm">Are you sure you want to rebuild download records from download path? This will scan all folders and add valid galleries to the download list. Folders without .ehviewer files will be created as local gallery records.</string>
     <string name="settings_download_rebuild_download_records_started">Rebuild task started, check task manager for progress</string>
     <string name="settings_download_clean_redundancy_started">Clean redundancy task started, check task manager for progress</string>
+    <string name="settings_advanced_advanced_download_sort">Advanced download sort</string>
+    <string name="settings_advanced_advanced_download_sort_summary">Enable advanced sorting for download queue, including category priority</string>
+    <string name="settings_advanced_download_category_priority_order">Gallery type priority order</string>
+    <string name="settings_advanced_download_category_priority_order_summary">Drag to reorder gallery types, topmost downloads first</string>
+    <string name="settings_advanced_download_treat_removed_as_complete">Treat removed galleries as completed</string>
+    <string name="settings_advanced_download_treat_removed_as_complete_summary">Mark download as finished if gallery has been removed from source</string>
+    <string name="settings_advanced_download_prefetch_pages">Prefetch page counts before sort</string>
+    <string name="settings_advanced_download_prefetch_pages_summary">Fetch page counts from network before sorting to ensure accurate ordering</string>
+    <string name="settings_advanced_download_prefetch_pages_concurrency">Prefetch concurrency limit</string>
+    <string name="settings_advanced_download_prefetch_pages_concurrency_summary">Max simultaneous network requests for fetching page counts</string>
+    <string name="settings_advanced_download_inherit_pages">Inherit page count from source</string>
+    <string name="settings_advanced_download_inherit_pages_summary">Copy page count from gallery detail/list when adding to downloads</string>
+    <string name="category_priority_dialog_title">Sort gallery types by priority</string>
+    <string name="category_priority_dialog_drag_hint">Long press and drag to reorder. Topmost = highest priority.</string>
     <string name="settings_advanced">Advanced</string>
     <string name="settings_advanced_save_parse_error_body">Save html content when parsing error</string>
     <string name="settings_advanced_save_parse_error_body_summary">Html content may be privacy-sensitive</string>
@@ -1187,6 +1202,7 @@
     <string name="download_card_folder_size">Size: %1$s</string>
     <string name="background_tasks_channel_name">Background tasks</string>
     <string name="background_tasks_channel_description">Background task notifications for scanning download files, merging duplicate galleries, etc.</string>
+    <string name="background_task_service_label">EhViewer Background Task Service</string>
     <string name="background_task_running">Background task running</string>
     <string name="background_task_running_description">Notification will automatically disappear after task completion</string>
     <plurals name="background_tasks_running">
@@ -1473,4 +1489,11 @@
     <string name="tag_search_entrance">Tag Selector</string>
     <string name="settings_download_export_download_items">Export Download Items</string>
     <string name="progress_detail_with_total">%1$s %2$d / %3$d</string>
+
+    <!-- Picture-in-Picture -->
+    <string name="pip_play">Picture-in-Picture Play</string>
+    <string name="pip_enter">Enter Picture-in-Picture</string>
+    <string name="pip_restore">Restore</string>
+    <string name="pip_prev">Previous</string>
+    <string name="pip_next">Next</string>
 </resources>

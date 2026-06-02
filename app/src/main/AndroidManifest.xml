@@ -127,9 +127,10 @@
         </activity>
         <activity
             android:name=".ui.GalleryActivity"
-            android:configChanges="screenSize|uiMode"
+            android:configChanges="screenSize|uiMode|screenLayout|smallestScreenSize|orientation"
             android:exported="true"
             android:launchMode="singleTask"
+            android:supportsPictureInPicture="false"
             android:theme="@style/AppTheme.Gallery">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
@@ -315,6 +316,11 @@
         <service
             android:name="com.hippo.ehviewer.service.RecycleBinScanService"
             android:exported="false" />
+
+        <service
+            android:name="com.hippo.ehviewer.service.BackgroundTaskService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <service
             android:name=".download.DownloadService"

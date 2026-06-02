@@ -23,11 +23,14 @@ import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
+import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Typeface;
 import android.net.Uri;
@@ -78,6 +81,7 @@ import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.util.GifUtils;
 import com.hippo.ehviewer.util.WebpUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
+import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.event.GalleryActivityEvent;
 import com.hippo.ehviewer.gallery.ArchiveGalleryProvider;
 import com.hippo.ehviewer.gallery.DirGalleryProvider;
@@ -137,6 +141,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     public static final String DATA_IN_EVENT = "data_in_event";
     public static final String KEY_PAGE = "page";
     public static final String KEY_CURRENT_INDEX = "current_index";
+    public static final String KEY_ENTER_PIP = "enter_pip";
 
     private static final long SLIDER_ANIMATION_DURING = 150;
     private static final long HIDE_SLIDER_DELAY = 3000;
@@ -210,6 +215,28 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
 
     private boolean canFinish = false;
     private boolean autoTransferring = false;
+
+    // PiP fields
+    private boolean mEnterPip;
+    private boolean mIsInPip;
+    @Nullable
+    private View mPipLayout;
+    @Nullable
+    private ImageView mPipThumb;
+    @Nullable
+    private TextView mPipTitle;
+    @Nullable
+    private TextView mPipProgress;
+    @Nullable
+    private ImageView mPipPrevBtn;
+    @Nullable
+    private ImageView mPipFirstBtn;
+    @Nullable
+    private ImageView mPipNextBtn;
+    @Nullable
+    private ImageView mPipPlayBtn;
+    @Nullable
+    private View mPipRestoreBtn;
 
     // Countdown timer for auto-play
     private long mAutoPageStartTime = 0;
@@ -435,6 +462,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             canFinish = true;
         }
         mPage = intent.getIntExtra(KEY_PAGE, -1);
+        mEnterPip = intent.getBooleanExtra(KEY_ENTER_PIP, false);
         buildProvider();
     }
 
@@ -445,6 +473,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         mGalleryInfo = savedInstanceState.getParcelable(KEY_GALLERY_INFO);
         mPage = savedInstanceState.getInt(KEY_PAGE, -1);
         mCurrentIndex = savedInstanceState.getInt(KEY_CURRENT_INDEX);
+        mEnterPip = savedInstanceState.getBoolean(KEY_ENTER_PIP, false);
         buildProvider();
     }
 
@@ -459,6 +488,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         }
         outState.putInt(KEY_PAGE, mPage);
         outState.putInt(KEY_CURRENT_INDEX, mCurrentIndex);
+        outState.putBoolean(KEY_ENTER_PIP, mEnterPip);
     }
 
     @Override
@@ -587,6 +617,12 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             return true;
         });
 
+        // PiP entry button is temporarily disabled.
+        View pipEntry = findViewById(R.id.pip_entry);
+        if (pipEntry != null) {
+            pipEntry.setVisibility(View.GONE);
+        }
+
         // Transfer countdown
         mTransferCountdown = (TextView) ViewUtils.$$(this, R.id.transfer_countdown);
 
@@ -641,6 +677,14 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             FrameLayout mainLayout = (FrameLayout) ViewUtils.$$(this, R.id.main);
             mainLayout.addView(new GalleryGuideView(this));
         }
+
+//        // Initialize PiP views
+//        initPipViews();
+//
+//        // Auto-enter PiP if requested
+//        if (mEnterPip && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+//            SimpleHandler.getInstance().postDelayed(this::enterPipMode, 400);
+//        }
     }
 
     private boolean isEglAvailable() {
@@ -736,7 +780,8 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     protected void onPause() {
         super.onPause();
 
-        if (mGLRootView != null) {
+        // Don't pause GL when entering PiP (system handles it)
+        if (!mIsInPip && mGLRootView != null) {
             mGLRootView.onPause();
         }
     }
@@ -745,8 +790,26 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     protected void onResume() {
         super.onResume();
 
-        if (mGLRootView != null) {
+        // Don't resume GL when in PiP mode
+        if (!mIsInPip && mGLRootView != null) {
             mGLRootView.onResume();
+        }
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, @NonNull Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        mIsInPip = isInPictureInPictureMode;
+        Log.d(PIP_TAG, "onPiPModeChanged: isInPip=" + isInPictureInPictureMode);
+
+        if (isInPictureInPictureMode) {
+            Log.d(PIP_TAG, "onPiPModeChanged: entering PiP (system surface)");
+            // System renders the GL surface directly - no custom overlay needed
+            // Controls are provided via RemoteAction in setActions()
+            updatePipProgress();
+            loadPipImage();
+        } else {
+            Log.d(PIP_TAG, "onPiPModeChanged: exiting PiP");
         }
     }
 
@@ -2226,11 +2289,13 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
                     GalleryActivity.this.mSize = mValue;
                     updateSlider();
                     updateProgress();
+                    updatePipProgress();
                     break;
                 case KEY_CURRENT_INDEX:
                     GalleryActivity.this.mCurrentIndex = mValue;
                     updateSlider();
                     updateProgress();
+                    updatePipProgress();
                     android.util.Log.d(TAG, "[AutoFlip] Page changed to " + mValue);
                     // Cancel animation wait when page changes (manual navigation)
                     if (mWaitingForAnimation) {
@@ -2371,6 +2436,328 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
                 sb.append(", resolution=").append(image.getWidth()).append("x").append(image.getHeight());
             }
             return sb.toString();
+        }
+    }
+
+    // ==================== PiP methods ====================
+
+    private static final String PIP_TAG = "GalleryPiP";
+    private static final String PIP_ACTION_PREV = "com.hippo.ehviewer.PIP_PREV";
+    private static final String PIP_ACTION_NEXT = "com.hippo.ehviewer.PIP_NEXT";
+    private static final String PIP_ACTION_PLAY = "com.hippo.ehviewer.PIP_PLAY";
+    private static final String PIP_ACTION_RESTORE = "com.hippo.ehviewer.PIP_RESTORE";
+
+    private void initPipViews() {
+        Log.d(PIP_TAG, "initPipViews: inflating PiP views");
+        mPipLayout = findViewById(R.id.pip_container);
+        mPipThumb = (ImageView) findViewById(R.id.pip_thumb);
+        mPipTitle = (TextView) findViewById(R.id.pip_title);
+        mPipProgress = (TextView) findViewById(R.id.pip_progress);
+        mPipPrevBtn = (ImageView) findViewById(R.id.pip_prev_btn);
+        mPipFirstBtn = (ImageView) findViewById(R.id.pip_first_btn);
+        mPipNextBtn = (ImageView) findViewById(R.id.pip_next_btn);
+        mPipPlayBtn = (ImageView) findViewById(R.id.pip_play_btn);
+        mPipRestoreBtn = findViewById(R.id.pip_restore_btn);
+
+        Log.d(PIP_TAG, "initPipViews: pipLayout=" + (mPipLayout != null)
+                + " pipThumb=" + (mPipThumb != null) + " pipTitle=" + (mPipTitle != null)
+                + " pipProgress=" + (mPipProgress != null) + " pipPrevBtn=" + (mPipPrevBtn != null)
+                + " pipFirstBtn=" + (mPipFirstBtn != null) + " pipNextBtn=" + (mPipNextBtn != null)
+                + " pipPlayBtn=" + (mPipPlayBtn != null) + " pipRestoreBtn=" + (mPipRestoreBtn != null));
+
+        if (mPipPrevBtn != null) {
+            mPipPrevBtn.setOnClickListener(v -> {
+                Log.d(PIP_TAG, "prevBtn clicked");
+                if (mGalleryView != null) mGalleryView.pageLeft();
+                updatePipProgress();
+                loadPipImageFromFile();
+            });
+        }
+        if (mPipFirstBtn != null) {
+            mPipFirstBtn.setOnClickListener(v -> {
+                Log.d(PIP_TAG, "firstBtn clicked");
+                if (mGalleryView != null && mGalleryProvider != null) {
+                    mGalleryView.setCurrentPage(0);
+                }
+                updatePipProgress();
+                loadPipImageFromFile();
+            });
+        }
+        if (mPipNextBtn != null) {
+            mPipNextBtn.setOnClickListener(v -> {
+                Log.d(PIP_TAG, "nextBtn clicked");
+                if (mGalleryView != null) mGalleryView.pageRight();
+                updatePipProgress();
+                loadPipImageFromFile();
+            });
+        }
+        if (mPipPlayBtn != null) {
+            mPipPlayBtn.setOnClickListener(v -> {
+                Log.d(PIP_TAG, "playBtn clicked " + (autoTransferring ? "(pause)" : "(play)"));
+                autoTransferring = !autoTransferring;
+                updatePipProgress();
+                if (autoTransferring) autoRead(mPipPlayBtn);
+            });
+        }
+        if (mPipRestoreBtn != null) {
+            mPipRestoreBtn.setOnClickListener(v -> {
+                Log.d(PIP_TAG, "restoreBtn clicked");
+                restoreFromPip();
+            });
+        }
+        Log.d(PIP_TAG, "initPipViews: done");
+    }
+
+    private void enterPipMode() {
+        Log.d(PIP_TAG, "enterPipMode: called, sdk=" + Build.VERSION.SDK_INT
+                + " mIsInPip=" + mIsInPip);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            Log.w(PIP_TAG, "enterPipMode: SDK < 26, returning");
+            return;
+        }
+        if (mIsInPip) {
+            Log.d(PIP_TAG, "enterPipMode: already in PiP, returning");
+            return;
+        }
+        mIsInPip = true;
+
+        // Auto-start playback when entering PiP
+        if (!autoTransferring) {
+            autoTransferring = true;
+            if (transferService == null || transferService.isShutdown()) {
+                transferService = Executors.newSingleThreadScheduledExecutor();
+            }
+            scheduleNextAutoFlip(0);
+        }
+
+        Log.d(PIP_TAG, "enterPipMode: calling enterPictureInPictureMode");
+        enterPictureInPictureMode(new PictureInPictureParams.Builder()
+                .setActions(buildPipActions())
+                .build());
+    }
+
+    private java.util.List<android.app.RemoteAction> buildPipActions() {
+        java.util.List<android.app.RemoteAction> actions = new java.util.ArrayList<>();
+
+        // Prev page
+        android.app.PendingIntent prevPi = android.app.PendingIntent.getBroadcast(this, 0,
+                new Intent(PIP_ACTION_PREV).setPackage(getPackageName()),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        actions.add(new android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
+                getString(R.string.pip_prev), getString(R.string.pip_prev), prevPi));
+
+        // Next page
+        android.app.PendingIntent nextPi = android.app.PendingIntent.getBroadcast(this, 1,
+                new Intent(PIP_ACTION_NEXT).setPackage(getPackageName()),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        actions.add(new android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
+                getString(R.string.pip_next), getString(R.string.pip_next), nextPi));
+
+        // Play/Pause
+        android.app.PendingIntent playPi = android.app.PendingIntent.getBroadcast(this, 2,
+                new Intent(PIP_ACTION_PLAY).setPackage(getPackageName()),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        actions.add(new android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, autoTransferring ? R.drawable.v_pause_x24 : R.drawable.v_play_x24),
+                getString(R.string.pip_enter), "Play/Pause", playPi));
+
+        // Restore
+        android.app.PendingIntent restorePi = android.app.PendingIntent.getBroadcast(this, 3,
+                new Intent(PIP_ACTION_RESTORE).setPackage(getPackageName()),
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
+        actions.add(new android.app.RemoteAction(
+                android.graphics.drawable.Icon.createWithResource(this, R.drawable.v_fullscreen_exit_x24),
+                getString(R.string.pip_restore), getString(R.string.pip_restore), restorePi));
+
+        return actions;
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handlePipAction(intent);
+    }
+
+    private void handlePipAction(Intent intent) {
+        if (intent == null || intent.getAction() == null) return;
+        String action = intent.getAction();
+        Log.d(PIP_TAG, "handlePipAction: " + action);
+        switch (action) {
+            case PIP_ACTION_PREV:
+                if (mGalleryView != null) mGalleryView.pageLeft();
+                updatePipProgress();
+                loadPipImageFromFile();
+                break;
+            case PIP_ACTION_NEXT:
+                if (mGalleryView != null) mGalleryView.pageRight();
+                updatePipProgress();
+                loadPipImageFromFile();
+                break;
+            case PIP_ACTION_PLAY:
+                autoTransferring = !autoTransferring;
+                updatePipProgress();
+                if (autoTransferring) {
+                    if (transferService == null || transferService.isShutdown()) {
+                        transferService = Executors.newSingleThreadScheduledExecutor();
+                    }
+                    scheduleNextAutoFlip(0);
+                } else {
+                    if (transferService != null) transferService.shutdown();
+                }
+                break;
+            case PIP_ACTION_RESTORE:
+                restoreFromPip();
+                break;
+        }
+    }
+
+    @SuppressLint("NewApi")
+    private void restoreFromPip() {
+        Log.d(PIP_TAG, "restoreFromPip: finishing activity, mIsInPip=" + mIsInPip);
+        mIsInPip = false;
+        if (mPipLayout != null) mPipLayout.setVisibility(View.GONE);
+        if (mGLRootView != null) mGLRootView.setVisibility(View.VISIBLE);
+        finish();
+    }
+
+    /** Called when entering PiP to show current page image */
+    private void loadPipImage() {
+        Log.d(PIP_TAG, "loadPipImage: mPipThumb=" + (mPipThumb != null)
+                + " mCurrentIndex=" + mCurrentIndex);
+        if (mPipThumb == null) {
+            Log.w(PIP_TAG, "loadPipImage: mPipThumb is null, returning");
+            return;
+        }
+        loadPipImageFromFile();
+    }
+
+    /** Called on page flip to load from file using SpiderDen index-based lookup */
+    private void loadPipImageFromFile() {
+        if (mPipThumb == null || mGalleryProvider == null || mCurrentIndex < 0) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: precondition fail - thumb="
+                    + (mPipThumb != null) + " provider=" + (mGalleryProvider != null)
+                    + " index=" + mCurrentIndex);
+            return;
+        }
+        int index = mCurrentIndex;
+        Log.d(PIP_TAG, "loadPipImageFromFile: index=" + index
+                + " galleryInfo=" + (mGalleryInfo != null)
+                + " gid=" + (mGalleryInfo != null ? mGalleryInfo.gid : -1));
+
+        if (mGalleryInfo == null) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: mGalleryInfo is null, returning");
+            return;
+        }
+
+        // Use SpiderDen to find the image file by its sequential index
+        // (e.g. 00000001.jpg), NOT the gid-hash-prefixed name from getImageFilename()
+        com.hippo.unifile.UniFile dir =
+                com.hippo.ehviewer.spider.SpiderDen.getGalleryDownloadDir(mGalleryInfo);
+        Log.d(PIP_TAG, "loadPipImageFromFile: downloadDir=" + (dir != null ? dir.getUri() : "null"));
+        if (dir == null) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: downloadDir is null, returning");
+            return;
+        }
+
+        // Strategy: try multiple naming conventions in order
+        // 1. Downloaded: 00000001.jpg (SpiderDen sequential naming)
+        com.hippo.unifile.UniFile imgFile =
+                com.hippo.ehviewer.spider.SpiderDen.findImageFile(dir, index);
+
+        // 2. Cached/partial: gid-hash-00000001.jpg (EhViewer cached format)
+        if (imgFile == null) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: not downloaded, trying cached naming");
+            String baseName = mGalleryProvider.getImageFilename(index);
+            for (String ext : com.hippo.ehviewer.gallery.GalleryProvider2.SUPPORT_IMAGE_EXTENSIONS) {
+                imgFile = dir.findFile(baseName + ext);
+                if (imgFile != null) break;
+            }
+        }
+
+        // 3. Brute force: list directory and match by sequential prefix
+        if (imgFile == null) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: not cached, trying listFiles");
+            var files = dir.listFiles();
+            if (files != null) {
+                String prefix = String.format(java.util.Locale.US, "%08d", index + 1);
+                for (com.hippo.unifile.UniFile f : files) {
+                    if (f != null && !f.isDirectory() && f.getName() != null
+                            && f.getName().startsWith(prefix)) {
+                        imgFile = f;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (imgFile == null) {
+            Log.w(PIP_TAG, "loadPipImageFromFile: no image found for index=" + index);
+            return;
+        }
+
+        android.net.Uri uri = imgFile.getUri();
+        Log.d(PIP_TAG, "loadPipImageFromFile: found via SpiderDen uri=" + uri);
+        if (uri == null) return;
+
+        java.io.InputStream is = null;
+        try {
+            if ("content".equals(uri.getScheme())) {
+                is = getContentResolver().openInputStream(uri);
+            } else {
+                is = new java.io.FileInputStream(uri.getPath());
+            }
+            if (is == null) {
+                Log.w(PIP_TAG, "loadPipImageFromFile: inputStream null for " + uri);
+                return;
+            }
+
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            android.graphics.BitmapFactory.decodeStream(is, null, o);
+            is.close();
+
+            int maxDim = 600;
+            o.inSampleSize = Math.max(o.outWidth, o.outHeight) / maxDim;
+            if (o.inSampleSize < 1) o.inSampleSize = 1;
+            o.inJustDecodeBounds = false;
+
+            Log.d(PIP_TAG, "loadPipImageFromFile: decoding " + o.outWidth + "x" + o.outHeight
+                    + " sampleSize=" + o.inSampleSize);
+
+            if ("content".equals(uri.getScheme())) {
+                is = getContentResolver().openInputStream(uri);
+            } else {
+                is = new java.io.FileInputStream(uri.getPath());
+            }
+            android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(is, null, o);
+            is.close();
+
+            if (bmp != null) {
+                Log.d(PIP_TAG, "loadPipImageFromFile: SUCCESS bitmap="
+                        + bmp.getWidth() + "x" + bmp.getHeight());
+                mPipThumb.setImageBitmap(bmp);
+            } else {
+                Log.w(PIP_TAG, "loadPipImageFromFile: decode returned null bitmap");
+            }
+        } catch (Exception e) {
+            Log.e(PIP_TAG, "loadPipImageFromFile: exception for " + uri, e);
+        } finally {
+            if (is != null) try { is.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private void updatePipProgress() {
+        if (mPipProgress != null && mGalleryView != null && mGalleryProvider != null) {
+            int cur = mGalleryView.getCurrentIndex();
+            int total = mGalleryProvider.size();
+            mPipProgress.setText((cur + 1) + " / " + total);
+            Log.d(PIP_TAG, "updatePipProgress: " + (cur + 1) + " / " + total);
+        }
+        if (mPipPlayBtn != null) {
+            mPipPlayBtn.setImageResource(autoTransferring
+                    ? R.drawable.v_pause_x24 : R.drawable.v_play_x24);
         }
     }
 

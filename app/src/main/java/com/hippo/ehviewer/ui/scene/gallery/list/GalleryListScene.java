@@ -22,6 +22,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -29,6 +30,7 @@ import android.graphics.Point;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.AsyncTask;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Looper;
 import android.text.InputType;
@@ -1367,18 +1369,36 @@ public final class GalleryListScene extends BaseScene
 
         boolean downloaded = mDownloadManager.getDownloadState(gi.gid) != DownloadInfo.STATE_INVALID;
         boolean favourited = gi.favoriteSlot != -2;
+        boolean pipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE);
 
-        CharSequence[] items = new CharSequence[]{
-                context.getString(R.string.read),
-                context.getString(downloaded ? R.string.delete_downloads : R.string.download),
-                context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
-        };
-
-        int[] icons = new int[]{
-                R.drawable.v_book_open_x24,
-                downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24,
-                favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
-        };
+        CharSequence[] items;
+        int[] icons;
+        if (pipSupported) {
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(downloaded ? R.string.delete_downloads : R.string.download),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+                    context.getString(R.string.pip_play),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+                    R.drawable.v_fullscreen_exit_x24,
+            };
+        } else {
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(downloaded ? R.string.delete_downloads : R.string.download),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+            };
+        }
 
         @SuppressLint("InflateParams") LinearLayout linearLayout = (LinearLayout) getLayoutInflater2().inflate(R.layout.gallery_item_dialog_coustom_title, null);
 
@@ -1431,6 +1451,13 @@ public final class GalleryListScene extends BaseScene
                             } else {
                                 CommonOperations.addToFavorites(activity, gi, new AddToFavoriteListener(context, activity.getStageId(), getTag()), false);
                             }
+                            break;
+                        case 3: // PiP play
+                            Intent pipIntent = new Intent(activity, GalleryActivity.class);
+                            pipIntent.setAction(GalleryActivity.ACTION_EH);
+                            pipIntent.putExtra(GalleryActivity.KEY_GALLERY_INFO, gi);
+//                            pipIntent.putExtra(GalleryActivity.KEY_ENTER_PIP, true);
+                            startActivity(pipIntent);
                             break;
                     }
                 }).show();

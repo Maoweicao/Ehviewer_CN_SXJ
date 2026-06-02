@@ -412,19 +412,11 @@ public class EhApplication extends RecordingApplication {
 //            Dispatcher dispatcher = new Dispatcher();
 //            dispatcher.setMaxRequestsPerHost(4);
             
-<<<<<<< HEAD
             // 创建优化的连接池 - 针对后台长时间下载优化
             // 增加空闲连接数和保活时间，避免后台切回时连接被回收后重建
             ConnectionPool connectionPool = new ConnectionPool(
                     20,  // 最大空闲连接数（从10提升到20，适应多线程下载）
                     10,  // 连接保活时间（从5分钟提升到10分钟，防止后台短暂切换时断连）
-=======
-            // 创建优化的连接池 - 针对后台下载优化
-            // 最多保持 10 个连接，每个连接保持 5 分钟，适合后台长时间下载
-            ConnectionPool connectionPool = new ConnectionPool(
-                    10,  // 最大空闲连接数
-                    5,   // 连接保活时间（分钟）
->>>>>>> upstream/BiLi_PC_Gamer
                     TimeUnit.MINUTES
             );
             
@@ -434,17 +426,11 @@ public class EhApplication extends RecordingApplication {
                     .connectTimeout(10, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
                     .writeTimeout(10, TimeUnit.SECONDS)
-<<<<<<< HEAD
                     .callTimeout(10, TimeUnit.SECONDS)
                     .connectionPool(connectionPool)  // 优化的连接池
                     .retryOnConnectionFailure(true)  // 连接失败时重试
                     // HTTP/2 连接使用 ping 保活，防止后台连接被 NAT/代理断开
                     .pingInterval(5, TimeUnit.MINUTES)
-=======
-//                    .callTimeout(10, TimeUnit.SECONDS)
-                    .connectionPool(connectionPool)  // 添加优化的连接池
-                    .retryOnConnectionFailure(true)  // 连接失败时重试
->>>>>>> upstream/BiLi_PC_Gamer
                     .cookieJar(getEhCookieStore(application))
                     .cache(getOkHttpCache(application))
 //                    .hostnameVerifier((hostname, session) -> true)

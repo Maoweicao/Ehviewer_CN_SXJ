@@ -1887,6 +1887,7 @@ public class Settings {
     public static final int DOWNLOAD_QUEUE_ORDER_DEFAULT = 0; // 按添加顺序
     public static final int DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST = 1; // 少图画廊优先
     public static final int DOWNLOAD_QUEUE_ORDER_MOST_FIRST = 2; // 多图画廊优先
+    public static final int DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY = 3; // 按画廊类型优先级
 
     public static int getDownloadQueueOrder() {
         return getInt(KEY_DOWNLOAD_QUEUE_ORDER, DOWNLOAD_QUEUE_ORDER_DEFAULT);
@@ -1894,6 +1895,69 @@ public class Settings {
 
     public static void setDownloadQueueOrder(int value) {
         putInt(KEY_DOWNLOAD_QUEUE_ORDER, value);
+    }
+
+    // ========== 高级下载排序设置 ==========
+
+    public static final String KEY_ADVANCED_DOWNLOAD_SORT_ENABLED = "advanced_download_sort_enabled";
+
+    public static boolean getAdvancedDownloadSortEnabled() {
+        return getBoolean(KEY_ADVANCED_DOWNLOAD_SORT_ENABLED, false);
+    }
+
+    public static void setAdvancedDownloadSortEnabled(boolean value) {
+        putBoolean(KEY_ADVANCED_DOWNLOAD_SORT_ENABLED, value);
+    }
+
+    public static final String KEY_DOWNLOAD_CATEGORY_PRIORITY_ORDER = "download_category_priority_order";
+
+    public static String getDownloadCategoryPriorityOrder() {
+        return getString(KEY_DOWNLOAD_CATEGORY_PRIORITY_ORDER, "");
+    }
+
+    public static void setDownloadCategoryPriorityOrder(String value) {
+        putString(KEY_DOWNLOAD_CATEGORY_PRIORITY_ORDER, value);
+    }
+
+    public static final String KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE = "download_treat_removed_as_complete";
+
+    public static boolean getDownloadTreatRemovedAsComplete() {
+        return getBoolean(KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE, false);
+    }
+
+    public static void setDownloadTreatRemovedAsComplete(boolean value) {
+        putBoolean(KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE, value);
+    }
+
+    public static final String KEY_DOWNLOAD_PREFETCH_PAGES_ENABLED = "download_prefetch_pages_enabled";
+
+    public static boolean getDownloadPrefetchPagesEnabled() {
+        return getBoolean(KEY_DOWNLOAD_PREFETCH_PAGES_ENABLED, true);
+    }
+
+    public static void setDownloadPrefetchPagesEnabled(boolean value) {
+        putBoolean(KEY_DOWNLOAD_PREFETCH_PAGES_ENABLED, value);
+    }
+
+    public static final String KEY_DOWNLOAD_PREFETCH_PAGES_CONCURRENCY = "download_prefetch_pages_concurrency";
+    public static final int DEFAULT_DOWNLOAD_PREFETCH_PAGES_CONCURRENCY = 5;
+
+    public static int getDownloadPrefetchPagesConcurrency() {
+        return getInt(KEY_DOWNLOAD_PREFETCH_PAGES_CONCURRENCY, DEFAULT_DOWNLOAD_PREFETCH_PAGES_CONCURRENCY);
+    }
+
+    public static void setDownloadPrefetchPagesConcurrency(int value) {
+        putInt(KEY_DOWNLOAD_PREFETCH_PAGES_CONCURRENCY, MathUtils.clamp(value, 1, 10));
+    }
+
+    public static final String KEY_DOWNLOAD_INHERIT_PAGES = "download_inherit_pages";
+
+    public static boolean getDownloadInheritPages() {
+        return getBoolean(KEY_DOWNLOAD_INHERIT_PAGES, true);
+    }
+
+    public static void setDownloadInheritPages(boolean value) {
+        putBoolean(KEY_DOWNLOAD_INHERIT_PAGES, value);
     }
 
     public static final String KEY_DOWNLOAD_LIST_PAGINATION = "download_list_pagination";

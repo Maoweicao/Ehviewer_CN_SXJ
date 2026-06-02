@@ -528,7 +528,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     info.state = DownloadInfo.STATE_DOWNLOAD;
                     info.speed = -1;
                     info.remaining = -1;
-                    info.total = -1;
+                    // 仅当页数未知时才重置为-1，保留已预取的有效页数
+                    if (info.total <= 0) {
+                        info.total = -1;
+                    }
                     info.finished = 0;
                     info.downloaded = 0;
                     info.legacy = -1;
@@ -788,6 +791,12 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             info.label = label;
             info.time = System.currentTimeMillis();
 
+            // 页面数量继承：从画廊详情/列表继承页面数量
+            if (Settings.getDownloadInheritPages() && galleryInfo.pages > 0) {
+                info.total = galleryInfo.pages;
+                Log.d(TAG, "[START] 继承页面数量: " + galleryInfo.pages + " -> " + galleryTitle);
+            }
+
             if (Settings.getIncrementalDownloadUpdate() && isLocalGalleryAvailable(galleryInfo.gid)) {
                 DownloadedFileManager.GalleryFileCheckResult checkResult = DownloadedFileManager.getInstance().checkGalleryFilesExist(galleryInfo.gid);
             Log.i(TAG, "[START] 本地库命中，加入复制队列: " + galleryTitle + " (GID: " + galleryInfo.gid + ")，本地文件情况：" +
@@ -897,6 +906,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             }
         }
         
+        // Step 2: 无条件补充缺失的页面数量数据
+        prefetchPagesBeforeSort(rangeDownloadList);
+        
         // 应用队列顺序排序
         sortDownloadList(rangeDownloadList, downloadQueueOrder);
         
@@ -937,106 +949,135 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     SimpleHandler.getInstance().post(() -> listener.onStart());
                 }
                 
-                boolean update = false;
-                // Start all STATE_NONE and STATE_FAILED item
                 LinkedList<DownloadInfo> allInfoList = mAllInfoList;
                 LinkedList<DownloadInfo> waitList = mWaitList;
                 
-                // 获取下载队列顺序设置
+                // 获取设置
                 int downloadQueueOrder = getDownloadQueueOrderSafely();
                 String queueOrderText = getQueueOrderText(downloadQueueOrder);
-                
-                // 获取正序倒序设置
-                boolean downloadOrder = Settings.getDownloadOrder();
-                String orderText = downloadOrder ? "正序" : "倒序";
-                
-                // 检查是否启用增量下载更新
                 boolean incrementalUpdateEnabled = Settings.getIncrementalDownloadUpdate();
                 
-                int totalCount = 0;
-                int eligibleCount = 0;
-                
-                // 计算非已完成项目数量作为进度总数，同时统计可启动项目数量
+                // Step 1: 收集所有未完成任务
+                List<DownloadInfo> unfinishedList = new ArrayList<>();
                 for (DownloadInfo info : allInfoList) {
                     if (info.state != DownloadInfo.STATE_FINISH) {
-                        totalCount++;
-                    }
-                    if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
-                        eligibleCount++;
+                        unfinishedList.add(info);
                     }
                 }
                 
-                Log.i(TAG, "[START_ALL] 批量启动下载任务 - 非已完成项目: " + totalCount + 
-                          ", 可启动项目: " + eligibleCount +
+                int totalCount = unfinishedList.size();
+                Log.i(TAG, "[START_ALL] 未完成任务数量: " + totalCount +
                           ", 队列顺序: " + queueOrderText + 
-                          ", 排序方式: " + orderText + 
                           ", 增量更新: " + (incrementalUpdateEnabled ? "启用" : "禁用"));
-
-                // 根据队列顺序设置对下载列表进行排序
-                List<DownloadInfo> sortedDownloadList = new ArrayList<>();
-                for (DownloadInfo info : allInfoList) {
-                    if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
-                        sortedDownloadList.add(info);
+                
+                if (totalCount == 0) {
+                    Log.i(TAG, "[START_ALL] 没有未完成的任务，跳过");
+                    if (listener != null) {
+                        SimpleHandler.getInstance().post(() -> listener.onComplete(0));
                     }
+                    return;
                 }
                 
-                // 应用队列顺序排序
-                sortDownloadList(sortedDownloadList, downloadQueueOrder);
+                // Step 2: 无条件补充缺失的页面数量数据
+                int prefetched = prefetchPagesBeforeSort(unfinishedList);
+                Log.i(TAG, "[START_ALL] 预取页数完成: " + prefetched + "/" + totalCount);
+                
+                // Step 3: 对未完成任务按设置排序
+                sortDownloadList(unfinishedList, downloadQueueOrder);
                 
                 // 记录排序结果
-                Log.d(TAG, "[START_ALL] 队列排序完成，排序前5项:");
-                for (int i = 0; i < Math.min(5, sortedDownloadList.size()); i++) {
-                    DownloadInfo info = sortedDownloadList.get(i);
+                Log.d(TAG, "[START_ALL] 排序完成，前5项:");
+                for (int i = 0; i < Math.min(5, unfinishedList.size()); i++) {
+                    DownloadInfo info = unfinishedList.get(i);
                     Log.d(TAG, "[START_ALL]   [" + (i+1) + "] " + EhUtils.getSuitableTitle(info) + 
                               " (GID: " + info.gid + ", 页数: " + info.total + ", 状态: " + getStateString(info.state) + ")");
                 }
-
-                // 根据正序倒序设置决定遍历方向
-                if (downloadOrder) {
-                    Log.d(TAG, "[START_ALL] 使用正序处理下载列表");
-                    // 正序：从前往后处理
-                    update = processDownloadListInOrder(allInfoList, waitList, true, incrementalUpdateEnabled, 
-                            listener, totalCount, eligibleCount, "[ALL-正序]");
-                } else {
-                    Log.d(TAG, "[START_ALL] 使用倒序处理下载列表");
-                    // 倒序：从后往前处理
-                    update = processDownloadListInOrder(allInfoList, waitList, false, incrementalUpdateEnabled, 
-                            listener, totalCount, eligibleCount, "[ALL-倒序]");
-                }
-
-                final boolean finalUpdate = update;
-                SimpleHandler.getInstance().post(() -> {
-                    if (finalUpdate) {
-                        // Notify Listener
-                        for (DownloadInfoListener l : mDownloadInfoListeners) {
-                            l.onUpdateAll();
-                        }
-                        // Ensure download
-                        requestEnsureDownload();
-                    }
-                    
-                    // 记录等待队列的最终状态
-                    Log.d(TAG, "[START_ALL] 批量启动完成，等待队列状态:");
-                    synchronized (mWaitList) {
-                        for (int i = 0; i < Math.min(5, mWaitList.size()); i++) {
-                            DownloadInfo info = mWaitList.get(i);
-                            Log.d(TAG, "[START_ALL]   等待[" + (i+1) + "] " + EhUtils.getSuitableTitle(info) + 
-                                      " (GID: " + info.gid + ", 页数: " + info.total + ")");
-                        }
-                        if (mWaitList.size() > 5) {
-                            Log.d(TAG, "[START_ALL]   ... 等待队列中共有 " + mWaitList.size() + " 个任务");
-                        }
-                    }
+                
+                // Step 4: 设置所有未完成任务进入等待状态，按排序后的顺序入队
+                int enqueuedCount = 0;
+                for (int i = 0; i < unfinishedList.size(); i++) {
+                    DownloadInfo info = unfinishedList.get(i);
+                    String title = EhUtils.getSuitableTitle(info);
                     
                     if (listener != null) {
-                        // 重新计算实际处理的数量
-                        int actualProcessedCount = 0;
-                        for (DownloadInfo info : allInfoList) {
-                            if (info.state == DownloadInfo.STATE_WAIT) {
-                                actualProcessedCount++;
+                        final int currentAll = i + 1;
+                        final String finalTitle = title;
+                        SimpleHandler.getInstance().post(() -> 
+                            listener.onProgress(currentAll, totalCount, finalTitle));
+                    }
+                    
+                    // 跳过已在等待/下载中的任务
+                    if (info.state == DownloadInfo.STATE_WAIT || info.state == DownloadInfo.STATE_DOWNLOAD) {
+                        Log.d(TAG, "[START_ALL] 任务已在队列中，跳过: " + title);
+                        continue;
+                    }
+                    
+                    // 检查增量更新（本地复制队列）
+                    if (incrementalUpdateEnabled && isLocalGalleryAvailable(info.gid)) {
+                        Log.i(TAG, "[START_ALL] 本地库命中，加入复制队列: " + title + " (GID: " + info.gid + ")");
+                        info.incremental = true;
+                        DownloadedFileManager.GalleryFileCheckResult checkResult = 
+                                DownloadedFileManager.getInstance().checkGalleryFilesExist(info.gid);
+                        if (checkResult != null) {
+                            info.copyCount = checkResult.validFiles;
+                            info.networkCount = 0;
+                            info.total = checkResult.totalFiles;
+                            info.finished = checkResult.validFiles;
+                            info.downloaded = checkResult.validFiles;
+                            info.legacy = info.total - info.finished;
+                        }
+                        info.state = DownloadInfo.STATE_WAIT;
+                        EhDB.putDownloadInfo(info);
+                        enqueueCopyInfo(info);
+                        enqueuedCount++;
+                        continue;
+                    }
+                    
+                    info.incremental = false;
+                    
+                    // 检查"被移除视为已完成"
+                    if (info.total <= 0 && isGalleryRemoved(info)) {
+                        info.state = DownloadInfo.STATE_FINISH;
+                        EhDB.putDownloadInfo(info);
+                        Log.i(TAG, "[START_ALL] 画廊已被移除，标记为已完成: " + title);
+                        List<DownloadInfo> labelList = getInfoListForLabel(info.label);
+                        if (labelList != null) {
+                            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                                l.onUpdate(info, labelList, mWaitList);
                             }
                         }
-                        listener.onComplete(actualProcessedCount);
+                        continue;
+                    }
+                    
+                    // 正常进入等待队列，按排序顺序添加
+                    info.state = DownloadInfo.STATE_WAIT;
+                    synchronized (waitList) {
+                        waitList.addLast(info);
+                    }
+                    EhDB.putDownloadInfo(info);
+                    enqueuedCount++;
+                    
+                    Log.d(TAG, "[START_ALL] [" + (i+1) + "/" + totalCount + "] 已加入等待队列: " + title +
+                              " (GID: " + info.gid + ", 页数: " + info.total + ")");
+                }
+                
+                final int finalEnqueued = enqueuedCount;
+                final int finalTotal = totalCount;
+                SimpleHandler.getInstance().post(() -> {
+                    // Notify Listener
+                    for (DownloadInfoListener l : mDownloadInfoListeners) {
+                        l.onUpdateAll();
+                    }
+                    
+                    // Step 5 & 6: 开始队列第一个，按正常队列顺序下载
+                    requestEnsureDownload();
+                    
+                    // 记录等待队列最终状态
+                    Log.d(TAG, "[START_ALL] 批量启动完成，入队: " + finalEnqueued + "/" + finalTotal +
+                              ", 等待队列: " + mWaitList.size() + " 个任务");
+                    
+                    if (listener != null) {
+                        listener.onComplete(finalEnqueued);
                     }
                 });
                 
@@ -1285,6 +1326,12 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         DownloadInfo info = new DownloadInfo(galleryInfo);
         info.label = label;
         info.time = System.currentTimeMillis();
+
+        // 页面数量继承：从画廊详情/列表继承页面数量
+        if (Settings.getDownloadInheritPages() && galleryInfo.pages > 0) {
+            info.total = galleryInfo.pages;
+            Log.d(TAG, "[DOWNLOAD] 继承页面数量: " + galleryInfo.pages + " -> " + galleryTitle);
+        }
 
         // 判断增量下载（本地存在则进入复制队列）
         if (Settings.getIncrementalDownloadUpdate() && isLocalGalleryAvailable(galleryInfo.gid)) {
@@ -2564,6 +2611,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 return "少图优先";
             case Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST:
                 return "多图优先";
+            case Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY:
+                return "按类型优先级";
             default:
                 return "未知";
         }
@@ -2825,174 +2874,168 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     /**
-     * 处理下载列表的通用方法（支持正序和倒序）
-     * @param allInfoList 所有下载信息列表
-     * @param waitList 等待列表
-     * @param forwardOrder 是否为正序（true=正序，false=倒序）
-     * @param incrementalUpdateEnabled 是否启用增量更新
-     * @param listener 监听器
-     * @param totalCount 总数量
-     * @param eligibleCount 符合条件的数量
-     * @param logPrefix 日志前缀
-     * @return 是否有更新
-     */
-    private boolean processDownloadListInOrder(LinkedList<DownloadInfo> allInfoList, 
-            LinkedList<DownloadInfo> waitList, boolean forwardOrder, 
-            boolean incrementalUpdateEnabled, StartAllDownloadListener listener,
-            int totalCount, int eligibleCount, String logPrefix) {
-        
-        boolean update = false;
-        int allProcessedCount = 0; // 用于跟踪所有扫描项目的进度
-        int processedCount = 0; // 符合条件的处理数量
-        String orderText = forwardOrder ? "正序" : "倒序";
-        
-        if (forwardOrder) {
-            // 正序：从前往后处理
-            for (DownloadInfo info : allInfoList) {
-                if (info.state != DownloadInfo.STATE_FINISH) {
-                    allProcessedCount++;
-                }
-                final int currentAll = allProcessedCount;
-                final int totalAll = totalCount;
-                
-                if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
-                    processedCount++;
-                    final int current = processedCount;
-                    
-                    if (processSingleDownloadItem(info, waitList, incrementalUpdateEnabled, listener, 
-                            current, eligibleCount, currentAll, totalAll, logPrefix + orderText, true)) {
-                        update = true;
-                    }
-                } else if (info.state != DownloadInfo.STATE_FINISH && listener != null) {
-                    final String title = EhUtils.getSuitableTitle(info);
-                    SimpleHandler.getInstance().post(() -> listener.onProgress(currentAll, totalAll, title));
-                }
-            }
-        } else {
-            // 倒序：从后往前处理
-            for (int i = allInfoList.size() - 1; i >= 0; i--) {
-                DownloadInfo info = allInfoList.get(i);
-                if (info.state != DownloadInfo.STATE_FINISH) {
-                    allProcessedCount++;
-                }
-                final int currentAll = allProcessedCount;
-                final int totalAll = totalCount;
-                
-                if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
-                    processedCount++;
-                    final int current = processedCount;
-                    
-                    if (processSingleDownloadItem(info, waitList, incrementalUpdateEnabled, listener, 
-                            current, eligibleCount, currentAll, totalAll, logPrefix + orderText, false)) {
-                        update = true;
-                    }
-                } else if (info.state != DownloadInfo.STATE_FINISH && listener != null) {
-                    final String title = EhUtils.getSuitableTitle(info);
-                    SimpleHandler.getInstance().post(() -> listener.onProgress(currentAll, totalAll, title));
-                }
-            }
-        }
-        
-        return update;
-    }
-
-    /**
-     * 处理单个下载项的完整逻辑
-     * @param info 下载信息
-     * @param waitList 等待列表
-     * @param incrementalUpdateEnabled 是否启用增量更新
-     * @param listener 监听器
-     * @param current 当前处理数量
-     * @param eligibleCount 符合条件的数量
-     * @param currentAll 当前扫描总数
-     * @param totalAll 总扫描数量
-     * @param logPrefix 日志前缀
-     * @param addToLast 是否添加到列表末尾（true=末尾，false=开头）
-     * @return 是否处理成功
-     */
-    private boolean processSingleDownloadItem(DownloadInfo info, LinkedList<DownloadInfo> waitList,
-            boolean incrementalUpdateEnabled, StartAllDownloadListener listener,
-            int current, int eligibleCount, int currentAll, int totalAll, 
-            String logPrefix, boolean addToLast) {
-        
-        String galleryTitle = EhUtils.getSuitableTitle(info);
-        Log.d(TAG, "[START_ALL] [" + current + "/" + eligibleCount + "] " + logPrefix + "处理: " + galleryTitle + 
-                  " (GID: " + info.gid + ", 页数: " + info.total + ")");
-        
-        final String finalGalleryTitle = galleryTitle;
-        if (listener != null) {
-            SimpleHandler.getInstance().post(() -> 
-                listener.onProgress(currentAll, totalAll, finalGalleryTitle));
-        }
-        
-        // 检查是否需要增量更新（本地记录）
-        if (incrementalUpdateEnabled && isLocalGalleryAvailable(info.gid)) {
-            Log.i(TAG, logPrefix + " 本地库命中，加入复制队列: " + galleryTitle + " (GID: " + info.gid + ")");
-            info.incremental = true;
-
-            DownloadedFileManager.GalleryFileCheckResult checkResult = DownloadedFileManager.getInstance().checkGalleryFilesExist(info.gid);
-            if (checkResult != null) {
-                info.copyCount = checkResult.validFiles;
-                info.networkCount = 0;
-                info.total = checkResult.totalFiles;
-                info.finished = checkResult.validFiles;
-                info.downloaded = checkResult.validFiles;
-                info.legacy = info.total - info.finished;
-            }
-
-            info.state = DownloadInfo.STATE_WAIT;
-            EhDB.putDownloadInfo(info);
-            enqueueCopyInfo(info);
-            return true;
-        }
-
-        info.incremental = false;
-        info.state = DownloadInfo.STATE_WAIT;
-        synchronized (waitList) {
-            if (addToLast) {
-                waitList.addLast(info); // 正序时添加到末尾，保持顺序
-            } else {
-                waitList.addFirst(info); // 倒序时添加到开头，实现倒序效果
-            }
-        }
-        EhDB.putDownloadInfo(info);
-        
-        Log.d(TAG, "[START_ALL] [" + current + "/" + eligibleCount + "] 已添加到等待队列: " + galleryTitle + 
-                  " (扫描进度: " + currentAll + "/" + totalAll + ")");
-        
-        return true;
-    }
-
-    /**
-     * 根据设置对下载列表进行排序
+     * 根据设置对下载列表进行排序。
+     * 当启用高级下载排序时，只影响未完成（state != STATE_FINISH）的画廊。
      */
     private void sortDownloadList(List<DownloadInfo> list, int order) {
         if (list == null || list.isEmpty()) {
             return;
         }
-        
+
+        boolean advancedSort = Settings.getAdvancedDownloadSortEnabled();
+
         switch (order) {
             case Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST:
                 // 少图画廊优先（按总页数排序）
-                Collections.sort(list, (o1, o2) -> {
-                    int pages1 = Math.max(o1.total, 0);
-                    int pages2 = Math.max(o2.total, 0);
-                    return Integer.compare(pages1, pages2);
-                });
+                if (advancedSort) {
+                    sortUnfinishedOnly(list, (o1, o2) -> {
+                        int pages1 = Math.max(o1.total, 0);
+                        int pages2 = Math.max(o2.total, 0);
+                        return Integer.compare(pages1, pages2);
+                    });
+                } else {
+                    Collections.sort(list, (o1, o2) -> {
+                        int pages1 = Math.max(o1.total, 0);
+                        int pages2 = Math.max(o2.total, 0);
+                        return Integer.compare(pages1, pages2);
+                    });
+                }
                 break;
             case Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST:
                 // 多图画廊优先（按总页数排序）
-                Collections.sort(list, (o1, o2) -> {
-                    int pages1 = Math.max(o1.total, 0);
-                    int pages2 = Math.max(o2.total, 0);
-                    return Integer.compare(pages2, pages1);
-                });
+                if (advancedSort) {
+                    sortUnfinishedOnly(list, (o1, o2) -> {
+                        int pages1 = Math.max(o1.total, 0);
+                        int pages2 = Math.max(o2.total, 0);
+                        return Integer.compare(pages2, pages1);
+                    });
+                } else {
+                    Collections.sort(list, (o1, o2) -> {
+                        int pages1 = Math.max(o1.total, 0);
+                        int pages2 = Math.max(o2.total, 0);
+                        return Integer.compare(pages2, pages1);
+                    });
+                }
+                break;
+            case Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY:
+                // 按画廊类型优先级排序
+                sortByCategoryPriority(list);
                 break;
             case Settings.DOWNLOAD_QUEUE_ORDER_DEFAULT:
             default:
                 // 默认按添加顺序，不需要排序
                 break;
         }
+    }
+
+    /**
+     * 只对未完成的项进行排序，保持已完成项在原位。
+     */
+    private void sortUnfinishedOnly(List<DownloadInfo> list, Comparator<DownloadInfo> comparator) {
+        // 分离未完成和已完成项
+        List<DownloadInfo> unfinished = new ArrayList<>();
+        List<DownloadInfo> finished = new ArrayList<>();
+        for (DownloadInfo info : list) {
+            if (info.state != DownloadInfo.STATE_FINISH) {
+                unfinished.add(info);
+            } else {
+                finished.add(info);
+            }
+        }
+        // 只对未完成排序
+        Collections.sort(unfinished, comparator);
+        // 重建列表：已完成在前，未完成（已排序）在后
+        list.clear();
+        list.addAll(finished);
+        list.addAll(unfinished);
+    }
+
+    /**
+     * 按画廊类型优先级排序：读取用户配置的类别顺序，按优先级分组。
+     * 同组内按默认顺序排序。已完成项保持在前面。
+     */
+    private void sortByCategoryPriority(List<DownloadInfo> list) {
+        String priorityStr = Settings.getDownloadCategoryPriorityOrder();
+        if (priorityStr == null || priorityStr.isEmpty()) {
+            Log.d(TAG, "[SORT] 类别优先级未配置，保持默认顺序");
+            return;
+        }
+
+        // 解析优先级顺序
+        String[] parts = priorityStr.split(",");
+        final List<Integer> priorityOrder = new ArrayList<>();
+        for (String part : parts) {
+            try {
+                priorityOrder.add(Integer.parseInt(part.trim()));
+            } catch (NumberFormatException ignored) {
+            }
+        }
+
+        if (priorityOrder.isEmpty()) {
+            return;
+        }
+
+        Log.d(TAG, "[SORT] 按类别优先级排序，优先级顺序: " + priorityStr);
+
+        // 分离已完成和未完成
+        List<DownloadInfo> unfinished = new ArrayList<>();
+        List<DownloadInfo> finished = new ArrayList<>();
+        for (DownloadInfo info : list) {
+            if (info.state != DownloadInfo.STATE_FINISH) {
+                unfinished.add(info);
+            } else {
+                finished.add(info);
+            }
+        }
+
+        // 对未完成按类别优先级排序
+        Collections.sort(unfinished, (o1, o2) -> {
+            int idx1 = priorityOrder.indexOf(o1.category);
+            int idx2 = priorityOrder.indexOf(o2.category);
+            if (idx1 == -1) idx1 = Integer.MAX_VALUE;
+            if (idx2 == -1) idx2 = Integer.MAX_VALUE;
+            return Integer.compare(idx1, idx2);
+        });
+
+        // 重建列表
+        list.clear();
+        list.addAll(finished);
+        list.addAll(unfinished);
+
+        Log.d(TAG, "[SORT] 类别优先级排序完成，未完成项: " + unfinished.size());
+    }
+
+    /**
+     * 在排序前预取所有 total==0 的项的页面数量，确保排序准确。
+     * @param list 待排序的下载列表
+     * @return 成功获取页数的项数量
+     */
+    private int prefetchPagesBeforeSort(List<DownloadInfo> list) {
+        int concurrency = Settings.getDownloadPrefetchPagesConcurrency();
+        Log.i(TAG, "[PREFETCH] 开始预取页数，列表大小: " + list.size() + ", 并发: " + concurrency);
+        return GalleryPageFetcher.fetchPagesBatch(mContext, list, concurrency);
+    }
+
+    /**
+     * 检查画廊是否已被源站移除。
+     * 仅在 total==0 且启用了"被移除视为已完成"时调用。
+     * @return true 如果画廊已被移除
+     */
+    private boolean isGalleryRemoved(DownloadInfo info) {
+        if (!Settings.getDownloadTreatRemovedAsComplete()) {
+            return false;
+        }
+        try {
+            int pages = GalleryPageFetcher.fetchPages(mContext, info);
+            // -2 表示画廊已被移除
+            if (pages == -2) {
+                Log.i(TAG, "[REMOVED] 画廊已被源站移除: " + EhUtils.getSuitableTitle(info) + " (GID: " + info.gid + ")");
+                return true;
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "[REMOVED] 检测画廊是否被移除时出错: " + info.gid, e);
+        }
+        return false;
     }
 
     /**
