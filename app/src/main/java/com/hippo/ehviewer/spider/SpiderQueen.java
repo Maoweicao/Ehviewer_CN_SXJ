@@ -989,15 +989,17 @@ public final class SpiderQueen implements Runnable {
     }
 
     private synchronized void writeSpiderInfoToLocal(@NonNull SpiderInfo spiderInfo) {
-        // Write to download dir
-        UniFile downloadDir = mSpiderDen.getDownloadDir();
-        if (downloadDir != null) {
-            UniFile file = downloadDir.createFile(SPIDER_INFO_FILENAME);
-            try {
-                spiderInfo.write(file.openOutputStream());
-            } catch (Throwable e) {
-                ExceptionUtils.throwIfFatal(e);
-                // Ignore
+        // Only download mode or sync-while-reading is allowed to write into download dir.
+        if (mSpiderDen.shouldWriteToDownloadDir()) {
+            UniFile downloadDir = mSpiderDen.getDownloadDir();
+            if (downloadDir != null) {
+                UniFile file = downloadDir.createFile(SPIDER_INFO_FILENAME);
+                try {
+                    spiderInfo.write(file.openOutputStream());
+                } catch (Throwable e) {
+                    ExceptionUtils.throwIfFatal(e);
+                    // Ignore
+                }
             }
         }
 

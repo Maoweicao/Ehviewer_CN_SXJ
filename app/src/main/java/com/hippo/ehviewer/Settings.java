@@ -1100,50 +1100,15 @@ public class Settings {
         return getBoolean(KEY_MEDIA_SCAN, DEFAULT_MEDIA_SCAN);
     }
 
-    public static boolean getLocalGalleryScanOnStart() {
-        return getBoolean(KEY_LOCAL_GALLERY_SCAN_ON_START, DEFAULT_LOCAL_GALLERY_SCAN_ON_START);
+    public static final String KEY_SYNC_DOWNLOAD_WHILE_READING = "sync_download_while_reading";
+    private static final boolean DEFAULT_SYNC_DOWNLOAD_WHILE_READING = false;
+
+    public static boolean getSyncDownloadWhileReading() {
+        return getBoolean(KEY_SYNC_DOWNLOAD_WHILE_READING, DEFAULT_SYNC_DOWNLOAD_WHILE_READING);
     }
 
-    public static void putLocalGalleryScanOnStart(boolean value) {
-        putBoolean(KEY_LOCAL_GALLERY_SCAN_ON_START, value);
-    }
-
-    public static boolean getLocalGalleryScanCacheEnabled() {
-        return getBoolean(KEY_LOCAL_GALLERY_SCAN_CACHE_ENABLED, DEFAULT_LOCAL_GALLERY_SCAN_CACHE_ENABLED);
-    }
-
-    public static void putLocalGalleryScanCacheEnabled(boolean value) {
-        putBoolean(KEY_LOCAL_GALLERY_SCAN_CACHE_ENABLED, value);
-    }
-
-    public static int getLocalGalleryCacheExpireDays() {
-        return getIntFromStr(KEY_LOCAL_GALLERY_CACHE_EXPIRE_DAYS, DEFAULT_LOCAL_GALLERY_CACHE_EXPIRE_DAYS);
-    }
-
-    public static void putLocalGalleryCacheExpireDays(int value) {
-        putIntToStr(KEY_LOCAL_GALLERY_CACHE_EXPIRE_DAYS, value);
-    }
-
-    public static final String KEY_ENABLE_MIN_DOWNLOAD_SPEED = "enable_min_download_speed";
-    private static final boolean DEFAULT_ENABLE_MIN_DOWNLOAD_SPEED = false;
-
-    public static boolean getEnableMinDownloadSpeed() {
-        return getBoolean(KEY_ENABLE_MIN_DOWNLOAD_SPEED, DEFAULT_ENABLE_MIN_DOWNLOAD_SPEED);
-    }
-
-    public static void putEnableMinDownloadSpeed(boolean value) {
-        putBoolean(KEY_ENABLE_MIN_DOWNLOAD_SPEED, value);
-    }
-
-    public static final String KEY_MIN_DOWNLOAD_SPEED = "min_download_speed";
-    private static final int DEFAULT_MIN_DOWNLOAD_SPEED = 64; // 64 KB/s
-
-    public static int getMinDownloadSpeed() {
-        return getInt(KEY_MIN_DOWNLOAD_SPEED, DEFAULT_MIN_DOWNLOAD_SPEED);
-    }
-
-    public static void putMinDownloadSpeed(int value) {
-        putInt(KEY_MIN_DOWNLOAD_SPEED, value);
+    public static void putSyncDownloadWhileReading(boolean value) {
+        putBoolean(KEY_SYNC_DOWNLOAD_WHILE_READING, value);
     }
 
     private static final String KEY_RECENT_DOWNLOAD_LABEL = "recent_download_label";

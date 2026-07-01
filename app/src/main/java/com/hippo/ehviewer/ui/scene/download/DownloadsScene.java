@@ -16,6 +16,7 @@
 
 package com.hippo.ehviewer.ui.scene.download;
 
+import static com.hippo.ehviewer.spider.SpiderDen.getExistingGalleryDownloadDir;
 import static com.hippo.ehviewer.spider.SpiderDen.getGalleryDownloadDir;
 import static com.hippo.ehviewer.spider.SpiderInfo.getSpiderInfo;
 import static com.hippo.ehviewer.ui.scene.download.part.DownloadAdapter.DRAG_ENABLE;
@@ -189,6 +190,7 @@ import org.greenrobot.eventbus.ThreadMode;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -2061,6 +2063,22 @@ public class DownloadsScene extends ToolbarScene
         com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
     }
 
+    private static void deleteGalleryFilesAsync(List<? extends GalleryInfo> galleryInfoList) {
+        new AsyncTask<List<? extends GalleryInfo>, Void, Void>() {
+            @Override
+            protected Void doInBackground(List<? extends GalleryInfo>... params) {
+                for (GalleryInfo info : params[0]) {
+                    UniFile file = getGalleryDownloadDir(info);
+                    EhDB.removeDownloadDirname(info.gid);
+                    if (file != null) {
+                        file.delete();
+                    }
+                }
+                return null;
+            }
+        }.executeOnExecutor(IoThreadPoolExecutor.Companion.getInstance(), galleryInfoList);
+    }
+
     @Override
     public void onClickTitle() {
         if (!mSearchMode) {
@@ -2585,8 +2603,18 @@ public class DownloadsScene extends ToolbarScene
                 mDownloadManager.deleteDownload(mGalleryInfo.gid);
             }
 
-            // When user selects delete, downloads are already moved to recycle bin by DownloadManager
-            // 'remove image files' setting means the user wants to quickly inline clear later.
+            // Delete image files
+            boolean checked = mBuilder.isChecked();
+            Settings.putRemoveImageFiles(checked);
+            if (checked) {
+                UniFile file = getExistingGalleryDownloadDir(mGalleryInfo);
+                EhDB.removeDownloadDirname(mGalleryInfo.gid);
+                if (file != null) {
+                    deleteFileAsync(file);
+                } else {
+                    deleteGalleryFilesAsync(Collections.singletonList(mGalleryInfo));
+                }
+            }
         }
     }
 
@@ -2632,16 +2660,8 @@ public class DownloadsScene extends ToolbarScene
             // 图片文件删除选项
             boolean checked = mBuilder.isChecked();
             Settings.putRemoveImageFiles(checked);
-
-            // 少量删除直接原逻辑（避免开新线程开销�?
-            if (mDownloadInfoList.size() <= 5) {
-                if (mDownloadManager != null) {
-                    mDownloadManager.deleteRangeDownload(mGidList);
-                }
-                if (checked) {
-                    // item moved to recycle bin already; we keep permanent delete to user action in recycle bin UI
-                }
-                return;
+            if (checked) {
+                deleteGalleryFilesAsync(mDownloadInfoList);
             }
 
             // 多个项目删档用后台任�?

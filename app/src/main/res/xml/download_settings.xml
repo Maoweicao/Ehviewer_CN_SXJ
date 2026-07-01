@@ -151,14 +151,12 @@
         android:summary="@string/settings_download_download_order_by_asc_summary"
         android:title="@string/settings_download_download_order_by_asc" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="download_queue_order"
-        android:summary="@string/settings_download_download_queue_order_summary"
-        android:title="@string/settings_download_download_queue_order"
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="sync_download_while_reading"
+        android:summary="@string/settings_download_sync_while_reading_summary"
+        android:title="@string/settings_download_sync_while_reading"
         app:allowDividerAbove="true"
-        app:entries="@array/download_queue_order_entries"
-        app:entryValues="@array/download_queue_order_entry_values"
         app:iconSpaceReserved="false" />
 
     <com.hippo.ehviewer.preference.RestoreDownloadPreference

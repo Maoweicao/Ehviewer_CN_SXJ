@@ -9,6 +9,8 @@ import static com.hippo.ehviewer.client.wifi.ConnectThread.DEVICE_DISCONNECTED;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.DOWNLOAD_INFO_DATA_KEY;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.DOWNLOAD_LABEL_KEY;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.FAVORITE_INFO_DATA_KEY;
+import static com.hippo.ehviewer.client.wifi.ConnectThread.GET_DIR_MANIFEST;
+import static com.hippo.ehviewer.client.wifi.ConnectThread.GET_FILE_CHUNK;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.GET_MSG;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.IS_CLIENT;
 import static com.hippo.ehviewer.client.wifi.ConnectThread.QUICK_SEARCH_DATA_KEY;
@@ -32,7 +34,9 @@ import android.util.Log;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
@@ -47,11 +51,11 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.data.wifi.WiFiDataHand;
 import com.hippo.ehviewer.client.wifi.ConnectThread;
 import com.hippo.ehviewer.client.wifi.ListenerThread;
+import com.hippo.ehviewer.client.wifi.WiFiDownloadMigrationHelper;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.download.DownloadManager;
-import com.hippo.ehviewer.ui.EhActivity;
-import com.hippo.util.ExecutorManager;
+import com.hippo.unifile.UniFile;
 import com.hippo.util.PermissionRequester;
 
 import org.greenrobot.eventbus.EventBus;
@@ -61,7 +65,11 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.net.Socket;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class WiFiClientActivity extends EhActivity {
 
@@ -69,24 +77,10 @@ public class WiFiClientActivity extends EhActivity {
 
     private TextView textState;
     private TextView receiveMessage;
-    private EditText ipAddressInput;
-    /**
-     * 连接线程
-     */
     private ConnectThread connectThread;
 
-    /**
-     * 监听线程
-     */
     private ListenerThread listenerThread;
 
-    /**
-     * 热点名称
-     */
-    private static final String WIFI_HOTSPOT_SSID = "TEST";
-    /**
-     * 端口号
-     */
     private static final int PORT = 54321;
     private WifiManager wifiManager;
 
@@ -94,18 +88,26 @@ public class WiFiClientActivity extends EhActivity {
 
     private WiFiClientHandler handler;
 
+    private final WiFiDownloadMigrationHelper.FileWriteState fileWriteState =
+            new WiFiDownloadMigrationHelper.FileWriteState();
+
+    private final Map<String, UniFile> galleryDirCache = new HashMap<>();
+
+    private final Map<Long, String> dirnameByGid = new HashMap<>();
+
+    private final ExecutorService migrationExecutor = Executors.newSingleThreadExecutor();
+
+    private int dirFilesCompleted;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_wifi_client);
-//        findViewById(R.id.send).setOnClickListener(this::send);
-        findViewById(R.id.connect_server).setOnClickListener(this::connectAuto);
-        findViewById(R.id.connect_custom_ip).setOnClickListener(this::connectCustomIP);
+        findViewById(R.id.connect_server).setOnClickListener(this::connect);
         wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
 
         boolean result = PermissionRequester.request(this, Manifest.permission.CHANGE_WIFI_STATE,
                 getString(R.string.wifi_server_no_permission),pCode);
-        //检查Wifi状态
         if (result && !wifiManager.isWifiEnabled())
             wifiManager.setWifiEnabled(true);
         textState = findViewById(R.id.status_info);
@@ -119,8 +121,6 @@ public class WiFiClientActivity extends EhActivity {
         if (handler == null) {
             handler = new WiFiClientHandler(getMainLooper());
         }
-        //        initBroadcastReceiver();
-        //        开启连接线程
         connectSocket();
         listenerThread = new ListenerThread(PORT, handler);
         listenerThread.start();
@@ -150,6 +150,7 @@ public class WiFiClientActivity extends EhActivity {
             try {
                 Socket socket = new Socket(targetIP, PORT);
                 connectThread = new ConnectThread(getApplicationContext(), socket, handler, IS_CLIENT);
+                connectThread.setFileChunkReceiver(this::applyFileChunk);
                 connectThread.start();
             } catch (IOException e) {
                 e.printStackTrace();
@@ -168,62 +169,14 @@ public class WiFiClientActivity extends EhActivity {
     private void connectAuto(View view) {
         String text = getString(R.string.wifi_connected_info, wifiManager.getConnectionInfo().getSSID(), getIp(), getWifiRouteIPAddress(this));
         statusInit.setText(text);
-        connectSocket();
     }
 
-    private void connectCustomIP(View view) {
-        String customIP = ipAddressInput.getText().toString().trim();
-        if (customIP.isEmpty()) {
-            textState.setText(getString(R.string.wifi_please_enter_ip));
-            return;
-        }
-        
-        // 简单的IP地址格式验证
-        if (!isValidIP(customIP)) {
-            textState.setText(getString(R.string.wifi_invalid_ip_format));
-            return;
-        }
-        
-        String text = getString(R.string.wifi_connecting_to_custom_ip, customIP, getIp());
-        statusInit.setText(text);
-        connectSocketWithIP(customIP);
-    }
-
-    private boolean isValidIP(String ip) {
-        if (ip == null || ip.isEmpty()) {
-            return false;
-        }
-        String[] parts = ip.split("\\.");
-        if (parts.length != 4) {
-            return false;
-        }
-        try {
-            for (String part : parts) {
-                int num = Integer.parseInt(part);
-                if (num < 0 || num > 255) {
-                    return false;
-                }
-            }
-        } catch (NumberFormatException e) {
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 获取已连接的热点路由
-     *
-     * @return
-     */
     private String getIp() {
        try {
-           //检查Wifi状态
            if (!wifiManager.isWifiEnabled())
                wifiManager.setWifiEnabled(true);
            WifiInfo wi = wifiManager.getConnectionInfo();
-           //获取32位整型IP地址
            int ipAdd = wi.getIpAddress();
-           //把整型地址转换成“*.*.*.*”地址
            return intToIp(ipAdd);
        }catch (SecurityException e){
            return "";
@@ -237,31 +190,15 @@ public class WiFiClientActivity extends EhActivity {
                 (i >> 24 & 0xFF);
     }
 
-    /**
-     * wifi获取 已连接网络路由  路由ip地址---方法同上
-     *
-     * @param context
-     * @return
-     */
     private static String getWifiRouteIPAddress(Context context) {
         WifiManager wifi_service = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         DhcpInfo dhcpInfo = wifi_service.getDhcpInfo();
-        //        WifiInfo wifiinfo = wifi_service.getConnectionInfo();
-        //        System.out.println("Wifi info----->" + wifiinfo.getIpAddress());
-        //        System.out.println("DHCP info gateway----->" + Formatter.formatIpAddress(dhcpInfo.gateway));
-        //        System.out.println("DHCP info netmask----->" + Formatter.formatIpAddress(dhcpInfo.netmask));
-        //DhcpInfo中的ipAddress是一个int型的变量，通过Formatter将其转化为字符串IP地址
         String routeIp = Formatter.formatIpAddress(dhcpInfo.gateway);
         Log.i("route ip", "wifi route ip：" + routeIp);
 
         return routeIp;
     }
 
-    /**
-     * 获取连接到热点上的手机ip
-     *
-     * @return
-     */
     private ArrayList<String> getConnectedIP() {
         ArrayList<String> connectedIP = new ArrayList<String>();
         try {
@@ -278,16 +215,17 @@ public class WiFiClientActivity extends EhActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        //        Log.i("connectIp:", connectedIP);
         return connectedIP;
     }
 
     @Override
     protected void onDestroy() {
-        if (connectThread!=null){
+        if (connectThread != null) {
+            connectThread.setFileChunkReceiver(null);
             connectThread.closeConnect();
             connectThread = null;
         }
+        migrationExecutor.shutdownNow();
         if (listenerThread!=null){
             listenerThread.closeConnect();
             listenerThread = null;
@@ -295,7 +233,12 @@ public class WiFiClientActivity extends EhActivity {
         super.onDestroy();
     }
 
-    private void onReceiveMsg(WiFiDataHand response) {
+    @NonNull
+    private static String dirKey(long gid, @NonNull String dirname) {
+        return gid + ":" + dirname;
+    }
+
+    private void onReceiveMsg(@NonNull WiFiDataHand response) {
         switch (response.dataType){
             case DATA_TYPE_QUICK_SEARCH:
                 dealWithQuickSearch(response);
@@ -315,6 +258,106 @@ public class WiFiClientActivity extends EhActivity {
                 break;
         }
 
+    }
+
+    private void dealWithDownloadDirManifest(@NonNull WiFiDownloadMigrationHelper.DirManifest manifest) {
+        migrationExecutor.execute(() -> processDownloadDirManifest(manifest));
+    }
+
+    private void processDownloadDirManifest(
+            @NonNull WiFiDownloadMigrationHelper.DirManifest manifest) {
+        if (WiFiDownloadMigrationHelper.getDownloadRoot() == null) {
+            runOnUiThread(() -> Toast.makeText(this,
+                    R.string.wifi_download_dir_no_location, Toast.LENGTH_LONG).show());
+            if (connectThread != null) {
+                connectThread.sendDirAck(manifest.gid, manifest.dirname, new ArrayList<>());
+            }
+            return;
+        }
+        UniFile galleryDir = WiFiDownloadMigrationHelper.ensureGalleryDir(
+                manifest.gid, manifest.dirname);
+        if (galleryDir == null) {
+            if (connectThread != null) {
+                connectThread.sendDirAck(manifest.gid, manifest.dirname, new ArrayList<>());
+            }
+            return;
+        }
+        dirnameByGid.put(manifest.gid, manifest.dirname);
+        galleryDirCache.put(dirKey(manifest.gid, manifest.dirname), galleryDir);
+        if (manifest.pageIndex == 1) {
+            dirFilesCompleted = 0;
+        }
+        List<String> needed = WiFiDownloadMigrationHelper.filterFilesNeeded(
+                galleryDir, manifest.files);
+        if (connectThread != null) {
+            connectThread.sendDirAck(manifest.gid, manifest.dirname, needed);
+        }
+        String progress = getString(R.string.wifi_download_dir_manifest_received,
+                manifest.dirname, manifest.pageIndex, manifest.pageSize,
+                manifest.files.size() - needed.size(), needed.size());
+        updateReceiveMessage(progress);
+    }
+
+    /**
+     * 在 ConnectThread 读取线程同步调用：写盘完成后再读下一帧，限制同时在内存中的分块数量。
+     */
+    private void applyFileChunk(@NonNull WiFiDownloadMigrationHelper.FileChunk chunk) {
+        String dirname = dirnameByGid.get(chunk.gid);
+        if (dirname == null) {
+            return;
+        }
+        String key = dirKey(chunk.gid, dirname);
+        UniFile galleryDir = galleryDirCache.get(key);
+        if (galleryDir == null) {
+            galleryDir = WiFiDownloadMigrationHelper.ensureGalleryDir(chunk.gid, dirname);
+            if (galleryDir == null) {
+                return;
+            }
+            galleryDirCache.put(key, galleryDir);
+        }
+        String fileKey = key + "/" + chunk.name;
+        try {
+            long offset = fileWriteState.getOffset(fileKey);
+            if (chunk.chunkIndex == 0) {
+                offset = 0;
+                fileWriteState.clear(fileKey);
+                UniFile existing = WiFiDownloadMigrationHelper.resolveFileInGallery(
+                        galleryDir, chunk.name);
+                if (existing != null && existing.isFile()) {
+                    existing.delete();
+                }
+            }
+            if (chunk.data.length > 0) {
+                WiFiDownloadMigrationHelper.writeChunk(
+                        galleryDir, chunk.name, chunk.data, offset);
+                fileWriteState.addWritten(fileKey, chunk.data.length);
+            }
+            if (chunk.lastChunk) {
+                UniFile file = WiFiDownloadMigrationHelper.resolveFileInGallery(
+                        galleryDir, chunk.name);
+                if (file != null && file.isFile()) {
+                    if (!WiFiDownloadMigrationHelper.verifyFileMd5(file, chunk.fileMd5)) {
+                        file.delete();
+                        Analytics.recordException(new IOException(
+                                "MD5 mismatch: " + chunk.name));
+                        runOnUiThread(() -> Toast.makeText(this,
+                                R.string.wifi_download_dir_file_failed, Toast.LENGTH_SHORT).show());
+                    }
+                }
+                fileWriteState.clear(fileKey);
+                dirFilesCompleted++;
+                if (dirFilesCompleted % 10 == 0) {
+                    final int count = dirFilesCompleted;
+                    updateReceiveMessage(getString(R.string.wifi_download_dir_files_progress, count));
+                }
+            }
+        } catch (IOException e) {
+            Analytics.recordException(e);
+        }
+    }
+
+    private void dealWithDownloadDirFileChunk(@NonNull WiFiDownloadMigrationHelper.FileChunk chunk) {
+        applyFileChunk(chunk);
     }
 
     private void dealWithFavoriteInfo(WiFiDataHand response) {
@@ -401,7 +444,23 @@ public class WiFiClientActivity extends EhActivity {
                     textState.setText(getString(R.string.wifi_server_send_fail, msg.getData().getString("MSG")));
                     break;
                 case GET_MSG:
-                    onReceiveMsg(new WiFiDataHand(msg.getData().getString("MSG")));
+                    if (msg.obj instanceof WiFiDataHand) {
+                        onReceiveMsg((WiFiDataHand) msg.obj);
+                    } else if (msg.getData() != null) {
+                        onReceiveMsg(new WiFiDataHand(msg.getData().getString("MSG")));
+                    }
+                    break;
+                case GET_DIR_MANIFEST:
+                    if (msg.obj instanceof WiFiDownloadMigrationHelper.DirManifest) {
+                        dealWithDownloadDirManifest(
+                                (WiFiDownloadMigrationHelper.DirManifest) msg.obj);
+                    }
+                    break;
+                case GET_FILE_CHUNK:
+                    if (msg.obj instanceof WiFiDownloadMigrationHelper.FileChunk) {
+                        dealWithDownloadDirFileChunk(
+                                (WiFiDownloadMigrationHelper.FileChunk) msg.obj);
+                    }
                     break;
                 default:
                     break;
