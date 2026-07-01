@@ -1574,7 +1574,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         } else if (mTorrent == v) {
             if (mGalleryDetail != null) {
                 TorrentListDialogHelper helper = new TorrentListDialogHelper();
-                Dialog dialog = new AlertDialog.Builder(mContext)
+                Dialog dialog = new AlertDialog.Builder(getDialogContext())
                         .setTitle(R.string.torrents)
                         .setView(R.layout.dialog_torrent_list)
                         .setOnDismissListener(helper)
@@ -1590,7 +1590,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 return;
             }
             ArchiveListDialogHelper helper = new ArchiveListDialogHelper();
-            Dialog dialog = new AlertDialog.Builder(mContext)
+            Dialog dialog = new AlertDialog.Builder(getDialogContext())
                     .setTitle(R.string.dialog_archive_title)
                     .setView(R.layout.dialog_archive_list)
                     .setOnDismissListener(helper)
@@ -1617,7 +1617,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 return;
             }
             RateDialogHelper helper = new RateDialogHelper();
-            Dialog dialog = new AlertDialog.Builder(mContext)
+            Dialog dialog = new AlertDialog.Builder(getDialogContext())
                     .setTitle(R.string.rate)
                     .setView(R.layout.dialog_rate)
                     .setNegativeButton(android.R.string.cancel, null)
@@ -1682,7 +1682,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             return;
         }
 
-        new AlertDialog.Builder(context)
+        new AlertDialog.Builder(getDialogContext())
                 .setMessage(getString(R.string.filter_the_uploader, uploader))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     if (which != DialogInterface.BUTTON_POSITIVE) {
@@ -1704,7 +1704,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             return;
         }
 
-        new AlertDialog.Builder(context)
+        new AlertDialog.Builder(getDialogContext())
                 .setMessage(getString(R.string.filter_the_tag, tag))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     if (which != DialogInterface.BUTTON_POSITIVE) {
@@ -1797,7 +1797,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                     }
                 }).start();
             } else {
-                new AlertDialog.Builder(mContext)
+                new AlertDialog.Builder(getDialogContext())
                         .setTitle(R.string.download_remove_dialog_title)
                         .setMessage(getString(R.string.download_remove_dialog_message, galleryInfo.title))
                         .setPositiveButton(android.R.string.ok, (dialog1, which1) -> EhApplication.getDownloadManager(mContext).deleteDownload(galleryInfo.gid))
@@ -2043,7 +2043,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         }
         
         SimpleHandler.getInstance().post(() -> {
-            new AlertDialog.Builder(context)
+            new AlertDialog.Builder(getDialogContext())
                     .setTitle("画廊已删除")
                     .setMessage("该画廊在E-Hentai上已被删除，但保留了本地缓存信息。")
                     .setPositiveButton(android.R.string.ok, null)
@@ -2159,7 +2159,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             if (torrentDownloadView.getParent() != null) {
                 ((android.view.ViewGroup) torrentDownloadView.getParent()).removeView(torrentDownloadView);
             }
-            downLoadAlertDialog = new AlertDialog.Builder(context)
+            downLoadAlertDialog = new AlertDialog.Builder(getDialogContext())
                     .setView(torrentDownloadView)
                     .setCancelable(false)
                     .show();
@@ -2665,7 +2665,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         }
 
         // 确认对话框
-        new AlertDialog.Builder(getEHContext())
+        new AlertDialog.Builder(getDialogContext())
                 .setTitle(R.string.repair_gallery_info)
                 .setMessage(R.string.repair_gallery_info_confirm)
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {

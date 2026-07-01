@@ -1423,7 +1423,7 @@ public final class GalleryListScene extends BaseScene
         });
 
 
-        alertDialog = new AlertDialog.Builder(context)
+        alertDialog = new AlertDialog.Builder(getDialogContext())
 //                .setTitle(EhUtils.getSuitableTitle(gi))
 //                .setView(imageViewNew)
                 .setCustomTitle(linearLayout)
@@ -1437,7 +1437,7 @@ public final class GalleryListScene extends BaseScene
                             break;
                         case 1: // Download
                             if (downloaded) {
-                                new AlertDialog.Builder(context)
+                                new AlertDialog.Builder(getDialogContext())
                                         .setTitle(R.string.download_remove_dialog_title)
                                         .setMessage(getString(R.string.download_remove_dialog_message, gi.title))
                                         .setPositiveButton(android.R.string.ok, (dialog1, which1) -> mDownloadManager.deleteDownload(gi.gid))
@@ -1514,7 +1514,7 @@ public final class GalleryListScene extends BaseScene
             LinearLayout linearLayout = (LinearLayout) getLayoutInflater().inflate(R.layout.gallery_list_date_jump_dialog, null);
             mJumpDateSelector = linearLayout.findViewById(R.id.gallery_list_jump_date);
             mJumpDateSelector.setOnTimeSelectedListener(this::onTimeSelected);
-            jumpSelectorDialog = new AlertDialog.Builder(context).setView(linearLayout).create();
+            jumpSelectorDialog = new AlertDialog.Builder(getDialogContext()).setView(linearLayout).create();
         }
         mJumpDateSelector.setFoundMessage(mHelper.resultCount);
         jumpSelectorDialog.show();
@@ -2556,7 +2556,7 @@ public final class GalleryListScene extends BaseScene
         }
 
         // 确认对话框
-        new AlertDialog.Builder(getEHContext())
+        new AlertDialog.Builder(getDialogContext())
                 .setTitle(R.string.download_selected)
                 .setMessage(getString(R.string.download_selected_confirm, mSelectedGalleryList.size()))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
