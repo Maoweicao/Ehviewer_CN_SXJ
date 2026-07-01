@@ -27,7 +27,7 @@ import java.io.OutputStream;
 public final class IOUtils {
     private static final int EOF = -1;
     private static final int DEFAULT_BUFFER_SIZE = 1024 * 4;
-    private static final int MAX_LINE_LENGTH = 131072; // 128KB
+    private static final int MAX_LINE_LENGTH = 8192; // 8KB - reduced to prevent OOM on corrupted files
 
     private IOUtils() {
     }
@@ -79,7 +79,11 @@ public final class IOUtils {
      * @throws IOException if the line exceeds maxLength (prevents OOM on corrupted files)
      */
     public static String readAsciiLine(final InputStream in) throws IOException {
-        return readAsciiLine(in, MAX_LINE_LENGTH);
+        try {
+            return readAsciiLine(in, MAX_LINE_LENGTH);
+        } catch (OutOfMemoryError e) {
+            throw new IOException("OOM while reading line", e);
+        }
     }
 
     /**

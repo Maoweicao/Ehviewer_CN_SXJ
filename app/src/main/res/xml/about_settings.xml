@@ -61,6 +61,13 @@
         app:activity="com.hippo.ehviewer.ui.SystemInfoActivity"
         app:allowDividerAbove="true" />
 
+    <com.hippo.preference.ActivityPreference
+        android:key="milestone"
+        android:title="@string/milestone_title"
+        android:summary="@string/milestone_summary"
+        app:activity="com.hippo.ehviewer.milestone.MilestoneActivity"
+        app:allowDividerAbove="true" />
+
     <Preference
         android:key="check_for_updates"
         android:title="@string/settings_about_check_for_updates"

@@ -50,6 +50,12 @@ public class DownloadInfo extends GalleryInfo {
 	public int copyCount;
 	public int networkCount;
 
+	// download phase indicator
+	public static final int PHASE_IDLE = -1;
+	public static final int PHASE_COPY = 0;
+	public static final int PHASE_DOWNLOAD = 1;
+	public int phase = PHASE_IDLE;
+
 
 	@Generated
 	public DownloadInfo() {

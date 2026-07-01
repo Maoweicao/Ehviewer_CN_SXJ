@@ -15,6 +15,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
+import android.os.Process;
+
 import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask;
 import com.hippo.ehviewer.ui.MainActivity;
 import com.hippo.ehviewer.dao.DownloadInfo;
@@ -25,6 +27,7 @@ import com.hippo.ehviewer.task.MergeDuplicateGalleryTask;
 import com.hippo.ehviewer.service.BackgroundTaskService;
 import com.hippo.ehviewer.ui.task.BackgroundTaskInfo;
 import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager;
+import com.hippo.lib.yorozuya.thread.PriorityThreadFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -58,8 +61,8 @@ public class BackgroundTaskManager {
 
     private final Map<String, BackgroundTaskFactory> mTaskFactoryMap = new ConcurrentHashMap<>();
     
-    // CPU密集型任务线程池（用于文件扫描等）
-    private final ExecutorService mCpuExecutor;
+    // CPU密集型任务线程池（用于文件扫描、压缩、合并等）
+    private final ThreadPoolExecutor mCpuExecutor;
     
     // 数据库操作单线程执行器（确保数据库操作串行化）
     private final ExecutorService mDbExecutor;
@@ -169,8 +172,13 @@ public class BackgroundTaskManager {
                 CompressSelectedGalleriesTask.restore(ctx, taskId, persistData));
         registerTaskFactory(MergeDuplicateGalleryTask.class.getName(), (ctx, taskId, persistData) ->
             MergeDuplicateGalleryTask.restore(ctx, taskId, persistData));
+        registerTaskFactory(com.hippo.ehviewer.task.ProgressiveScanTask.class.getName(), (ctx, taskId, persistData) ->
+            new com.hippo.ehviewer.task.ProgressiveScanTask(ctx));
+        registerTaskFactory(com.hippo.ehviewer.task.ProgressiveMergeTask.class.getName(), (ctx, taskId, persistData) ->
+            new com.hippo.ehviewer.task.ProgressiveMergeTask(ctx, -1L, java.util.Collections.emptyList(), taskId));
         
-        // CPU线程池：核心线程数 = CPU核心数，最大线程数 = CPU核心数 * 2
+        // CPU密集型任务线程池（用于文件扫描、压缩、合并等）
+        // 使用 THREAD_PRIORITY_DEFAULT 确保非网络后台任务不被系统过度降速
         int cpuCount = Runtime.getRuntime().availableProcessors();
         int corePoolSize = Math.max(2, cpuCount);
         int maxPoolSize = cpuCount * 2;
@@ -179,7 +187,7 @@ public class BackgroundTaskManager {
                 maxPoolSize,
                 60L, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(),
-                Executors.defaultThreadFactory()
+                new PriorityThreadFactory("BgTask-CPU", Process.THREAD_PRIORITY_DEFAULT)
         );
         
         // 数据库执行器：单线程确保数据库操作串行化
@@ -189,7 +197,7 @@ public class BackgroundTaskManager {
             return thread;
         });
         
-        // IO线程池：用于文件IO、网络请求等
+        // IO密集型任务线程池（用于文件IO、网络请求等）
         // 使用可配置并发和有界队列，避免后台任务无限堆积导致资源耗尽
         mBackgroundConcurrentTasks = Settings.getBackgroundConcurrentTasks();
         mIoExecutor = new ThreadPoolExecutor(
@@ -199,7 +207,7 @@ public class BackgroundTaskManager {
             new LinkedBlockingQueue<>(IO_TASK_QUEUE_CAPACITY),
                 r -> {
                     Thread thread = new Thread(r, "BackgroundTaskManager-IO");
-                    thread.setPriority(Thread.NORM_PRIORITY - 1); // 稍微降低优先级
+                    thread.setPriority(Thread.NORM_PRIORITY);
                     return thread;
                 }
         );
@@ -329,11 +337,39 @@ public class BackgroundTaskManager {
     }
 
     /**
+     * 提交已有的FutureTask到CPU线程池
+     */
+    public Future<?> submitCpuFutureTask(java.util.concurrent.FutureTask<?> task) {
+        mCpuExecutor.execute(task);
+        return task;
+    }
+
+    /**
      * 提交已有的FutureTask到IO线程池
      */
     public Future<?> submitIoFutureTask(java.util.concurrent.FutureTask<?> task) {
         mIoExecutor.execute(task);
         return task;
+    }
+
+    /**
+     * 判断是否为CPU密集型任务（压缩、合并、扫描、更新等）
+     * 这些任务不依赖网络，应分配到CPU线程池以获得更高的执行优先级
+     */
+    private static boolean isCpuBoundTask(BackgroundTask.TaskType type) {
+        switch (type) {
+            case MERGE:
+            case CLEANUP:
+            case SCAN:
+            case UPDATE:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private boolean canAcceptCpuTask() {
+        return mCpuExecutor.getQueue().remainingCapacity() > 0;
     }
     
     /**
@@ -371,17 +407,30 @@ public class BackgroundTaskManager {
         final String taskId = task.getTaskId();
         final String taskName = task.getTaskName();
         final String taskDescription = task.getTaskDescription();
+        final BackgroundTask.TaskType taskType = task.getTaskType();
+        final boolean cpuBound = isCpuBoundTask(taskType);
 
-        if (!canAcceptIoTask()) {
-            String rejectedTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, null,
-                    task.getTaskType(), task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
-            if (rejectedTaskId != null) {
-                mTaskStatusManager.markTaskError(rejectedTaskId, mContext.getString(R.string.background_task_queue_full));
+        if (cpuBound) {
+            if (!canAcceptCpuTask()) {
+                String rejectedTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, null,
+                        taskType, task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
+                if (rejectedTaskId != null) {
+                    mTaskStatusManager.markTaskError(rejectedTaskId, mContext.getString(R.string.background_task_queue_full));
+                }
+                return new TaskHandle(taskId, createNoOpFuture());
             }
-            return new TaskHandle(taskId, createNoOpFuture());
+        } else {
+            if (!canAcceptIoTask()) {
+                String rejectedTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, null,
+                        taskType, task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
+                if (rejectedTaskId != null) {
+                    mTaskStatusManager.markTaskError(rejectedTaskId, mContext.getString(R.string.background_task_queue_full));
+                }
+                return new TaskHandle(taskId, createNoOpFuture());
+            }
         }
 
-        if (task.isUniqueTask() && task.getTaskType() != BackgroundTask.TaskType.DOWNLOAD) {
+        if (task.isUniqueTask() && taskType != BackgroundTask.TaskType.DOWNLOAD) {
             BackgroundTaskInfo activeUnique = mTaskStatusManager.getActiveUniqueNonDownloadTask();
             if (activeUnique != null) {
                 Log.d(TAG, "Skip unique task, active task running: " + activeUnique.getTaskId());
@@ -430,13 +479,17 @@ public class BackgroundTaskManager {
         });
 
         String registeredTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, futureTask,
-                task.getTaskType(), task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
+                taskType, task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
         if (registeredTaskId == null) {
             return new TaskHandle(taskId, createNoOpFuture());
         }
         mTaskStatusManager.markTaskQueued(registeredTaskId, null);
         try {
-            submitIoFutureTask(futureTask);
+            if (cpuBound) {
+                submitCpuFutureTask(futureTask);
+            } else {
+                submitIoFutureTask(futureTask);
+            }
         } catch (RejectedExecutionException e) {
             mTaskStatusManager.markTaskError(registeredTaskId, mContext.getString(R.string.background_task_queue_full));
             return new TaskHandle(taskId, createNoOpFuture());

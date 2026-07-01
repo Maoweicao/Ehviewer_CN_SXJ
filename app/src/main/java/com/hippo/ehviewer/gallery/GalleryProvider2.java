@@ -17,6 +17,7 @@
 package com.hippo.ehviewer.gallery;
 
 import android.text.TextUtils;
+import android.util.LruCache;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.hippo.ehviewer.util.GifUtils;
@@ -34,6 +35,9 @@ public abstract class GalleryProvider2 extends GalleryProvider {
             ".gif", // Graphics Interchange Format
             ".webp"
     };
+
+    // Cache for animated state to avoid repeated file I/O on main thread
+    private final LruCache<Integer, Boolean> mAnimatedCache = new LruCache<>(200);
 
     public int getStartPage() {
         return 0;
@@ -68,6 +72,18 @@ public abstract class GalleryProvider2 extends GalleryProvider {
      * @return true if animated
      */
     public boolean isAnimated(int index) {
+        // Check cache first to avoid repeated file I/O
+        Boolean cached = mAnimatedCache.get(index);
+        if (cached != null) {
+            return cached;
+        }
+
+        boolean result = isAnimatedInternal(index);
+        mAnimatedCache.put(index, result);
+        return result;
+    }
+
+    private boolean isAnimatedInternal(int index) {
         String ext = getImageExtension(index).toLowerCase();
         if (".gif".equals(ext)) {
             String imagePath = getImagePath(index);

@@ -134,13 +134,17 @@ public class SpiderInfo {
             // Start page
             spiderInfo.startPage = getStartPage(line);
             // Gid
-            spiderInfo.gid = Long.parseLong(IOUtils.readAsciiLine(is));
+            line = IOUtils.readAsciiLine(is);
+            if (line == null || line.isEmpty()) return null;
+            spiderInfo.gid = Long.parseLong(line);
             // Token
             spiderInfo.token = IOUtils.readAsciiLine(is);
             // Deprecated, mode, skip it
             IOUtils.readAsciiLine(is);
             // Preview pages
-            spiderInfo.previewPages = Integer.parseInt(IOUtils.readAsciiLine(is));
+            line = IOUtils.readAsciiLine(is);
+            if (line == null || line.isEmpty()) return null;
+            spiderInfo.previewPages = Integer.parseInt(line);
             // Preview per page
             line = IOUtils.readAsciiLine(is);
             if (version == 1) {
@@ -149,19 +153,27 @@ public class SpiderInfo {
                 spiderInfo.previewPerPage = Integer.parseInt(line);
             }
             // Pages
-            spiderInfo.pages = Integer.parseInt(IOUtils.readAsciiLine(is));
+            line = IOUtils.readAsciiLine(is);
+            if (line == null || line.isEmpty()) return null;
+            spiderInfo.pages = Integer.parseInt(line);
             // Check pages
             if (spiderInfo.pages <= 0 || spiderInfo.pages > MAX_SPIDER_INFO_PAGES) {
                 return null;
             }
             spiderInfo.pTokenMap = new SparseArray<>(spiderInfo.pages);
-            for (int linesRead = 0; linesRead < spiderInfo.pages; linesRead++) {
+            int maxTokens = Math.min(spiderInfo.pages, MAX_SPIDER_INFO_PAGES);
+            for (int linesRead = 0; linesRead < maxTokens; linesRead++) {
                 try {
                     line = IOUtils.readAsciiLine(is);
                 } catch (EOFException e) {
                     break;
                 }
-                if (line == null || line.length() == 0) {
+                if (line == null || line.isEmpty()) {
+                    continue;
+                }
+                // Limit line length to prevent OOM from corrupted data
+                if (line.length() > 2048) {
+                    Log.w(TAG, "Line too long (" + line.length() + " chars), skipping");
                     continue;
                 }
                 int pos = line.indexOf(' ');
@@ -180,11 +192,16 @@ public class SpiderInfo {
                         Log.e(TAG, "Can't parse index: " + line.substring(0, Math.min(pos, 20)));
                     }
                 } else {
-                    Log.e(TAG, "Can't parse index and pToken, pos = " + pos + ", line length = " + (line == null ? 0 : line.length()));
+                    Log.e(TAG, "Can't parse index and pToken, pos = " + pos + ", line length = " + line.length());
                 }
             }
         } catch (IOException | NumberFormatException e) {
-            // Ignore
+            Log.e(TAG, "Error reading spider info", e);
+        } catch (OutOfMemoryError e) {
+            // Don't include the exception in the log - printing stack trace
+            // allocates memory and can trigger a secondary OOM crash.
+            Log.e(TAG, "OOM while reading spider info");
+            return null;
         }
 
         if (spiderInfo == null || spiderInfo.gid == -1 || spiderInfo.token == null ||

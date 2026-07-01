@@ -15,16 +15,27 @@ object BackgroundTaskRunner {
     @JvmStatic
     fun runBlockingExecute(task: BackgroundTask): Throwable? {
         val thread = Thread.currentThread()
-        val originalPriority = thread.priority
+        val originalJavaPriority = thread.priority
         var originalTidPriority = Process.THREAD_PRIORITY_DEFAULT
-        var priorityRestored = false
+        var priorityElevated = false
         try {
-            // 提升到正常优先级，确保后台任务（合并、压缩等）顺利执行
+            // Boost both Linux and Java thread priorities for CPU-bound tasks
+            // (merge, compress, scan) to prevent HyperOS/system throttling
             originalTidPriority = Process.getThreadPriority(Process.myTid())
             if (originalTidPriority > Process.THREAD_PRIORITY_DEFAULT) {
                 Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT)
-                priorityRestored = true
-                Log.d(TAG, "任务 ${task.getTaskId()} 线程优先级从 $originalTidPriority 提升到 THREAD_PRIORITY_DEFAULT")
+                priorityElevated = true
+                Log.d(TAG, "Task ${task.getTaskId()} tid priority: $originalTidPriority -> THREAD_PRIORITY_DEFAULT")
+            } else if (originalTidPriority == Process.THREAD_PRIORITY_DEFAULT) {
+                // Already at default, but also set to more favorable to be safe on throttled devices
+                Process.setThreadPriority(Process.THREAD_PRIORITY_MORE_FAVORABLE)
+                priorityElevated = true
+                Log.d(TAG, "Task ${task.getTaskId()} tid priority boosted: DEFAULT -> MORE_FAVORABLE")
+            }
+
+            // Also raise Java thread priority for extra safety on HyperOS
+            if (thread.priority < Thread.NORM_PRIORITY + 2) {
+                thread.priority = Thread.NORM_PRIORITY + 2
             }
         } catch (_: Exception) {
         }
@@ -38,13 +49,13 @@ object BackgroundTaskRunner {
                 }
             }
         } finally {
-            if (priorityRestored) {
+            if (priorityElevated) {
                 try {
                     Process.setThreadPriority(originalTidPriority)
                 } catch (_: Exception) {
                 }
             }
-            thread.priority = originalPriority
+            thread.priority = originalJavaPriority
         }
     }
 }

@@ -113,6 +113,20 @@ public class DownloadLogger {
             gid, title, totalTime, successCount, failCount);
         log(LogLevel.INFO, "DownloadComplete", message, gid, title);
     }
+
+    public void logPhaseChange(@NonNull String gid, @NonNull String title, int phase) {
+        if (!mIsLoggingEnabled) return;
+
+        String phaseStr;
+        switch (phase) {
+            case 0: phaseStr = "本地复制"; break;
+            case 1: phaseStr = "网络下载"; break;
+            default: phaseStr = "空闲"; break;
+        }
+        String message = String.format(Locale.getDefault(),
+            "阶段切换 - GID: %s, 标题: %s, 阶段: %s", gid, title, phaseStr);
+        log(LogLevel.INFO, "PhaseChange", message, gid, title);
+    }
     
     /**
      * 记录下载错误日志

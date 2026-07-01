@@ -33,4 +33,25 @@
 
     </string-array>
 
+    <!-- 识图模式 -->
+    <string-array name="ocr_mode_entries">
+        <item>传统OCR</item>
+        <item>AI识图</item>
+    </string-array>
+
+    <!-- 传统OCR引擎 -->
+    <string-array name="ocr_traditional_engine_entries">
+        <item>PP-OCRv5 (推荐，需下载模型)</item>
+        <item>Tesseract OCR</item>
+        <item>系统OCR (ML Kit)</item>
+        <item>自定义ONNX模型</item>
+    </string-array>
+
+    <!-- OCR模型选择 -->
+    <string-array name="ocr_model_entries">
+        <item>PP-OCRv6_medium_rec (推荐，支持50种语言)</item>
+        <item>PP-OCRv5 (完整OCR流水线)</item>
+        <item>PaddleOCR-VL (视觉语言模型)</item>
+    </string-array>
+
 </resources>

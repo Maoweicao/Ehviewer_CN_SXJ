@@ -189,6 +189,21 @@
             android:configChanges="screenSize|uiMode"
             android:theme="@style/AppTheme.Toolbar" />
         <activity
+            android:name=".ui.lab.SubscriptionManagerActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="订阅管理"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
+            android:name=".ui.lab.NodeListActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="节点列表"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
+            android:name=".ui.lab.ProgressiveManagerActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/lab_progressive_manager"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
             android:name=".ui.SystemInfoActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_about_system_info"
@@ -289,6 +304,12 @@
             android:name="com.hippo.ehviewer.ui.DatabaseViewerActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_advanced_database_viewer"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.milestone.MilestoneActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/milestone_title"
             android:theme="@style/AppTheme.Toolbar" />
 
         <activity

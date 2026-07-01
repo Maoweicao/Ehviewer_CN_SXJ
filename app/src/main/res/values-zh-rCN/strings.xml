@@ -475,6 +475,8 @@
     <string name="download_service_label">EhViewer下载服务</string>
     <string name="download_speed_text">%1$s</string>
     <string name="download_speed_text_2">%1$s，剩余 %2$s</string>
+    <string name="phase_copying">本地复制中...</string>
+    <string name="phase_copying_notification">正在本地复制文件...</string>
     <string name="remember_download_label">记住下载标签</string>
     <string name="default_download_label">默认下载标签</string>
     <string name="added_to_download_list">已添加到下载列表</string>
@@ -1084,7 +1086,7 @@ SSID: %1$s
     <string name="ip_base_limits">基于IP的限制</string>
     <string name="limit_unneed_reset">目前无需重置配额，请刷新后重试~</string>
     <string name="pagination_count">数量</string>
-    <string name="pagination_page_and_item">r/p</string>
+    <string name="pagination_page_and_item">条/页</string>
     <string name="cookie_login_import_in_clipboard">从剪贴板导入</string>
     <string name="no_cookie_in_clipboard">剪贴板中未找到有效 Cookie</string>
     <string name="gallery_update_dialog_title">更新方法</string>
@@ -1519,4 +1521,170 @@ SSID: %1$s
     <string name="pip_restore">还原</string>
     <string name="pip_prev">上一页</string>
     <string name="pip_next">下一页</string>
-    </resources>
+
+    <!-- Lab 实验室功能 -->
+    <string name="settings_lab">实验室</string>
+    <string name="lab_warning">实验功能</string>
+    <string name="lab_warning_title">以下功能为实验性质</string>
+    <string name="lab_warning_description">这些功能可能不稳定，使用时请自行承担风险。建议在使用前备份重要数据。</string>
+    <string name="lab_features">功能列表</string>
+
+    <!-- IP切换 -->
+    <string name="lab_ip_switch">自动切换IP</string>
+    <string name="lab_ip_switch_summary">通过代理订阅自动切换IP，避免下载限制</string>
+    <string name="lab_ip_switch_basic">基本设置</string>
+    <string name="lab_ip_switch_enable">启用自动切换IP</string>
+    <string name="lab_ip_switch_enable_summary">当检测到下载限制时自动切换到其他IP</string>
+    <string name="lab_ip_subscription_manage">订阅源管理</string>
+    <string name="lab_ip_subscription_manage_summary">添加、编辑或删除代理订阅源</string>
+    <string name="lab_ip_switch_strategy">风控策略</string>
+    <string name="lab_ip_download_threshold">单IP下载阈值</string>
+    <string name="lab_ip_download_threshold_summary">每个IP下载多少张图片后切换</string>
+    <string name="lab_ip_block_duration">风控解封时间</string>
+    <string name="lab_ip_block_duration_summary">IP被风控后的解封等待时间</string>
+    <string name="lab_ip_switch_strategy_title">切换策略</string>
+    <string name="lab_ip_switch_strategy_summary">选择IP切换的优先级策略</string>
+    <string name="lab_ip_switch_advanced">高级设置</string>
+    <string name="lab_ip_refresh_interval">订阅刷新间隔</string>
+    <string name="lab_ip_refresh_interval_summary">自动刷新订阅源的时间间隔</string>
+    <string name="lab_ip_pool_status">IP池状态</string>
+    <string name="lab_ip_pool_status_summary">查看当前IP池中的IP数量和状态</string>
+    <string name="lab_ip_pool_clear">清空IP池</string>
+    <string name="lab_ip_pool_clear_summary">清除所有已缓存的IP信息</string>
+    <string name="lab_ip_node_list">节点列表</string>
+    <string name="lab_ip_node_list_summary">查看和管理所有解析的节点</string>
+    <string name="lab_ip_current_proxy">当前代理</string>
+    <string name="lab_ip_current_proxy_summary">查看当前使用的代理信息</string>
+    <string name="lab_ip_notification">切换通知</string>
+    <string name="lab_ip_notification_summary">IP切换时显示通知</string>
+
+    <!-- AI翻译 -->
+    <string name="lab_ai_translate">AI浮层翻译</string>
+    <string name="lab_ai_translate_summary">使用AI识别并翻译图片中的文字</string>
+    <string name="lab_ai_translate_basic">基本设置</string>
+    <string name="lab_ai_translate_enable">启用AI翻译</string>
+    <string name="lab_ai_translate_enable_summary">在阅读器中显示翻译浮层</string>
+    <string name="lab_ai_translate_ocr">OCR文字识别</string>
+    <string name="lab_ai_ocr_engine">OCR引擎</string>
+    <string name="lab_ai_ocr_engine_summary">选择文字识别引擎，PaddleOCR中文效果最佳</string>
+    <string name="lab_ai_ocr_model_download">下载OCR模型</string>
+    <string name="lab_ai_ocr_model_download_summary">下载PaddleOCR本地模型文件（约45MB）</string>
+    <string name="lab_ai_translate_service">翻译服务</string>
+    <string name="lab_ai_translate_provider">翻译提供商</string>
+    <string name="lab_ai_translate_provider_summary">选择AI翻译服务提供商</string>
+    <string name="lab_ai_translate_api_key">API Key</string>
+    <string name="lab_ai_translate_api_key_summary">配置翻译服务的API密钥</string>
+    <string name="lab_ai_translate_api_url">API地址</string>
+    <string name="lab_ai_translate_api_url_summary">自定义翻译API的请求地址</string>
+    <string name="lab_ai_translate_model">模型选择</string>
+    <string name="lab_ai_translate_model_summary">选择翻译使用的AI模型</string>
+    <string name="lab_ai_translate_test">测试翻译</string>
+    <string name="lab_ai_translate_test_summary">测试翻译服务是否正常工作</string>
+    <string name="lab_ai_translate_display">显示设置</string>
+    <string name="lab_ai_translate_overlay_alpha">浮层透明度</string>
+    <string name="lab_ai_translate_overlay_alpha_summary">设置翻译浮层的背景透明度</string>
+    <string name="lab_ai_translate_font_size">字体大小</string>
+    <string name="lab_ai_translate_font_size_summary">设置翻译文本的字体大小</string>
+    <string name="lab_ai_translate_position">显示位置</string>
+    <string name="lab_ai_translate_position_summary">设置翻译文本相对于原文的位置</string>
+    <string name="lab_ai_translate_cache">缓存设置</string>
+    <string name="lab_ai_translate_cache_enable">启用翻译缓存</string>
+    <string name="lab_ai_translate_cache_enable_summary">缓存翻译结果以减少API调用</string>
+    <string name="lab_ai_translate_cache_expire">缓存过期时间</string>
+    <string name="lab_ai_translate_cache_expire_summary">缓存多少天后自动失效</string>
+    <string name="lab_ai_translate_cache_clear">清除翻译缓存</string>
+    <string name="lab_ai_translate_cache_clear_summary">删除所有已缓存的翻译结果</string>
+
+    <!-- LAN OCR -->
+    <string name="lab_ai_ocr_lan_url">局域网OCR服务器</string>
+    <string name="lab_ai_ocr_lan_url_summary">配置PC上运行的PaddleOCR服务器地址</string>
+    <string name="lab_ai_ocr_test">测试OCR连接</string>
+    <string name="lab_ai_ocr_test_summary">测试与局域网OCR服务器的连接</string>
+
+    <!-- 高级设置 -->
+    <string name="lab_ai_translate_advanced">高级设置</string>
+    <string name="lab_ai_translate_auto_detect">自动图像探测</string>
+    <string name="lab_ai_translate_auto_detect_summary">预处理图像以检测文本区域并裁剪边距</string>
+    <string name="lab_ai_translate_skip_animated">跳过动图页面</string>
+    <string name="lab_ai_translate_skip_animated_summary">在GIF/WebP动图页面上禁用翻译浮层</string>
+
+    <!-- OCR双核模式 -->
+    <string name="lab_ai_ocr_mode">识图模式</string>
+    <string name="lab_ai_ocr_mode_summary">选择传统OCR或AI识图模式</string>
+    <string name="lab_ai_ocr_traditional_engine">OCR引擎</string>
+    <string name="lab_ai_ocr_traditional_engine_summary">选择传统OCR引擎</string>
+    <string name="lab_ai_ocr_custom_model_path">自定义模型路径</string>
+    <string name="lab_ai_ocr_custom_model_path_summary">ONNX或PaddlePaddle模型文件路径</string>
+    <string name="lab_ai_ocr_use_translate_settings">使用AI翻译层设置</string>
+    <string name="lab_ai_ocr_use_translate_settings_summary">使用与AI翻译相同的API设置</string>
+    <string name="lab_ai_ocr_ai_api_url">识图API地址</string>
+    <string name="lab_ai_ocr_ai_api_url_summary">AI视觉服务的API端点</string>
+    <string name="lab_ai_ocr_ai_api_key">识图API Key</string>
+    <string name="lab_ai_ocr_ai_api_key_summary">AI视觉服务的API密钥</string>
+    <string name="lab_ai_ocr_ai_model">视觉模型</string>
+    <string name="lab_ai_ocr_ai_model_summary">选择AI视觉模型</string>
+    <string name="lab_ai_ocr_download_ppocrv5">下载PP-OCRv5模型</string>
+    <string name="lab_ai_ocr_download_ppocrv5_summary">下载PP-OCRv5模型（约100MB）</string>
+    <string name="lab_ai_ocr_download_paddle_vl">下载PaddleOCR-VL模型</string>
+    <string name="lab_ai_ocr_download_paddle_vl_summary">下载PaddleOCR-VL-1.6模型（约500MB）</string>
+    <string name="lab_ai_ocr_download_ppocrv6">下载PP-OCRv6模型</string>
+    <string name="lab_ai_ocr_download_ppocrv6_summary">下载PP-OCRv6_medium_rec_onnx模型（约76MB）</string>
+    <string name="lab_ai_ocr_selected_model">OCR模型</string>
+    <string name="lab_ai_ocr_selected_model_summary">选择要使用的OCR模型</string>
+    <string name="lab_ai_ocr_model_download_path">OCR模型目录</string>
+    <string name="lab_ai_ocr_model_download_path_summary">设置OCR模型的下载目录</string>
+    <string name="lab_ai_model_download_path">AI模型目录</string>
+    <string name="lab_ai_model_download_path_summary">设置AI模型的下载目录</string>
+    <string name="lab_ai_ocr_use_custom_path">使用自定义模型路径</string>
+    <string name="lab_ai_ocr_use_custom_path_summary">指定ONNX模型文件的精确路径</string>
+    <string name="lab_ai_ocr_full_model_path">ONNX模型文件路径</string>
+    <string name="lab_ai_ocr_full_model_path_summary">.onnx模型文件的完整路径</string>
+    <string name="lab_ai_ocr_export_model_info">导出模型信息</string>
+    <string name="lab_ai_ocr_export_model_info_summary">查看和复制模型下载指南</string>
+
+    <string name="milestone_title">里程碑</string>
+    <string name="milestone_summary">查看您的使用统计和里程碑</string>
+    <string name="milestone_overview">概览</string>
+    <string name="milestone_total_usage_time">总使用时长</string>
+    <string name="milestone_total_gallery_count">浏览画廊数</string>
+    <string name="milestone_total_download_count">下载数</string>
+    <string name="milestone_gallery_view_time">画廊浏览时长</string>
+    <string name="milestone_gallery_view_time_label">画廊浏览时长：%1$s</string>
+    <string name="milestone_search_count_label">搜索次数：%1$d</string>
+    <string name="milestone_favorite">收藏</string>
+    <string name="milestone_favorite_gallery_label">最喜欢的画廊：%1$s</string>
+    <string name="milestone_favorite_tag_label">最喜欢的标签：%1$s</string>
+    <string name="milestone_favorite_category_label">最喜欢的分类：%1$s</string>
+    <string name="milestone_category_stats">分类统计</string>
+    <string name="milestone_daily_usage">每日使用时长（近7天）</string>
+    <string name="milestone_days_since_first_use">使用天数</string>
+    <string name="milestone_days_since_first_use_label">您已经使用 EhViewer %1$d 天</string>
+    <string name="milestone_no_data">暂无数据</string>
+
+    <!-- 递进关系文件夹管理 -->
+    <string name="lab_progressive_manager">递进关系管理</string>
+    <string name="lab_progressive_manager_summary">跨名称扫描已下载画廊的 .ehviewer 内容，检测递进关系并手动管理合并</string>
+    <string name="progressive_scan_start">开始扫描</string>
+    <string name="progressive_scan_refresh">重新扫描</string>
+    <string name="progressive_scan_scanning">正在扫描文件夹…</string>
+    <string name="progressive_scan_ready">准备就绪。点击「开始扫描」检测已下载画廊之间的递进关系。</string>
+    <string name="progressive_scan_empty">未发现递进关系。所有画廊内容互不包含。</string>
+    <string name="progressive_scan_no_folders">未找到包含 .ehviewer 文件的文件夹。</string>
+    <string name="progressive_scan_error">错误：%1$s</string>
+    <string name="progressive_chain_count">发现 %1$d 条递进链</string>
+    <string name="progressive_chain_depth">%1$d 个层级</string>
+    <string name="progressive_chain_summary">%1$d 页公共，共 %2$d 页去重</string>
+    <string name="progressive_merge">合并（保留勾选）</string>
+    <string name="progressive_merge_all">全部合并（保留最多）</string>
+    <string name="progressive_merge_all_confirm">将对全部 %1$d 条链执行合并，每条链保留最完整版本。继续？</string>
+    <string name="progressive_merge_all_started">正在合并全部 %1$d 条链…</string>
+    <string name="progressive_merge_all_done">全部链合并完成</string>
+    <string name="progressive_merge_started">合并任务已启动</string>
+    <string name="progressive_merge_complete">合并完成</string>
+    <string name="progressive_merge_failed">合并失败</string>
+    <string name="progressive_merge_task_name">递进合并</string>
+    <string name="progressive_merge_task_desc">正在将 %1$d 个源文件夹合并到目标</string>
+    <string name="progressive_merge_preparing">准备合并…</string>
+    <string name="progressive_ignore">忽略</string>
+    <string name="progressive_view_in_downloads">在下载列表查看</string>
+</resources>

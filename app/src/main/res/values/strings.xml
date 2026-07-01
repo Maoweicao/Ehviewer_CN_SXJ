@@ -447,6 +447,8 @@
     <string name="download_service_label">EhViewer Download Service</string>
     <string name="download_speed_text">%1$s</string>
     <string name="download_speed_text_2">%1$s, %2$s left</string>
+    <string name="phase_copying">Copying locally...</string>
+    <string name="phase_copying_notification">Copying local files...</string>
     <string name="remember_download_label">Remember download label</string>
     <string name="default_download_label">Default download label</string>
     <string name="added_to_download_list">Added to download list</string>
@@ -1486,4 +1488,170 @@
     <string name="pip_restore">Restore</string>
     <string name="pip_prev">Previous</string>
     <string name="pip_next">Next</string>
+
+    <!-- Lab -->
+    <string name="settings_lab">Lab</string>
+    <string name="lab_warning">Experimental</string>
+    <string name="lab_warning_title">Experimental Features</string>
+    <string name="lab_warning_description">These features may be unstable. Use at your own risk. It is recommended to backup important data before use.</string>
+    <string name="lab_features">Features</string>
+
+    <!-- IP Switch -->
+    <string name="lab_ip_switch">Auto IP Switch</string>
+    <string name="lab_ip_switch_summary">Auto switch IP via proxy subscriptions to avoid download limits</string>
+    <string name="lab_ip_switch_basic">Basic Settings</string>
+    <string name="lab_ip_switch_enable">Enable Auto IP Switch</string>
+    <string name="lab_ip_switch_enable_summary">Auto switch to other IP when download limit detected</string>
+    <string name="lab_ip_subscription_manage">Manage Subscriptions</string>
+    <string name="lab_ip_subscription_manage_summary">Add, edit or delete proxy subscriptions</string>
+    <string name="lab_ip_switch_strategy">Rate Limit Strategy</string>
+    <string name="lab_ip_download_threshold">Per-IP Download Threshold</string>
+    <string name="lab_ip_download_threshold_summary">How many images to download per IP before switching</string>
+    <string name="lab_ip_block_duration">Block Duration</string>
+    <string name="lab_ip_block_duration_summary">How long to wait before reusing a blocked IP</string>
+    <string name="lab_ip_switch_strategy_title">Switch Strategy</string>
+    <string name="lab_ip_switch_strategy_summary">IP switching priority strategy</string>
+    <string name="lab_ip_switch_advanced">Advanced Settings</string>
+    <string name="lab_ip_refresh_interval">Subscription Refresh Interval</string>
+    <string name="lab_ip_refresh_interval_summary">Auto refresh subscription interval</string>
+    <string name="lab_ip_pool_status">IP Pool Status</string>
+    <string name="lab_ip_pool_status_summary">View IP pool count and status</string>
+    <string name="lab_ip_pool_clear">Clear IP Pool</string>
+    <string name="lab_ip_pool_clear_summary">Clear all cached IP information</string>
+    <string name="lab_ip_node_list">Node List</string>
+    <string name="lab_ip_node_list_summary">View and manage all parsed nodes</string>
+    <string name="lab_ip_current_proxy">Current Proxy</string>
+    <string name="lab_ip_current_proxy_summary">View current proxy information</string>
+    <string name="lab_ip_notification">Switch Notification</string>
+    <string name="lab_ip_notification_summary">Show notification when IP switches</string>
+
+    <!-- AI Translate -->
+    <string name="lab_ai_translate">AI Overlay Translate</string>
+    <string name="lab_ai_translate_summary">Use AI to recognize and translate text in images</string>
+    <string name="lab_ai_translate_basic">Basic Settings</string>
+    <string name="lab_ai_translate_enable">Enable AI Translate</string>
+    <string name="lab_ai_translate_enable_summary">Show translation overlay in reader</string>
+    <string name="lab_ai_translate_ocr">OCR Text Recognition</string>
+    <string name="lab_ai_ocr_engine">OCR Engine</string>
+    <string name="lab_ai_ocr_engine_summary">Select text recognition engine, PaddleOCR best for Chinese</string>
+    <string name="lab_ai_ocr_model_download">Download OCR Model</string>
+    <string name="lab_ai_ocr_model_download_summary">Download PaddleOCR local model (~45MB)</string>
+    <string name="lab_ai_translate_service">Translation Service</string>
+    <string name="lab_ai_translate_provider">Translation Provider</string>
+    <string name="lab_ai_translate_provider_summary">Select AI translation service provider</string>
+    <string name="lab_ai_translate_api_key">API Key</string>
+    <string name="lab_ai_translate_api_key_summary">Configure translation service API key</string>
+    <string name="lab_ai_translate_api_url">API URL</string>
+    <string name="lab_ai_translate_api_url_summary">Custom translation API request URL</string>
+    <string name="lab_ai_translate_model">Model</string>
+    <string name="lab_ai_translate_model_summary">Select translation AI model</string>
+    <string name="lab_ai_translate_test">Test Translation</string>
+    <string name="lab_ai_translate_test_summary">Test if translation service works</string>
+    <string name="lab_ai_translate_display">Display Settings</string>
+    <string name="lab_ai_translate_overlay_alpha">Overlay Alpha</string>
+    <string name="lab_ai_translate_overlay_alpha_summary">Set translation overlay background alpha</string>
+    <string name="lab_ai_translate_font_size">Font Size</string>
+    <string name="lab_ai_translate_font_size_summary">Set translation text font size</string>
+    <string name="lab_ai_translate_position">Position</string>
+    <string name="lab_ai_translate_position_summary">Set translation text position relative to original</string>
+    <string name="lab_ai_translate_cache">Cache Settings</string>
+    <string name="lab_ai_translate_cache_enable">Enable Translation Cache</string>
+    <string name="lab_ai_translate_cache_enable_summary">Cache translation results to reduce API calls</string>
+    <string name="lab_ai_translate_cache_expire">Cache Expiry</string>
+    <string name="lab_ai_translate_cache_expire_summary">Days before cache expires</string>
+    <string name="lab_ai_translate_cache_clear">Clear Translation Cache</string>
+    <string name="lab_ai_translate_cache_clear_summary">Delete all cached translation results</string>
+
+    <!-- LAN OCR -->
+    <string name="lab_ai_ocr_lan_url">LAN OCR Server</string>
+    <string name="lab_ai_ocr_lan_url_summary">Configure the PaddleOCR server URL on your PC</string>
+    <string name="lab_ai_ocr_test">Test OCR Connection</string>
+    <string name="lab_ai_ocr_test_summary">Test connection to LAN OCR server</string>
+
+    <!-- Advanced settings -->
+    <string name="lab_ai_translate_advanced">Advanced</string>
+    <string name="lab_ai_translate_auto_detect">Auto Image Detection</string>
+    <string name="lab_ai_translate_auto_detect_summary">Pre-process images to detect text regions and crop margins</string>
+    <string name="lab_ai_translate_skip_animated">Skip Animated Pages</string>
+    <string name="lab_ai_translate_skip_animated_summary">Disable translation overlay on GIF/WebP animated pages</string>
+
+    <!-- OCR双核模式 -->
+    <string name="lab_ai_ocr_mode">Recognition Mode</string>
+    <string name="lab_ai_ocr_mode_summary">Choose between traditional OCR or AI vision</string>
+    <string name="lab_ai_ocr_traditional_engine">OCR Engine</string>
+    <string name="lab_ai_ocr_traditional_engine_summary">Select traditional OCR engine</string>
+    <string name="lab_ai_ocr_custom_model_path">Custom Model Path</string>
+    <string name="lab_ai_ocr_custom_model_path_summary">Path to ONNX or PaddlePaddle model file</string>
+    <string name="lab_ai_ocr_use_translate_settings">Use AI Translate Settings</string>
+    <string name="lab_ai_ocr_use_translate_settings_summary">Use same API settings as AI translation</string>
+    <string name="lab_ai_ocr_ai_api_url">OCR API URL</string>
+    <string name="lab_ai_ocr_ai_api_url_summary">Custom API endpoint for AI vision</string>
+    <string name="lab_ai_ocr_ai_api_key">OCR API Key</string>
+    <string name="lab_ai_ocr_ai_api_key_summary">API key for AI vision service</string>
+    <string name="lab_ai_ocr_ai_model">Vision Model</string>
+    <string name="lab_ai_ocr_ai_model_summary">Select AI vision model</string>
+    <string name="lab_ai_ocr_download_ppocrv5">Download PP-OCRv5 Model</string>
+    <string name="lab_ai_ocr_download_ppocrv5_summary">Download PP-OCRv5 model (~100MB)</string>
+    <string name="lab_ai_ocr_download_paddle_vl">Download PaddleOCR-VL Model</string>
+    <string name="lab_ai_ocr_download_paddle_vl_summary">Download PaddleOCR-VL-1.6 model (~500MB)</string>
+    <string name="lab_ai_ocr_download_ppocrv6">Download PP-OCRv6 Model</string>
+    <string name="lab_ai_ocr_download_ppocrv6_summary">Download PP-OCRv6_medium_rec_onnx model (~76MB)</string>
+    <string name="lab_ai_ocr_selected_model">OCR Model</string>
+    <string name="lab_ai_ocr_selected_model_summary">Select OCR model to use</string>
+    <string name="lab_ai_ocr_model_download_path">OCR Model Directory</string>
+    <string name="lab_ai_ocr_model_download_path_summary">Set download directory for OCR models</string>
+    <string name="lab_ai_model_download_path">AI Model Directory</string>
+    <string name="lab_ai_model_download_path_summary">Set download directory for AI models</string>
+    <string name="lab_ai_ocr_use_custom_path">Use Custom Model Path</string>
+    <string name="lab_ai_ocr_use_custom_path_summary">Specify exact path to ONNX model file</string>
+    <string name="lab_ai_ocr_full_model_path">ONNX Model File Path</string>
+    <string name="lab_ai_ocr_full_model_path_summary">Full path to .onnx model file</string>
+    <string name="lab_ai_ocr_export_model_info">Export Model Info</string>
+    <string name="lab_ai_ocr_export_model_info_summary">View and copy model download guide</string>
+
+    <string name="milestone_title">Milestones</string>
+    <string name="milestone_summary">View your usage statistics and milestones</string>
+    <string name="milestone_overview">Overview</string>
+    <string name="milestone_total_usage_time">Total Usage Time</string>
+    <string name="milestone_total_gallery_count">Galleries Viewed</string>
+    <string name="milestone_total_download_count">Downloads</string>
+    <string name="milestone_gallery_view_time">Gallery View Time</string>
+    <string name="milestone_gallery_view_time_label">Gallery View Time: %1$s</string>
+    <string name="milestone_search_count_label">Search Count: %1$d</string>
+    <string name="milestone_favorite">Favorites</string>
+    <string name="milestone_favorite_gallery_label">Favorite Gallery: %1$s</string>
+    <string name="milestone_favorite_tag_label">Favorite Tag: %1$s</string>
+    <string name="milestone_favorite_category_label">Favorite Category: %1$s</string>
+    <string name="milestone_category_stats">Category Statistics</string>
+    <string name="milestone_daily_usage">Daily Usage (Last 7 Days)</string>
+    <string name="milestone_days_since_first_use">Days Since First Use</string>
+    <string name="milestone_days_since_first_use_label">You have been using EhViewer for %1$d days</string>
+    <string name="milestone_no_data">No data yet</string>
+
+    <!-- Progressive Folder Manager -->
+    <string name="lab_progressive_manager">Progressive Folder Manager</string>
+    <string name="lab_progressive_manager_summary">Cross-name scan downloaded galleries for progressive (subset) relationships and manage merging</string>
+    <string name="progressive_scan_start">Start Scan</string>
+    <string name="progressive_scan_refresh">Refresh Scan</string>
+    <string name="progressive_scan_scanning">Scanning folders…</string>
+    <string name="progressive_scan_ready">Ready to scan. Tap "Start Scan" to detect progressive relationships between downloaded galleries.</string>
+    <string name="progressive_scan_empty">No progressive relationships found. All galleries have unique content.</string>
+    <string name="progressive_scan_no_folders">No folders with .ehviewer files found.</string>
+    <string name="progressive_scan_error">Error: %1$s</string>
+    <string name="progressive_chain_count">Found %1$d progressive chain(s)</string>
+    <string name="progressive_chain_depth">%1$d levels</string>
+    <string name="progressive_chain_summary">%1$d common pages, %2$d total unique pages</string>
+    <string name="progressive_merge">Merge (keep selected)</string>
+    <string name="progressive_merge_all">Merge All (keep most complete)</string>
+    <string name="progressive_merge_all_confirm">This will merge all %1$d chains. For each chain, the most complete version will be kept. Continue?</string>
+    <string name="progressive_merge_all_started">Merging all %1$d chains…</string>
+    <string name="progressive_merge_all_done">All chains merged</string>
+    <string name="progressive_merge_started">Merge task started</string>
+    <string name="progressive_merge_complete">Merge completed</string>
+    <string name="progressive_merge_failed">Merge failed</string>
+    <string name="progressive_merge_task_name">Progressive Merge</string>
+    <string name="progressive_merge_task_desc">Merging %1$d source folder(s) into target</string>
+    <string name="progressive_merge_preparing">Preparing merge…</string>
+    <string name="progressive_ignore">Ignore</string>
+    <string name="progressive_view_in_downloads">View in Downloads</string>
 </resources>

@@ -17,6 +17,7 @@
 package com.hippo.ehviewer;
 
 import android.text.TextUtils;
+import com.hippo.ehviewer.lab.ip.IpSwitchController;
 import com.hippo.network.InetValidator;
 import com.hippo.util.ExceptionUtils;
 import java.io.IOException;
@@ -66,6 +67,13 @@ public class EhProxySelector extends ProxySelector {
 
   @Override
   public List<Proxy> select(URI uri) {
+    if (Settings.getIpSwitchEnabled()) {
+      Proxy ipSwitchProxy = IpSwitchController.getInstance().getCurrentProxy();
+      if (ipSwitchProxy != null) {
+        return Collections.singletonList(ipSwitchProxy);
+      }
+    }
+
     int type = Settings.getProxyType();
     if (type == TYPE_HTTP || type == TYPE_SOCKS) {
       try {

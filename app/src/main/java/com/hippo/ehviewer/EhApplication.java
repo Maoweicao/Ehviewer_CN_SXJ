@@ -194,6 +194,18 @@ public class EhApplication extends RecordingApplication {
         BackgroundTaskManager.initialize(this);
         EhEngine.initialize();
         BitmapUtils.initialize(this);
+
+        // Initialize lab managers
+        if (Settings.getLabEnabled()) {
+            com.hippo.ehviewer.lab.ip.IpPoolManager.getInstance();
+            com.hippo.ehviewer.lab.ip.SubscriptionManager.getInstance();
+            if (Settings.getIpSwitchEnabled()) {
+                com.hippo.ehviewer.lab.ip.SubscriptionManager.getInstance().startAutoRefresh();
+            }
+            if (Settings.getAiTranslateEnabled()) {
+                com.hippo.ehviewer.lab.translate.AiTranslateManager.getInstance().initialize();
+            }
+        }
 //        Image1.initialize(this);
         Image.initialize(this);
         Native.initialize();
@@ -323,6 +335,12 @@ public class EhApplication extends RecordingApplication {
             } catch (Exception e) {
                 // 忽略异常，避免影响应用正常运行
             }
+        }
+
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            // Critical memory pressure - request GC
+            System.gc();
+            System.runFinalization();
         }
     }
 
@@ -549,7 +567,10 @@ public class EhApplication extends RecordingApplication {
             ConnectionPool imageConnectionPool = new ConnectionPool(
                     10, 5, TimeUnit.MINUTES
             );
-            
+
+            // Use a separate cache for image downloads to reduce DiskLruCache contention
+            Cache imageCache = new Cache(new File(application.getCacheDir(), "image_cache"), 50L * 1024L * 1024L);
+
             OkHttpClient.Builder builder = new OkHttpClient.Builder()
                     .followRedirects(false)
                     .followSslRedirects(false)
@@ -560,7 +581,7 @@ public class EhApplication extends RecordingApplication {
                     .connectionPool(imageConnectionPool)
                     .pingInterval(5, TimeUnit.MINUTES)
                     .cookieJar(getEhCookieStore(application))
-                    .cache(getOkHttpCache(application))
+                    .cache(imageCache)
 //                    .hostnameVerifier((hostname, session) -> true)
                     .dns(new EhHosts(application))
                     .addNetworkInterceptor(sprocket -> {
@@ -624,7 +645,7 @@ public class EhApplication extends RecordingApplication {
     }
 
     private static int getMemoryCacheMaxSize() {
-        return Math.min(20 * 1024 * 1024, (int) OSUtils.getAppMaxMemory());
+        return Math.min(12 * 1024 * 1024, (int) OSUtils.getAppMaxMemory());
     }
 
     @NonNull
@@ -773,7 +794,8 @@ public class EhApplication extends RecordingApplication {
     public static Cache getOkHttpCache(@NonNull Context context) {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mOkHttpCache == null) {
-            application.mOkHttpCache = new Cache(new File(application.getCacheDir(), "http_cache"), 50L * 1024L * 1024L);
+            // Increase cache size to 100MB to reduce DiskLruCache lock contention
+            application.mOkHttpCache = new Cache(new File(application.getCacheDir(), "http_cache"), 100L * 1024L * 1024L);
         }
         return application.mOkHttpCache;
     }

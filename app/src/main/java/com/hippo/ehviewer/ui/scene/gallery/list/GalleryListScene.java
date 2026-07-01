@@ -104,6 +104,7 @@ import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.download.DownloadInfoListener;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.event.SomethingNeedRefresh;
+import com.hippo.ehviewer.milestone.MilestoneManager;
 import com.hippo.ehviewer.ui.CommonOperations;
 import com.hippo.ehviewer.ui.GalleryActivity;
 import com.hippo.ehviewer.ui.MainActivity;
@@ -1979,6 +1980,11 @@ public final class GalleryListScene extends BaseScene
     public void onApplySearch(String query) {
         if (null == mUrlBuilder || null == mHelper || null == mSearchLayout) {
             return;
+        }
+
+        // Track search
+        if (query != null && !query.isEmpty()) {
+            MilestoneManager.getInstance(requireContext()).recordSearch(query);
         }
 
         // 过滤搜索文本中的换行符，避免影响搜索语法

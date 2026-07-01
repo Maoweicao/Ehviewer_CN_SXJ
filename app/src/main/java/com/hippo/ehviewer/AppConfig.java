@@ -46,6 +46,7 @@ public class AppConfig {
     private static final String LOGCAT = "logcat";
     private static final String DATA = "data";
     private static final String CRASH = "crash";
+    private static final String COMPRESS_PLAN = "CompressPlan";
 
     private static volatile boolean sDeletingOldParseErrorFiles = false;
     private static final Object sDeleteOldParseErrorFilesLock = new Object();
@@ -132,6 +133,11 @@ public class AppConfig {
     @Nullable
     public static File getExternalCrashDir() {
         return getDirInExternalAppDir(CRASH);
+    }
+
+    @Nullable
+    public static File getCompressPlanDir() {
+        return getDirInExternalAppDir(COMPRESS_PLAN);
     }
 
 //    @Nullable

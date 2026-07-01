@@ -221,6 +221,12 @@ dependencies {
     // 内置轻量级HTTP服务器，用于本地REST端点
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
 
+    // YAML解析 (用于Clash订阅)
+    implementation 'org.yaml:snakeyaml:1.33'
+
+    // ONNX Runtime (用于本地AI模型推理)
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.16.0'
+
     // SlidingPaneLayout - 支持平滑滑动面板
     implementation 'androidx.slidingpanelayout:slidingpanelayout:1.2.0'
     

@@ -116,9 +116,7 @@ public class MyPageChangeListener implements PaginationIndicator.OnChangedListen
 
     @SuppressLint("NotifyDataSetChanged")
     public void notifyAdapter() {
-        // 确保在主线程中执行
-        android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
-        mainHandler.post(() -> {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             if (mAdapter != null) {
                 try {
                     mAdapter.notifyDataSetChanged();
@@ -132,19 +130,34 @@ public class MyPageChangeListener implements PaginationIndicator.OnChangedListen
                         doNotScroll = false;
                         return;
                     }
-                    // 使用smoothScrollToPosition提供更好的用户体验
-                    mRecyclerView.post(() -> {
-                        try {
-                            mRecyclerView.scrollToPosition(0);
-                        } catch (Exception e) {
-                            android.util.Log.e("MyPageChangeListener", "Error scrolling: " + e.getMessage());
-                        }
-                    });
+                    mRecyclerView.scrollToPosition(0);
                 } catch (Exception e) {
-                    android.util.Log.e("MyPageChangeListener", "Error in scroll logic: " + e.getMessage());
+                    android.util.Log.e("MyPageChangeListener", "Error scrolling: " + e.getMessage());
                 }
             }
-        });
+        } else {
+            android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+            mainHandler.post(() -> {
+                if (mAdapter != null) {
+                    try {
+                        mAdapter.notifyDataSetChanged();
+                    } catch (Exception e) {
+                        android.util.Log.e("MyPageChangeListener", "Error notifying adapter: " + e.getMessage());
+                    }
+                }
+                if (mRecyclerView != null) {
+                    try {
+                        if (doNotScroll) {
+                            doNotScroll = false;
+                            return;
+                        }
+                        mRecyclerView.scrollToPosition(0);
+                    } catch (Exception e) {
+                        android.util.Log.e("MyPageChangeListener", "Error scrolling: " + e.getMessage());
+                    }
+                }
+            });
+        }
     }
 
     // Getter and Setter methods

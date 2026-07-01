@@ -23,6 +23,9 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.PorterDuff;
+import android.util.LruCache;
 import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
@@ -51,6 +54,7 @@ import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.task.TaskExecutor;
 import com.hippo.ehviewer.task.impl.StartRangeDownloadTask;
 import com.hippo.lib.yorozuya.collect.LongList;
+import com.hippo.lib.yorozuya.ResourcesUtils;
 import com.hippo.ehviewer.gallery.A7ZipArchive;
 import com.hippo.ehviewer.gallery.Pipe;
 import com.hippo.ehviewer.spider.SpiderInfo;
@@ -110,7 +114,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
     private View movedItem = null;
 
-    private final Map<String, Bitmap> thumbnailCache = new HashMap<>();
+    private final android.util.LruCache<String, Bitmap> thumbnailCache = new android.util.LruCache<>(20 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, Bitmap value) {
+            return value.getAllocationByteCount();
+        }
+    };
     private final Map<Long, Long> folderTimeCache = new HashMap<>();
     private final Map<Long, Long> folderSizeCache = new HashMap<>();
 
@@ -398,10 +407,11 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
         // Check if this is an incremental update
         boolean isIncrementalUpdate = info.incremental;
-        
+
         if (info.total <= 0 || info.finished < 0) {
             holder.percent.setText(null);
             holder.progressBar.setIndeterminate(true);
+            holder.progressBar.getProgressDrawable().clearColorFilter();
         } else {
             String progressText;
             if (isIncrementalUpdate) {
@@ -415,16 +425,47 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             holder.progressBar.setMax(info.total);
             holder.progressBar.setProgress(info.finished);
 
+            // Phase-based progress bar color
+            switch (info.phase) {
+                case DownloadInfo.PHASE_COPY: {
+                    int themeColor = ResourcesUtils.getAttrColor(
+                        mScene.getEHContext(), androidx.appcompat.R.attr.colorPrimary);
+                    int inverseColor = Color.rgb(
+                        255 - Color.red(themeColor),
+                        255 - Color.green(themeColor),
+                        255 - Color.blue(themeColor));
+                    holder.progressBar.getProgressDrawable()
+                        .setColorFilter(inverseColor, PorterDuff.Mode.SRC_IN);
+                    break;
+                }
+                case DownloadInfo.PHASE_DOWNLOAD:
+                    holder.progressBar.getProgressDrawable().clearColorFilter();
+                    break;
+                default:
+                    holder.progressBar.getProgressDrawable().clearColorFilter();
+                    break;
+            }
+
             if (isIncrementalUpdate) {
                 String galleryTitle = EhUtils.getSuitableTitle(info);
                 Log.d(TAG, "[ADAPTER] 增量更新进度: " + galleryTitle + " - " + progressText);
             }
         }
+
+        // Speed display with phase indicator
         long speed = info.speed;
         if (speed < 0) {
             speed = 0;
         }
-        holder.speed.setText(com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(speed, false) + "/S");
+        switch (info.phase) {
+            case DownloadInfo.PHASE_COPY:
+                holder.speed.setText(mScene.getString(R.string.phase_copying));
+                break;
+            case DownloadInfo.PHASE_DOWNLOAD:
+            default:
+                holder.speed.setText(com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(speed, false) + "/S");
+                break;
+        }
     }
 
     private void bindFolderMeta(DownloadHolder holder, DownloadInfo info) {
@@ -492,6 +533,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         });
     }
 
+
+    public void clearCaches() {
+        thumbnailCache.evictAll();
+        folderTimeCache.clear();
+        folderSizeCache.clear();
+    }
 
     // 拖拽排序相关方法实现
     @Override
@@ -600,10 +647,10 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         String uriString = archiveUri.toString();
 
         // Check cache first
-        if (thumbnailCache.containsKey(uriString)) {
-            Bitmap cachedThumbnail = thumbnailCache.get(uriString);
-            if (cachedThumbnail != null && !cachedThumbnail.isRecycled()) {
-                thumb.setImageBitmap(cachedThumbnail);
+        Bitmap cached = thumbnailCache.get(uriString);
+        if (cached != null) {
+            if (!cached.isRecycled()) {
+                thumb.setImageBitmap(cached);
                 return;
             } else {
                 // Remove invalid cached entry
@@ -625,9 +672,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                         thumb.setImageBitmap(thumbnail);
                     } else {
                         // If extraction fails, check if we have a previous cached thumbnail
-                        Bitmap fallbackThumbnail = thumbnailCache.get(uriString);
-                        if (fallbackThumbnail != null && !fallbackThumbnail.isRecycled()) {
-                            thumb.setImageBitmap(fallbackThumbnail);
+                        Bitmap fallback = thumbnailCache.get(uriString);
+                        if (fallback != null && !fallback.isRecycled()) {
+                            thumb.setImageBitmap(fallback);
                         }
                         // Otherwise keep the default archive icon that was already set
                     }

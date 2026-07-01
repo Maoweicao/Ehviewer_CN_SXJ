@@ -97,6 +97,7 @@ import com.hippo.ehviewer.ui.scene.sign.SignInScene;
 import com.hippo.ehviewer.ui.scene.SolidScene;
 import com.hippo.ehviewer.ui.scene.WarningScene;
 import com.hippo.ehviewer.ui.scene.sign.WebViewSignInScene;
+import com.hippo.ehviewer.milestone.MilestoneManager;
 import com.hippo.ehviewer.ui.splash.SplashActivity;
 import com.hippo.ehviewer.updater.AppUpdater;
 import com.hippo.ehviewer.widget.EhDrawerLayout;
@@ -153,6 +154,8 @@ public final class MainActivity extends StageActivity
     private TextView mDisplayName;
     @Nullable
     private LimitsCountView limitsCountView;
+    @Nullable
+    private long mAppResumeTime = 0;
     @Nullable
     UserImageChange userImageChange;
 
@@ -624,6 +627,8 @@ public final class MainActivity extends StageActivity
     protected void onResume() {
         super.onResume();
 
+        mAppResumeTime = System.currentTimeMillis();
+
         setNavCheckedItem(mNavCheckedItem);
 
         checkClipboardUrl();
@@ -638,6 +643,12 @@ public final class MainActivity extends StageActivity
     @Override
     protected void onPause() {
         super.onPause();
+
+        if (mAppResumeTime > 0) {
+            long duration = System.currentTimeMillis() - mAppResumeTime;
+            MilestoneManager.getInstance(this).recordAppUsage(duration);
+            mAppResumeTime = 0;
+        }
 
         // 通知下载管理器应用进入后台
         EhApplication app = (EhApplication) getApplication();

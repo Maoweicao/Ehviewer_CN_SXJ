@@ -19,6 +19,7 @@ package com.hippo.lib.glgallery;
 import android.graphics.Color;
 
 import android.graphics.Color;
+import android.graphics.RectF;
 import com.hippo.lib.glview.glrenderer.BasicTexture;
 import com.hippo.lib.glview.glrenderer.Texture;
 import com.hippo.lib.glview.image.GLImageMovableTextView;
@@ -293,5 +294,21 @@ public class GalleryPageView extends GLFrameLayout {
 
     boolean isCurrentPageAnimating() {
         return mImage.isImageAnimating();
+    }
+
+    public void getImageDisplayRect(RectF outRect) {
+        mImage.getImageDisplayRect(outRect);
+    }
+
+    public int getTextureWidth() {
+        return mImage.getTextureWidth();
+    }
+
+    public int getTextureHeight() {
+        return mImage.getTextureHeight();
+    }
+
+    public boolean isImageLoaded() {
+        return mImage.isLoaded();
     }
 }

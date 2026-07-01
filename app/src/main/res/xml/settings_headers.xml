@@ -53,4 +53,10 @@
         app:allowDividerAbove="true"
         app:fragment="com.hippo.ehviewer.ui.fragment.AboutFragment" />
 
+    <com.hippo.ehviewer.ui.fragment.BasePreference
+        android:icon="@drawable/v_science_primary_x24"
+        android:title="@string/settings_lab"
+        app:allowDividerAbove="true"
+        app:fragment="com.hippo.ehviewer.ui.fragment.LabFragment" />
+
 </PreferenceScreen>

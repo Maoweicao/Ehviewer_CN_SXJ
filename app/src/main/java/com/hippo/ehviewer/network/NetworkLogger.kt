@@ -179,7 +179,9 @@ object NetworkLogger {
                 }
                 writer.flush()
             } catch (e: IOException) {
-                Log.e(TAG, "Failed to write log for ${category.fileName}", e)
+                // Don't log - may OOM if heap is full
+            } catch (e: OutOfMemoryError) {
+                // Silently ignore - logging when heap is full causes secondary OOM
             }
         }
     }

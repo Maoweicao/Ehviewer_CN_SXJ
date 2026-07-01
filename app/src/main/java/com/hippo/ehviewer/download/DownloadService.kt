@@ -116,6 +116,27 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
             
             Log.i(TAG, "Created notification channel with importance: $notificationImportance")
         }
+
+        // Immediately promote to foreground service to meet 5s deadline
+        ensureDownloadingBuilder()
+        mDownloadingBuilder!!
+            .setContentTitle(getString(R.string.download_service))
+            .setContentText(getString(R.string.preparing_download))
+            .setContentInfo(null)
+            .setProgress(0, 0, true)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    ID_DOWNLOADING,
+                    mDownloadingBuilder!!.build(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(ID_DOWNLOADING, mDownloadingBuilder!!.build())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to start foreground immediately", e)
+        }
         
         // 初始化 WakeLock（用于防止CPU被限制）
         initWakeLock()
@@ -598,6 +619,32 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         }
 
         checkStopSelf()
+    }
+
+    override fun onPhaseChanged(info: DownloadInfo, phase: Int) {
+        if (mNotifyManager == null) {
+            return
+        }
+        ensureDownloadingBuilder()
+
+        val primaryColor = resources.getColor(R.color.colorPrimary, null)
+        val inverseColor = android.graphics.Color.rgb(
+            255 - android.graphics.Color.red(primaryColor),
+            255 - android.graphics.Color.green(primaryColor),
+            255 - android.graphics.Color.blue(primaryColor)
+        )
+
+        when (phase) {
+            DownloadInfo.PHASE_COPY -> {
+                mDownloadingBuilder!!.setColor(inverseColor)
+                mDownloadingBuilder!!.setContentText(getString(R.string.phase_copying_notification))
+            }
+            DownloadInfo.PHASE_DOWNLOAD -> {
+                mDownloadingBuilder!!.setColor(primaryColor)
+                mDownloadingBuilder!!.setContentText(null)
+            }
+        }
+        mDownloadingDelay!!.startForeground()
     }
 
     private fun checkStopSelf() {

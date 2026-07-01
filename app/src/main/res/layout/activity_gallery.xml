@@ -26,6 +26,12 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <com.hippo.ehviewer.lab.translate.TranslateOverlayView
+        android:id="@+id/translate_overlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone" />
+
     <!-- Transfer countdown - above image layer, below control bars -->
     <TextView
         android:id="@+id/transfer_countdown"

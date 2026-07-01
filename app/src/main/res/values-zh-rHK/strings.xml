@@ -1021,6 +1021,8 @@
     <string name="download_service_label">EhViewer 下載服務</string>
     <string name="download_speed_text">%s</string>
     <string name="download_speed_text_2">%1$s，剩餘 %2$s</string>
+    <string name="phase_copying">本地複製中...</string>
+    <string name="phase_copying_notification">正在本地複製檔案...</string>
     <string name="remember_download_label">記住下載標籤</string>
     <string name="default_download_label">預設下載標籤</string>
     <string name="added_to_download_list">已新增至下載列表</string>
@@ -1546,7 +1548,7 @@
     <string name="limit_unneed_reset">目前無需重置配額，請在重新整理後再試～</string>
 
     <string name="pagination_count">數量</string>
-    <string name="pagination_page_and_item">r/p</string>
+    <string name="pagination_page_and_item">條/頁</string>
     <string name="settings_eh_list_show_read_progress">顯示閱讀進度</string>
     <string name="settings_eh_list_show_read_progress_summary">在詳細列表模式下顯示每個畫廊的閱讀進度</string>
     <string name="cookie_login_import_in_clipboard">從剪貼簿匯入</string>

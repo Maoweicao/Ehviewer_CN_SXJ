@@ -79,6 +79,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class EhDB {
 
@@ -87,6 +88,9 @@ public class EhDB {
     public static int MAX_HISTORY_COUNT = 100;
 
     private static DaoSession sDaoSession;
+
+    // Cache for download dirnames to reduce synchronized contention
+    private static final ConcurrentHashMap<Long, String> sDownloadDirnameCache = new ConcurrentHashMap<>();
 
     private static boolean sHasOldDB;
     private static boolean sNewDB;
@@ -713,10 +717,18 @@ public class EhDB {
 
     @Nullable
     public static synchronized String getDownloadDirname(long gid) {
+        // Check cache first
+        String cached = sDownloadDirnameCache.get(gid);
+        if (cached != null) {
+            return cached;
+        }
+
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
         DownloadDirname raw = dao.load(gid);
         if (raw != null) {
-            return raw.getDirname();
+            String dirname = raw.getDirname();
+            sDownloadDirnameCache.put(gid, dirname);
+            return dirname;
         } else {
             return null;
         }
@@ -737,11 +749,15 @@ public class EhDB {
             raw.setDirname(dirname);
             dao.insert(raw);
         }
+        // Update cache
+        sDownloadDirnameCache.put(gid, dirname);
     }
 
     public static synchronized void removeDownloadDirname(long gid) {
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
         dao.deleteByKey(gid);
+        // Remove from cache
+        sDownloadDirnameCache.remove(gid);
     }
 
     public static synchronized void updateDownloadDirname(long removeGid, long newGid, String dirname) {
@@ -757,11 +773,16 @@ public class EhDB {
             raw.setDirname(dirname);
             dao.insert(raw);
         }
+        // Update cache
+        sDownloadDirnameCache.remove(removeGid);
+        sDownloadDirnameCache.put(newGid, dirname);
     }
 
     public static synchronized void clearDownloadDirname() {
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
         dao.deleteAll();
+        // Clear cache
+        sDownloadDirnameCache.clear();
     }
 
     // ==================== GalleryVersionMap ====================

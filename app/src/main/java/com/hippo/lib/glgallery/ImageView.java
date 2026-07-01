@@ -608,4 +608,31 @@ class ImageView extends GLView implements ImageTexture.Callback {
     boolean isImageAnimating() {
         return mImageTexture != null && mImageTexture.isRunning();
     }
+
+    public void getImageDisplayRect(android.graphics.RectF outRect) {
+        if (mScaleOffsetDirty) {
+            setScaleOffset(mScaleMode, mStartPosition, mScaleValue);
+        }
+        if (mPositionInRootDirty) {
+            applyPositionInRoot();
+        }
+
+        int[] pos = new int[2];
+        getPositionInRoot(pos);
+
+        outRect.set(
+                pos[0] + mDstActual.left,
+                pos[1] + mDstActual.top,
+                pos[0] + mDstActual.right,
+                pos[1] + mDstActual.bottom
+        );
+    }
+
+    public int getTextureWidth() {
+        return mTextureWidth;
+    }
+
+    public int getTextureHeight() {
+        return mTextureHeight;
+    }
 }

@@ -479,5 +479,224 @@
         <item>https://raw.githubusercontent.com/xiaojieonly/Ehviewer_CN_SXJ/refs/heads/BiLi_PC_Gamer/feedauthor/update.json</item>
     </string-array>
 
+    <!-- Lab 实验室功能数组 -->
+
+    <!-- IP下载阈值 -->
+    <string-array name="ip_threshold_entries">
+        <item>100</item>
+        <item>500</item>
+        <item>1000</item>
+        <item>无限制</item>
+    </string-array>
+
+    <string-array name="ip_threshold_values">
+        <item>100</item>
+        <item>500</item>
+        <item>1000</item>
+        <item>0</item>
+    </string-array>
+
+    <!-- IP风控解封时间 -->
+    <string-array name="ip_block_duration_entries">
+        <item>4小时</item>
+        <item>6小时</item>
+        <item>12小时</item>
+        <item>24小时</item>
+    </string-array>
+
+    <string-array name="ip_block_duration_values">
+        <item>240</item>
+        <item>360</item>
+        <item>720</item>
+        <item>1440</item>
+    </string-array>
+
+    <!-- IP切换策略 -->
+    <string-array name="ip_switch_strategy_entries">
+        <item>轮询模式</item>
+        <item>随机模式</item>
+        <item>优先级模式</item>
+        <item>最低延迟优先</item>
+    </string-array>
+
+    <string-array name="ip_switch_strategy_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- 订阅刷新间隔 -->
+    <string-array name="ip_refresh_interval_entries">
+        <item>30分钟</item>
+        <item>60分钟</item>
+        <item>120分钟</item>
+        <item>360分钟</item>
+        <item>720分钟</item>
+        <item>1440分钟</item>
+    </string-array>
+
+    <string-array name="ip_refresh_interval_values">
+        <item>30</item>
+        <item>60</item>
+        <item>120</item>
+        <item>360</item>
+        <item>720</item>
+        <item>1440</item>
+    </string-array>
+
+    <!-- OCR引擎选择 -->
+    <string-array name="ocr_engine_entries">
+        <item>LAN PaddleOCR Server</item>
+    </string-array>
+
+    <string-array name="ocr_engine_values">
+        <item>lan</item>
+    </string-array>
+
+    <!-- 翻译提供商 -->
+    <string-array name="translate_provider_entries">
+        <item>Ollama (Local)</item>
+        <item>llama.cpp Server</item>
+        <item>Unsloth</item>
+        <item>DeepSeek</item>
+        <item>OpenAI</item>
+        <item>Custom API</item>
+    </string-array>
+
+    <string-array name="translate_provider_values">
+        <item>ollama</item>
+        <item>llamacpp</item>
+        <item>unsloth</item>
+        <item>deepseek</item>
+        <item>openai</item>
+        <item>custom</item>
+    </string-array>
+
+    <!-- 浮层透明度 -->
+    <string-array name="overlay_alpha_entries">
+        <item>100 (不透明)</item>
+        <item>150</item>
+        <item>180</item>
+        <item>200</item>
+        <item>220</item>
+        <item>240 (几乎透明)</item>
+    </string-array>
+
+    <string-array name="overlay_alpha_values">
+        <item>100</item>
+        <item>150</item>
+        <item>180</item>
+        <item>200</item>
+        <item>220</item>
+        <item>240</item>
+    </string-array>
+
+    <!-- 字体大小 -->
+    <string-array name="font_size_entries">
+        <item>10sp</item>
+        <item>12sp</item>
+        <item>14sp</item>
+        <item>16sp</item>
+        <item>18sp</item>
+        <item>20sp</item>
+        <item>24sp</item>
+    </string-array>
+
+    <string-array name="font_size_values">
+        <item>10</item>
+        <item>12</item>
+        <item>14</item>
+        <item>16</item>
+        <item>18</item>
+        <item>20</item>
+        <item>24</item>
+    </string-array>
+
+    <!-- 翻译位置 -->
+    <string-array name="translate_position_entries">
+        <item>原文上方</item>
+        <item>原文下方</item>
+        <item>覆盖原文</item>
+    </string-array>
+
+    <string-array name="translate_position_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
+    <!-- 缓存过期时间 -->
+    <string-array name="cache_expire_entries">
+        <item>1天</item>
+        <item>3天</item>
+        <item>7天</item>
+        <item>14天</item>
+        <item>30天</item>
+        <item>永不过期</item>
+    </string-array>
+
+    <string-array name="cache_expire_values">
+        <item>1</item>
+        <item>3</item>
+        <item>7</item>
+        <item>14</item>
+        <item>30</item>
+        <item>0</item>
+    </string-array>
+
+    <!-- 识图模式 -->
+    <string-array name="ocr_mode_entries">
+        <item>传统OCR</item>
+        <item>AI识图</item>
+    </string-array>
+
+    <string-array name="ocr_mode_values">
+        <item>traditional</item>
+        <item>ai</item>
+    </string-array>
+
+    <!-- 传统OCR引擎 -->
+    <string-array name="ocr_traditional_engine_entries">
+        <item>PP-OCRv5 (推荐，需下载模型)</item>
+        <item>Tesseract OCR</item>
+        <item>系统OCR (ML Kit)</item>
+        <item>自定义ONNX模型</item>
+    </string-array>
+
+    <string-array name="ocr_traditional_engine_values">
+        <item>ppocrv5</item>
+        <item>tesseract</item>
+        <item>mlkit</item>
+        <item>onnx</item>
+    </string-array>
+
+    <!-- AI识图模型 -->
+    <string-array name="ocr_ai_model_entries">
+        <item>PaddleOCR-VL-1.6</item>
+        <item>GPT-4o Vision</item>
+        <item>Claude Vision</item>
+        <item>自定义API</item>
+    </string-array>
+
+    <string-array name="ocr_ai_model_values">
+        <item>paddle_vl</item>
+        <item>gpt4o</item>
+        <item>claude</item>
+        <item>custom</item>
+    </string-array>
+
+    <!-- OCR模型选择 -->
+    <string-array name="ocr_model_entries">
+        <item>PP-OCRv6_medium_rec (推荐，支持50种语言)</item>
+        <item>PP-OCRv5 (完整OCR流水线)</item>
+        <item>PaddleOCR-VL (视觉语言模型)</item>
+    </string-array>
+
+    <string-array name="ocr_model_values">
+        <item>PP_OCRV6_MEDIUM_REC</item>
+        <item>PP_OCRV5</item>
+        <item>PADDLE_OCR_VL</item>
+    </string-array>
 
 </resources>

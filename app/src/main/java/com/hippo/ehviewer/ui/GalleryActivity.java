@@ -33,6 +33,9 @@ import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.Typeface;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.RectF;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -78,6 +81,7 @@ import com.hippo.android.resource.AttrResources;
 import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.milestone.MilestoneManager;
 import com.hippo.ehviewer.util.GifUtils;
 import com.hippo.ehviewer.util.WebpUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
@@ -91,6 +95,9 @@ import com.hippo.ehviewer.widget.GalleryGuideView;
 import com.hippo.ehviewer.widget.GalleryHeader;
 import com.hippo.ehviewer.widget.BottomIndicatorView;
 import com.hippo.ehviewer.widget.ReversibleSeekBar;
+import com.hippo.ehviewer.lab.translate.AiTranslateManager;
+import com.hippo.ehviewer.lab.translate.TranslateOverlayView;
+import com.hippo.ehviewer.lab.translate.model.TranslateResult;
 import com.hippo.lib.glgallery.GalleryProvider;
 import com.hippo.lib.glgallery.GalleryView;
 import com.hippo.lib.glgallery.SimpleAdapter;
@@ -118,6 +125,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Locale;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -154,6 +162,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     private GalleryInfo mGalleryInfo;
     private int mPage;
     private String mCacheFileName;
+    private long mGalleryResumeTime = 0;
 
     @Nullable
     private GLRootView mGLRootView;
@@ -204,6 +213,11 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     private ReversibleSeekBar mSeekBar;
     @Nullable
     private TextView mTransferCountdown;
+
+    @Nullable
+    private TranslateOverlayView mTranslateOverlay;
+    private final ExecutorService mTranslateExecutor = Executors.newSingleThreadExecutor();
+    private int mTranslatePendingIndex = -1;
 
     private ObjectAnimator mSeekBarPanelAnimator;
     private ObjectAnimator mAutoTransferAnimator;
@@ -421,6 +435,10 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         } else if (ACTION_EH.equals(mAction)) {
             if (mGalleryInfo != null) {
                 mGalleryProvider = new EhGalleryProvider(this, mGalleryInfo);
+                MilestoneManager.getInstance(this).recordGalleryViewed(
+                        mGalleryInfo.title,
+                        mGalleryInfo.category
+                );
             }
         } else if (Intent.ACTION_VIEW.equals(mAction)) {
             if (mUri != null) {
@@ -626,6 +644,12 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         // Transfer countdown
         mTransferCountdown = (TextView) ViewUtils.$$(this, R.id.transfer_countdown);
 
+        // AI Translate overlay
+        mTranslateOverlay = (TranslateOverlayView) ViewUtils.$$(this, R.id.translate_overlay);
+        if (mTranslateOverlay != null) {
+            mTranslateOverlay.setVisible(Settings.getAiTranslateEnabled() && Settings.getLabEnabled());
+        }
+
         mSize = mGalleryProvider.size();
         mCurrentIndex = startPage;
         if (mGalleryView != null) {
@@ -752,6 +776,11 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         mBadgeContainer = null;
         mTransferCountdown = null;
 
+        if (mTranslateExecutor != null && !mTranslateExecutor.isShutdown()) {
+            mTranslateExecutor.shutdownNow();
+        }
+        mTranslateOverlay = null;
+
         // Clean up countdown, animation waiting, and loading states
         mCountdownHandler.removeCallbacks(mCountdownRunnable);
         mCountdownHandler.removeCallbacks(mAnimationWaitRunnable);
@@ -780,6 +809,12 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     protected void onPause() {
         super.onPause();
 
+        if (mGalleryResumeTime > 0) {
+            long duration = System.currentTimeMillis() - mGalleryResumeTime;
+            MilestoneManager.getInstance(this).recordGalleryView(duration);
+            mGalleryResumeTime = 0;
+        }
+
         // Don't pause GL when entering PiP (system handles it)
         if (!mIsInPip && mGLRootView != null) {
             mGLRootView.onPause();
@@ -789,6 +824,8 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     @Override
     protected void onResume() {
         super.onResume();
+
+        mGalleryResumeTime = System.currentTimeMillis();
 
         // Don't resume GL when in PiP mode
         if (!mIsInPip && mGLRootView != null) {
@@ -1339,7 +1376,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         if (mFileTypeBadge == null || mGalleryProvider == null) {
             return;
         }
-        
+
         // Get file extension from provider
         String extension = mGalleryProvider.getImageExtension(mCurrentIndex);
         if (!TextUtils.isEmpty(extension)) {
@@ -1347,15 +1384,24 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             String badgeText = extension.substring(1).toUpperCase();
             mFileTypeBadge.setText(badgeText);
             mFileTypeBadge.setVisibility(View.VISIBLE);
-            
-            // Add animated indicator for GIF/WebP animations
-            if (mGalleryProvider.isAnimated(mCurrentIndex)) {
-                mFileTypeBadge.setText(badgeText + " " + getString(R.string.settings_read_wait_for_animation));
-            }
+
+            // Check animated state in background to avoid blocking main thread
+            final int currentIndex = mCurrentIndex;
+            final String ext = extension;
+            new Thread(() -> {
+                final boolean animated = mGalleryProvider.isAnimated(currentIndex);
+                runOnUiThread(() -> {
+                    if (mFileTypeBadge == null || currentIndex != mCurrentIndex) return;
+                    if (animated) {
+                        String badge = ext.substring(1).toUpperCase() + " " + getString(R.string.settings_read_wait_for_animation);
+                        mFileTypeBadge.setText(badge);
+                    }
+                });
+            }).start();
         } else {
             mFileTypeBadge.setVisibility(View.GONE);
         }
-        
+
         // Update GIF badge separately
         updateGifBadge();
     }
@@ -1367,12 +1413,20 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         if (mGifBadge == null || mGalleryProvider == null) {
             return;
         }
-        if (mGalleryProvider.isAnimated(mCurrentIndex)) {
-            mGifBadge.setText("GIF");
-            mGifBadge.setVisibility(View.VISIBLE);
-        } else {
-            mGifBadge.setVisibility(View.GONE);
-        }
+        final int currentIndex = mCurrentIndex;
+        // Check animated state in background to avoid blocking main thread
+        new Thread(() -> {
+            final boolean animated = mGalleryProvider.isAnimated(currentIndex);
+            runOnUiThread(() -> {
+                if (mGifBadge == null) return;
+                if (animated && currentIndex == mCurrentIndex) {
+                    mGifBadge.setText("GIF");
+                    mGifBadge.setVisibility(View.VISIBLE);
+                } else {
+                    mGifBadge.setVisibility(View.GONE);
+                }
+            });
+        }).start();
     }
 
     /**
@@ -2302,6 +2356,7 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
                         mWaitingForAnimation = false;
                         mCountdownHandler.removeCallbacks(mAnimationWaitRunnable);
                     }
+                    scheduleAiTranslate(mValue);
                     break;
                 case KEY_TAP_MENU_AREA:
                     onTapMenuArea();
@@ -2318,6 +2373,91 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             }
             mNotifyTaskPool.push(this);
         }
+    }
+
+    private void scheduleAiTranslate(int pageIndex) {
+        if (mTranslateOverlay == null || mGalleryView == null || mGalleryProvider == null) return;
+
+        if (!Settings.getAiTranslateEnabled() || !Settings.getLabEnabled()) {
+            mTranslateOverlay.setVisible(false);
+            mTranslateOverlay.clearRegions();
+            return;
+        }
+
+        mTranslateOverlay.setVisible(true);
+        mTranslatePendingIndex = pageIndex;
+
+        if (mGalleryProvider.isAnimated(pageIndex) && Settings.getAiTranslateSkipAnimated()) {
+            Log.d(TAG, "Skipping animated page " + pageIndex + " for AI translation");
+            mTranslateOverlay.clearRegions();
+            return;
+        }
+
+        mTranslateExecutor.execute(() -> translatePageAsync(pageIndex));
+    }
+
+    private void translatePageAsync(int pageIndex) {
+        if (mGalleryProvider == null) return;
+
+        int galleryId = mFilename != null ? Math.abs(mFilename.hashCode()) : 0;
+
+        String imagePath = mGalleryProvider.getImagePath(pageIndex);
+
+        if (imagePath == null || imagePath.isEmpty()) {
+            return;
+        }
+
+        Bitmap bitmap = null;
+        try {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inPreferredConfig = Bitmap.Config.RGB_565;
+            bitmap = BitmapFactory.decodeFile(imagePath, opts);
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to decode image for translation: " + imagePath, e);
+            return;
+        }
+
+        if (bitmap == null) return;
+
+        final Bitmap finalBitmap = bitmap;
+        AiTranslateManager.getInstance().translatePage(
+                galleryId, pageIndex, finalBitmap, "zh",
+                new AiTranslateManager.FullTranslateCallback() {
+                    @Override
+                    public void onSuccess(TranslateResult result) {
+                        finalBitmap.recycle();
+                        if (pageIndex != mTranslatePendingIndex) return;
+                        runOnUiThread(() -> {
+                            updateTranslateOverlay(result, pageIndex);
+                        });
+                    }
+
+                    @Override
+                    public void onProgress(int completed, int total) {
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        finalBitmap.recycle();
+                        Log.w(TAG, "AI translate error for page " + pageIndex + ": " + error);
+                    }
+                });
+    }
+
+    private void updateTranslateOverlay(TranslateResult result, int pageIndex) {
+        if (mTranslateOverlay == null || mGalleryView == null) return;
+
+        mTranslateOverlay.setRegions(result.regions);
+
+        GalleryPageView page = mGalleryView.findPageByIndex(pageIndex);
+        if (page != null && page.isImageLoaded()) {
+            RectF displayRect = new RectF();
+            page.getImageDisplayRect(displayRect);
+            mTranslateOverlay.setImageDisplayRect(displayRect);
+            mTranslateOverlay.setTextureSize(page.getTextureWidth(), page.getTextureHeight());
+        }
+
+        mTranslateOverlay.setVisible(true);
     }
 
     private class GalleryAdapter extends SimpleAdapter {

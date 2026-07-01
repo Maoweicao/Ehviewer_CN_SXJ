@@ -255,6 +255,11 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
         notifyPageFailed(index, error);
     }
 
+    @Override
+    public void onPhaseChanged(int phase) {
+        // No-op for read mode
+    }
+
     private static class ReleaseTask implements Runnable {
 
         private SpiderQueen mSpiderQueen;

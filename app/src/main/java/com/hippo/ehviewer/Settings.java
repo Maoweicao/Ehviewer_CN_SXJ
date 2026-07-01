@@ -2050,4 +2050,415 @@ public class Settings {
     public static void putNetworkLogEnabled(boolean value) {
         putBoolean(KEY_NETWORK_LOG_ENABLED, value);
     }
+
+    /********************
+     ****** Lab 实验室功能
+     ********************/
+
+    // 实验室功能总开关
+    public static final String KEY_LAB_ENABLED = "lab_enabled";
+    private static final boolean DEFAULT_LAB_ENABLED = false;
+
+    public static boolean getLabEnabled() {
+        return getBoolean(KEY_LAB_ENABLED, DEFAULT_LAB_ENABLED);
+    }
+
+    public static void putLabEnabled(boolean value) {
+        putBoolean(KEY_LAB_ENABLED, value);
+    }
+
+    // ========== IP切换相关 ==========
+
+    public static final String KEY_IP_SWITCH_ENABLED = "ip_switch_enabled";
+    private static final boolean DEFAULT_IP_SWITCH_ENABLED = false;
+
+    public static boolean getIpSwitchEnabled() {
+        return getBoolean(KEY_IP_SWITCH_ENABLED, DEFAULT_IP_SWITCH_ENABLED);
+    }
+
+    public static void putIpSwitchEnabled(boolean value) {
+        putBoolean(KEY_IP_SWITCH_ENABLED, value);
+    }
+
+    public static final String KEY_IP_SUBSCRIPTION_LIST = "ip_subscription_list";
+    private static final String DEFAULT_IP_SUBSCRIPTION_LIST = "[]";
+
+    public static String getIpSubscriptionList() {
+        return getString(KEY_IP_SUBSCRIPTION_LIST, DEFAULT_IP_SUBSCRIPTION_LIST);
+    }
+
+    public static void putIpSubscriptionList(String value) {
+        putString(KEY_IP_SUBSCRIPTION_LIST, value);
+    }
+
+    public static final String KEY_IP_DOWNLOAD_THRESHOLD = "ip_download_threshold";
+    private static final int DEFAULT_IP_DOWNLOAD_THRESHOLD = 50;
+
+    public static int getIpDownloadThreshold() {
+        return getIntFromStr(KEY_IP_DOWNLOAD_THRESHOLD, DEFAULT_IP_DOWNLOAD_THRESHOLD);
+    }
+
+    public static void putIpDownloadThreshold(int value) {
+        putIntToStr(KEY_IP_DOWNLOAD_THRESHOLD, value);
+    }
+
+    public static final String KEY_IP_BLOCK_DURATION = "ip_block_duration";
+    private static final int DEFAULT_IP_BLOCK_DURATION = 30;
+
+    public static int getIpBlockDuration() {
+        return getIntFromStr(KEY_IP_BLOCK_DURATION, DEFAULT_IP_BLOCK_DURATION);
+    }
+
+    public static void putIpBlockDuration(int value) {
+        putIntToStr(KEY_IP_BLOCK_DURATION, value);
+    }
+
+    public static final String KEY_IP_REFRESH_INTERVAL = "ip_refresh_interval";
+    private static final int DEFAULT_IP_REFRESH_INTERVAL = 60;
+
+    public static int getIpRefreshInterval() {
+        return getIntFromStr(KEY_IP_REFRESH_INTERVAL, DEFAULT_IP_REFRESH_INTERVAL);
+    }
+
+    public static void putIpRefreshInterval(int value) {
+        putIntToStr(KEY_IP_REFRESH_INTERVAL, value);
+    }
+
+    public static final String KEY_IP_SWITCH_STRATEGY = "ip_switch_strategy";
+    private static final int DEFAULT_IP_SWITCH_STRATEGY = 0;
+
+    public static int getIpSwitchStrategy() {
+        return getInt(KEY_IP_SWITCH_STRATEGY, DEFAULT_IP_SWITCH_STRATEGY);
+    }
+
+    public static void putIpSwitchStrategy(int value) {
+        putInt(KEY_IP_SWITCH_STRATEGY, value);
+    }
+
+    // ========== AI翻译相关 ==========
+
+    public static final String KEY_AI_TRANSLATE_ENABLED = "ai_translate_enabled";
+    private static final boolean DEFAULT_AI_TRANSLATE_ENABLED = false;
+
+    public static boolean getAiTranslateEnabled() {
+        return getBoolean(KEY_AI_TRANSLATE_ENABLED, DEFAULT_AI_TRANSLATE_ENABLED);
+    }
+
+    public static void putAiTranslateEnabled(boolean value) {
+        putBoolean(KEY_AI_TRANSLATE_ENABLED, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_PROVIDER = "ai_translate_provider";
+    private static final String DEFAULT_AI_TRANSLATE_PROVIDER = "custom";
+
+    public static String getAiTranslateProvider() {
+        return getString(KEY_AI_TRANSLATE_PROVIDER, DEFAULT_AI_TRANSLATE_PROVIDER);
+    }
+
+    public static void putAiTranslateProvider(String value) {
+        putString(KEY_AI_TRANSLATE_PROVIDER, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_API_KEY = "ai_translate_api_key";
+    private static final String DEFAULT_AI_TRANSLATE_API_KEY = "";
+
+    public static String getAiTranslateApiKey() {
+        return getString(KEY_AI_TRANSLATE_API_KEY, DEFAULT_AI_TRANSLATE_API_KEY);
+    }
+
+    public static void putAiTranslateApiKey(String value) {
+        putString(KEY_AI_TRANSLATE_API_KEY, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_API_URL = "ai_translate_api_url";
+    private static final String DEFAULT_AI_TRANSLATE_API_URL = "";
+
+    public static String getAiTranslateApiUrl() {
+        return getString(KEY_AI_TRANSLATE_API_URL, DEFAULT_AI_TRANSLATE_API_URL);
+    }
+
+    public static void putAiTranslateApiUrl(String value) {
+        putString(KEY_AI_TRANSLATE_API_URL, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_MODEL = "ai_translate_model";
+    private static final String DEFAULT_AI_TRANSLATE_MODEL = "gpt-4o-mini";
+
+    public static String getAiTranslateModel() {
+        return getString(KEY_AI_TRANSLATE_MODEL, DEFAULT_AI_TRANSLATE_MODEL);
+    }
+
+    public static void putAiTranslateModel(String value) {
+        putString(KEY_AI_TRANSLATE_MODEL, value);
+    }
+
+    public static final String KEY_AI_OCR_LAN_URL = "ai_ocr_lan_url";
+    private static final String DEFAULT_AI_OCR_LAN_URL = "";
+
+    public static String getAiOcrLanUrl() {
+        return getString(KEY_AI_OCR_LAN_URL, DEFAULT_AI_OCR_LAN_URL);
+    }
+
+    public static void putAiOcrLanUrl(String value) {
+        putString(KEY_AI_OCR_LAN_URL, value);
+    }
+
+    public static final String KEY_AI_OCR_ENGINE = "ai_ocr_engine";
+    private static final String DEFAULT_AI_OCR_ENGINE = "lan";
+
+    public static String getAiOcrEngine() {
+        return getString(KEY_AI_OCR_ENGINE, DEFAULT_AI_OCR_ENGINE);
+    }
+
+    public static void putAiOcrEngine(String value) {
+        putString(KEY_AI_OCR_ENGINE, value);
+    }
+
+    public static final String KEY_AI_OCR_API_URL = "ai_ocr_api_url";
+    private static final String DEFAULT_AI_OCR_API_URL = "";
+
+    public static String getAiOcrApiUrl() {
+        return getString(KEY_AI_OCR_API_URL, DEFAULT_AI_OCR_API_URL);
+    }
+
+    public static void putAiOcrApiUrl(String value) {
+        putString(KEY_AI_OCR_API_URL, value);
+    }
+
+    public static final String KEY_AI_OCR_MODEL_PATH = "ai_ocr_model_path";
+    private static final String DEFAULT_AI_OCR_MODEL_PATH = "";
+
+    public static String getAiOcrModelPath() {
+        return getString(KEY_AI_OCR_MODEL_PATH, DEFAULT_AI_OCR_MODEL_PATH);
+    }
+
+    public static void putAiOcrModelPath(String value) {
+        putString(KEY_AI_OCR_MODEL_PATH, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_OVERLAY_ALPHA = "ai_translate_overlay_alpha";
+    private static final int DEFAULT_AI_TRANSLATE_OVERLAY_ALPHA = 180;
+
+    public static int getAiTranslateOverlayAlpha() {
+        return getIntFromStr(KEY_AI_TRANSLATE_OVERLAY_ALPHA, DEFAULT_AI_TRANSLATE_OVERLAY_ALPHA);
+    }
+
+    public static void putAiTranslateOverlayAlpha(int value) {
+        putIntToStr(KEY_AI_TRANSLATE_OVERLAY_ALPHA, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_FONT_SIZE = "ai_translate_font_size";
+    private static final int DEFAULT_AI_TRANSLATE_FONT_SIZE = 14;
+
+    public static int getAiTranslateFontSize() {
+        return getIntFromStr(KEY_AI_TRANSLATE_FONT_SIZE, DEFAULT_AI_TRANSLATE_FONT_SIZE);
+    }
+
+    public static void putAiTranslateFontSize(int value) {
+        putIntToStr(KEY_AI_TRANSLATE_FONT_SIZE, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_POSITION = "ai_translate_position";
+    private static final int DEFAULT_AI_TRANSLATE_POSITION = 0;
+
+    public static int getAiTranslatePosition() {
+        return getInt(KEY_AI_TRANSLATE_POSITION, DEFAULT_AI_TRANSLATE_POSITION);
+    }
+
+    public static void putAiTranslatePosition(int value) {
+        putInt(KEY_AI_TRANSLATE_POSITION, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_CACHE_ENABLED = "ai_translate_cache_enabled";
+    private static final boolean DEFAULT_AI_TRANSLATE_CACHE_ENABLED = true;
+
+    public static boolean getAiTranslateCacheEnabled() {
+        return getBoolean(KEY_AI_TRANSLATE_CACHE_ENABLED, DEFAULT_AI_TRANSLATE_CACHE_ENABLED);
+    }
+
+    public static void putAiTranslateCacheEnabled(boolean value) {
+        putBoolean(KEY_AI_TRANSLATE_CACHE_ENABLED, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_CACHE_EXPIRE = "ai_translate_cache_expire";
+    private static final int DEFAULT_AI_TRANSLATE_CACHE_EXPIRE = 7;
+
+    public static int getAiTranslateCacheExpire() {
+        return getIntFromStr(KEY_AI_TRANSLATE_CACHE_EXPIRE, DEFAULT_AI_TRANSLATE_CACHE_EXPIRE);
+    }
+
+    public static void putAiTranslateCacheExpire(int value) {
+        putIntToStr(KEY_AI_TRANSLATE_CACHE_EXPIRE, value);
+    }
+
+    // ========== OCR双核模式设置 ==========
+
+    public static final String KEY_AI_OCR_MODE = "ai_ocr_mode";
+    private static final String DEFAULT_AI_OCR_MODE = "traditional";
+
+    public static String getAiOcrMode() {
+        return getString(KEY_AI_OCR_MODE, DEFAULT_AI_OCR_MODE);
+    }
+
+    public static void putAiOcrMode(String value) {
+        putString(KEY_AI_OCR_MODE, value);
+    }
+
+    // 传统OCR引擎选择
+    public static final String KEY_AI_OCR_TRADITIONAL_ENGINE = "ai_ocr_traditional_engine";
+    private static final String DEFAULT_AI_OCR_TRADITIONAL_ENGINE = "ppocrv5";
+
+    public static String getAiOcrTraditionalEngine() {
+        return getString(KEY_AI_OCR_TRADITIONAL_ENGINE, DEFAULT_AI_OCR_TRADITIONAL_ENGINE);
+    }
+
+    public static void putAiOcrTraditionalEngine(String value) {
+        putString(KEY_AI_OCR_TRADITIONAL_ENGINE, value);
+    }
+
+    // 自定义模型路径
+    public static final String KEY_AI_OCR_CUSTOM_MODEL_PATH = "ai_ocr_custom_model_path";
+    private static final String DEFAULT_AI_OCR_CUSTOM_MODEL_PATH = "";
+
+    public static String getAiOcrCustomModelPath() {
+        return getString(KEY_AI_OCR_CUSTOM_MODEL_PATH, DEFAULT_AI_OCR_CUSTOM_MODEL_PATH);
+    }
+
+    public static void putAiOcrCustomModelPath(String value) {
+        putString(KEY_AI_OCR_CUSTOM_MODEL_PATH, value);
+    }
+
+    // AI识图是否使用翻译层设置
+    public static final String KEY_AI_OCR_USE_TRANSLATE_SETTINGS = "ai_ocr_use_translate_settings";
+    private static final boolean DEFAULT_AI_OCR_USE_TRANSLATE_SETTINGS = true;
+
+    public static boolean getAiOcrUseTranslateSettings() {
+        return getBoolean(KEY_AI_OCR_USE_TRANSLATE_SETTINGS, DEFAULT_AI_OCR_USE_TRANSLATE_SETTINGS);
+    }
+
+    public static void putAiOcrUseTranslateSettings(boolean value) {
+        putBoolean(KEY_AI_OCR_USE_TRANSLATE_SETTINGS, value);
+    }
+
+    // AI识图专用API地址
+    public static final String KEY_AI_OCR_AI_API_URL = "ai_ocr_ai_api_url";
+    private static final String DEFAULT_AI_OCR_AI_API_URL = "";
+
+    public static String getAiOcrAiApiUrl() {
+        return getString(KEY_AI_OCR_AI_API_URL, DEFAULT_AI_OCR_AI_API_URL);
+    }
+
+    public static void putAiOcrAiApiUrl(String value) {
+        putString(KEY_AI_OCR_AI_API_URL, value);
+    }
+
+    // AI识图专用API Key
+    public static final String KEY_AI_OCR_AI_API_KEY = "ai_ocr_ai_api_key";
+    private static final String DEFAULT_AI_OCR_AI_API_KEY = "";
+
+    public static String getAiOcrAiApiKey() {
+        return getString(KEY_AI_OCR_AI_API_KEY, DEFAULT_AI_OCR_AI_API_KEY);
+    }
+
+    public static void putAiOcrAiApiKey(String value) {
+        putString(KEY_AI_OCR_AI_API_KEY, value);
+    }
+
+    // AI识图专用模型
+    public static final String KEY_AI_OCR_AI_MODEL = "ai_ocr_ai_model";
+    private static final String DEFAULT_AI_OCR_AI_MODEL = "gpt-4o";
+
+    public static String getAiOcrAiModel() {
+        return getString(KEY_AI_OCR_AI_MODEL, DEFAULT_AI_OCR_AI_MODEL);
+    }
+
+    public static void putAiOcrAiModel(String value) {
+        putString(KEY_AI_OCR_AI_MODEL, value);
+    }
+
+    // ========== 模型目录设置 ==========
+
+    // OCR模型下载路径
+    public static final String KEY_AI_OCR_MODEL_DOWNLOAD_PATH = "ai_ocr_model_download_path";
+    private static final String DEFAULT_AI_OCR_MODEL_DOWNLOAD_PATH = "";
+
+    public static String getAiOcrModelDownloadPath() {
+        return getString(KEY_AI_OCR_MODEL_DOWNLOAD_PATH, DEFAULT_AI_OCR_MODEL_DOWNLOAD_PATH);
+    }
+
+    public static void putAiOcrModelDownloadPath(String value) {
+        putString(KEY_AI_OCR_MODEL_DOWNLOAD_PATH, value);
+    }
+
+    // AI模型下载路径
+    public static final String KEY_AI_MODEL_DOWNLOAD_PATH = "ai_model_download_path";
+    private static final String DEFAULT_AI_MODEL_DOWNLOAD_PATH = "";
+
+    public static String getAiModelDownloadPath() {
+        return getString(KEY_AI_MODEL_DOWNLOAD_PATH, DEFAULT_AI_MODEL_DOWNLOAD_PATH);
+    }
+
+    public static void putAiModelDownloadPath(String value) {
+        putString(KEY_AI_MODEL_DOWNLOAD_PATH, value);
+    }
+
+    // 当前选择的OCR模型类型
+    public static final String KEY_AI_OCR_SELECTED_MODEL = "ai_ocr_selected_model";
+    private static final String DEFAULT_AI_OCR_SELECTED_MODEL = "PP_OCRV6_MEDIUM_REC";
+
+    public static String getAiOcrSelectedModel() {
+        return getString(KEY_AI_OCR_SELECTED_MODEL, DEFAULT_AI_OCR_SELECTED_MODEL);
+    }
+
+    public static void putAiOcrSelectedModel(String value) {
+        putString(KEY_AI_OCR_SELECTED_MODEL, value);
+    }
+
+    // 是否使用自定义模型路径
+    public static final String KEY_AI_OCR_USE_CUSTOM_PATH = "ai_ocr_use_custom_path";
+    private static final boolean DEFAULT_AI_OCR_USE_CUSTOM_PATH = false;
+
+    public static boolean getAiOcrUseCustomPath() {
+        return getBoolean(KEY_AI_OCR_USE_CUSTOM_PATH, DEFAULT_AI_OCR_USE_CUSTOM_PATH);
+    }
+
+    public static void putAiOcrUseCustomPath(boolean value) {
+        putBoolean(KEY_AI_OCR_USE_CUSTOM_PATH, value);
+    }
+
+    // 自定义OCR模型完整路径（包含模型文件）
+    public static final String KEY_AI_OCR_FULL_MODEL_PATH = "ai_ocr_full_model_path";
+    private static final String DEFAULT_AI_OCR_FULL_MODEL_PATH = "";
+
+    public static String getAiOcrFullModelPath() {
+        return getString(KEY_AI_OCR_FULL_MODEL_PATH, DEFAULT_AI_OCR_FULL_MODEL_PATH);
+    }
+
+    public static void putAiOcrFullModelPath(String value) {
+        putString(KEY_AI_OCR_FULL_MODEL_PATH, value);
+    }
+
+    // ========== 高级设置 ==========
+
+    public static final String KEY_AI_TRANSLATE_SKIP_ANIMATED = "ai_translate_skip_animated";
+    private static final boolean DEFAULT_AI_TRANSLATE_SKIP_ANIMATED = true;
+
+    public static boolean getAiTranslateSkipAnimated() {
+        return getBoolean(KEY_AI_TRANSLATE_SKIP_ANIMATED, DEFAULT_AI_TRANSLATE_SKIP_ANIMATED);
+    }
+
+    public static void putAiTranslateSkipAnimated(boolean value) {
+        putBoolean(KEY_AI_TRANSLATE_SKIP_ANIMATED, value);
+    }
+
+    public static final String KEY_AI_TRANSLATE_AUTO_DETECT = "ai_translate_auto_detect";
+    private static final boolean DEFAULT_AI_TRANSLATE_AUTO_DETECT = true;
+
+    public static boolean getAiTranslateAutoDetect() {
+        return getBoolean(KEY_AI_TRANSLATE_AUTO_DETECT, DEFAULT_AI_TRANSLATE_AUTO_DETECT);
+    }
+
+    public static void putAiTranslateAutoDetect(boolean value) {
+        putBoolean(KEY_AI_TRANSLATE_AUTO_DETECT, value);
+    }
 }

@@ -53,6 +53,7 @@ import com.hippo.ehviewer.client.parser.GalleryPageParser;
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser;
 import com.hippo.ehviewer.dao.DownloadedFile;
 import com.hippo.ehviewer.dao.GalleryVersionMap;
+import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.gallery.GalleryProvider2;
 import com.hippo.lib.glgallery.GalleryPageView;
@@ -274,8 +275,10 @@ public final class SpiderQueen implements Runnable {
         int maxPerHost = Math.max(5, mWorkerMaxCount);
         downloadDispatcher.setMaxRequestsPerHost(maxPerHost);
         downloadDispatcher.setMaxRequests(Math.max(64, maxPerHost * 2));
+        // Create a new client with no cache to avoid DiskLruCache contention
         mDownloadHttpClient = mHttpClient.newBuilder()
             .dispatcher(downloadDispatcher)
+            .cache(null)  // Disable cache for downloads to avoid DiskLruCache lock contention
             .build();
 
         for (int i = 0; i < DECODE_THREAD_NUM; i++) {
@@ -451,6 +454,14 @@ public final class SpiderQueen implements Runnable {
         synchronized (mSpiderListeners) {
             for (OnSpiderListener listener : mSpiderListeners) {
                 listener.onGetImageFailure(index, error);
+            }
+        }
+    }
+
+    private void notifyPhaseChanged(int phase) {
+        synchronized (mSpiderListeners) {
+            for (OnSpiderListener listener : mSpiderListeners) {
+                listener.onPhaseChanged(phase);
             }
         }
     }
@@ -1016,6 +1027,84 @@ public final class SpiderQueen implements Runnable {
         }
     }
 
+    private void prefetchAllPTokens(SpiderInfo spiderInfo) {
+        if (spiderInfo == null || spiderInfo.pTokenMap == null) {
+            return;
+        }
+        int missingCount = 0;
+        for (int i = 0; i < spiderInfo.pages; i++) {
+            String pt = spiderInfo.pTokenMap.get(i);
+            if (pt == null || SpiderInfo.TOKEN_FAILED.equals(pt)) {
+                missingCount++;
+            }
+        }
+        if (missingCount == 0) {
+            Log.i(TAG, "[BATCH] 所有 pToken 已就绪，跳过网络请求");
+            return;
+        }
+        Log.i(TAG, "[BATCH] 缺失 " + missingCount + " 个 pToken，开始批量获取");
+        int previewPerPage = spiderInfo.previewPerPage > 0 ? spiderInfo.previewPerPage : 20;
+        java.util.Set<Integer> neededPreviewPages = new java.util.HashSet<>();
+        for (int i = 0; i < spiderInfo.pages; i++) {
+            String pt = spiderInfo.pTokenMap.get(i);
+            if (pt == null || SpiderInfo.TOKEN_FAILED.equals(pt)) {
+                int previewIndex = i / previewPerPage;
+                if (spiderInfo.previewPages > 0) {
+                    previewIndex = Math.min(previewIndex, spiderInfo.previewPages - 1);
+                }
+                neededPreviewPages.add(previewIndex);
+            }
+        }
+        for (int previewIndex : neededPreviewPages) {
+            if (Thread.currentThread().isInterrupted()) break;
+            try {
+                String url = EhUrl.getGalleryDetailUrl(
+                    mGalleryInfo.gid, mGalleryInfo.token, previewIndex, false);
+                Request request = new EhRequestBuilder(url, EhUrl.getReferer()).build();
+                Response response = mHttpClient.newCall(request).execute();
+                String body = response.body().string();
+                readPreviews(body, previewIndex, spiderInfo);
+            } catch (Exception e) {
+                Log.w(TAG, "[BATCH] 获取预览页 " + previewIndex + " 失败", e);
+            }
+        }
+        writeSpiderInfoToLocal(spiderInfo);
+    }
+
+    private int batchCheckAndCopyLocalFiles(SpiderInfo spiderInfo) {
+        DownloadedFileManager manager = DownloadedFileManager.getInstance();
+        int copiedCount = 0;
+        int checkedCount = 0;
+        int dbHitCount = 0;
+        for (int i = 0; i < spiderInfo.pages; i++) {
+            if (Thread.currentThread().isInterrupted()) break;
+            if (mSpiderDen.contain(i)) {
+                updatePageState(i, STATE_FINISHED);
+                copiedCount++;
+                continue;
+            }
+            String pToken = spiderInfo.pTokenMap.get(i);
+            if (pToken == null || SpiderInfo.TOKEN_FAILED.equals(pToken)) {
+                continue;
+            }
+            checkedCount++;
+            DownloadedFile downloadedFile = manager.getFileByToken(pToken);
+            if (downloadedFile != null) {
+                dbHitCount++;
+                if (copyExistingFile(downloadedFile, i)) {
+                    updatePageState(i, STATE_FINISHED);
+                    copiedCount++;
+                    Log.d(TAG, "[BATCH] 页面 " + i + " 复制成功 (pToken: " + pToken + ")");
+                } else {
+                    Log.w(TAG, "[BATCH] 页面 " + i + " 复制失败，将从网络下载");
+                }
+            }
+        }
+        Log.i(TAG, "[BATCH] 批量检查完成: 检查 " + checkedCount + " 页, " +
+                  "数据库命中 " + dbHitCount + ", 复制成功 " + copiedCount);
+        return copiedCount;
+    }
+
     private void runInternal() {
         // Read spider info
         SpiderInfo spiderInfo = readSpiderInfoFromLocal();
@@ -1056,6 +1145,23 @@ public final class SpiderQueen implements Runnable {
 
         // Notify get pages
         notifyGetPages(spiderInfo.pages);
+
+        // Check interrupted
+        if (Thread.currentThread().isInterrupted()) {
+            return;
+        }
+
+        // Batch pre-fetch pTokens and copy local files
+        if (mDownloadReference > 0) {
+            notifyPhaseChanged(DownloadInfo.PHASE_COPY);
+            prefetchAllPTokens(spiderInfo);
+            if (Thread.currentThread().isInterrupted()) {
+                return;
+            }
+            int copiedCount = batchCheckAndCopyLocalFiles(spiderInfo);
+            Log.i(TAG, "[BATCH] 预复制完成: " + copiedCount + "/" + spiderInfo.pages + " 页");
+            notifyPhaseChanged(DownloadInfo.PHASE_DOWNLOAD);
+        }
 
         // Ensure worker
         tryToEnsureWorkers();
@@ -1452,6 +1558,8 @@ public final class SpiderQueen implements Runnable {
         void onGetImageSuccess(int index, Image image);
 
         void onGetImageFailure(int index, String error);
+
+        void onPhaseChanged(int phase);
     }
 
     private static class AutoCloseInputStream extends InputStream {
@@ -1684,6 +1792,19 @@ public final class SpiderQueen implements Runnable {
                         Log.d(TAG, "Start download image " + index);
                     }
 
+                    // Check memory before download
+                    Runtime rt = Runtime.getRuntime();
+                    long availMem = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory());
+                    if (availMem < 10 * 1024 * 1024) { // Less than 10MB
+                        Log.w(TAG, "Insufficient memory for download (" + (availMem / 1024 / 1024) + "MB), triggering GC");
+                        System.gc();
+                        availMem = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory());
+                        if (availMem < 5 * 1024 * 1024) {
+                            error = "Out of memory";
+                            break;
+                        }
+                    }
+
                         // 扩大连接/读/写超时，避免 10s 连接超时导致频繁失败
                         int timeoutSec = downloadTimeout <= 0 ? 30 : downloadTimeout;
                         Call call = mDownloadHttpClient.newBuilder()
@@ -1870,6 +1991,12 @@ public final class SpiderQueen implements Runnable {
                     e.printStackTrace();
                     error = GetText.getString(R.string.error_socket);
                     forceHtml = true;
+                } catch (OutOfMemoryError oom) {
+                    Log.e(TAG, "OOM during image download for page " + index, oom);
+                    error = "Out of memory";
+                    // Force GC to reclaim some memory
+                    System.gc();
+                    break;
                 } finally {
                     IOUtils.closeQuietly(is);
 
@@ -1894,6 +2021,31 @@ public final class SpiderQueen implements Runnable {
 
         // false for stop
         private boolean runInternal() {
+            // Check available memory before processing
+            Runtime runtime = Runtime.getRuntime();
+            long freeMemory = runtime.freeMemory();
+            long maxMemory = runtime.maxMemory();
+            long usedMemory = runtime.totalMemory() - freeMemory;
+            long availableMemory = maxMemory - usedMemory;
+
+            // If less than 5% memory available, wait and trigger GC
+            if (availableMemory < maxMemory * 0.05) {
+                Log.w(TAG, "Low memory available (" + (availableMemory / 1024 / 1024) + "MB), waiting...");
+                System.gc();
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    return false;
+                }
+                // Recheck after GC
+                freeMemory = runtime.freeMemory();
+                availableMemory = maxMemory - (runtime.totalMemory() - freeMemory);
+                if (availableMemory < maxMemory * 0.03) {
+                    Log.e(TAG, "Still low memory after GC, skipping worker");
+                    return true; // Continue but skip this cycle
+                }
+            }
+
             SpiderInfo spiderInfo = mSpiderInfo.get();
             UniFile downloadDir = mSpiderDen.getDownloadDir();
             SpiderInfo oldInfo;

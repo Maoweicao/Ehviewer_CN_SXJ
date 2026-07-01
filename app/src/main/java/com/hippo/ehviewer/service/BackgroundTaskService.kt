@@ -79,20 +79,6 @@ class BackgroundTaskService : Service() {
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize WakeLock
-        try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            mWakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "EhViewer:BackgroundTaskWakeLock"
-            ).apply {
-                setReferenceCounted(false)
-            }
-            Log.i(TAG, "WakeLock initialized")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize WakeLock", e)
-        }
-
         // Ensure notification channel exists (same channel as BackgroundTaskManager)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -106,6 +92,25 @@ class BackgroundTaskService : Service() {
             }
             nm.createNotificationChannel(channel)
         }
+
+        // Call startForeground immediately in onCreate to avoid
+        // ForegroundServiceDidNotStartInTimeException
+        startForeground(NOTIFICATION_ID, buildNotification(0, null))
+        Log.d(TAG, "startForeground called in onCreate")
+
+        // Initialize WakeLock
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            mWakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "EhViewer:BackgroundTaskWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+            }
+            Log.i(TAG, "WakeLock initialized")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize WakeLock", e)
+        }
     }
 
     @SuppressLint("WakelockTimeout")
@@ -116,10 +121,11 @@ class BackgroundTaskService : Service() {
         // Start lock refresh timer
         startLockRefresh()
 
-        // Build and show foreground notification
+        // Update foreground notification with actual task info
         val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_TASK_COUNT, 0) ?: 0
         val taskName = intent?.getStringExtra(EXTRA_TASK_NAME)
-        startForeground(NOTIFICATION_ID, buildNotification(activeCount, taskName))
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIFICATION_ID, buildNotification(activeCount, taskName))
 
         Log.d(TAG, "Service started, activeTasks=$activeCount, taskName=$taskName")
         return START_NOT_STICKY

@@ -45,6 +45,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.dao.DownloadedFile;
 import com.hippo.ehviewer.dao.GalleryVersionMap;
+import com.hippo.ehviewer.milestone.MilestoneManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
@@ -54,6 +55,7 @@ import com.hippo.ehviewer.cache.GalleryCacheManager;
 import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.lab.ip.IpSwitchController;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.GalleryTagGroup;
 import okhttp3.OkHttpClient;
@@ -528,6 +530,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     info.state = DownloadInfo.STATE_DOWNLOAD;
                     info.speed = -1;
                     info.remaining = -1;
+                    info.phase = DownloadInfo.PHASE_IDLE;
                     // 仅当页数未知时才重置为-1，保留已预取的有效页数
                     if (info.total <= 0) {
                         info.total = -1;
@@ -1323,6 +1326,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             return;
         }
 
+        // Track download
+        MilestoneManager.getInstance(mContext).recordDownload();
+
         DownloadInfo info = new DownloadInfo(galleryInfo);
         info.label = label;
         info.time = System.currentTimeMillis();
@@ -1988,6 +1994,22 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Ignore
     }
 
+    @Override
+    public void onPhaseChanged(int phase) {
+        if (mCurrentTask != null) {
+            String galleryTitle = EhUtils.getSuitableTitle(mCurrentTask);
+            String phaseStr = phase == DownloadInfo.PHASE_COPY ? "COPY" : "DOWNLOAD";
+            Log.d(TAG, "[SPIDER] 阶段变化: " + phaseStr + " - " + galleryTitle);
+            mDownloadLogger.logPhaseChange(String.valueOf(mCurrentTask.gid), galleryTitle, phase);
+        }
+        NotifyTask task = mNotifyTaskPool.pop();
+        if (task == null) {
+            task = new NotifyTask();
+        }
+        task.setOnPhaseChangedData(phase);
+        SimpleHandler.getInstance().post(task);
+    }
+
     private class NotifyTask implements Runnable {
 
         public static final int TYPE_ON_GET_PAGES = 0;
@@ -1996,6 +2018,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         public static final int TYPE_ON_PAGE_SUCCESS = 3;
         public static final int TYPE_ON_PAGE_FAILURE = 4;
         public static final int TYPE_ON_FINISH = 5;
+        public static final int TYPE_ON_PHASE_CHANGED = 6;
 
         private int mType;
         private int mPages;
@@ -2008,6 +2031,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         private int mFinished;
         private int mDownloaded;
         private int mTotal;
+        private int mPhase;
 
         public void setOnGetPagesData(int pages) {
             mType = TYPE_ON_GET_PAGES;
@@ -2051,6 +2075,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             mTotal = total;
         }
 
+        public void setOnPhaseChangedData(int phase) {
+            mType = TYPE_ON_PHASE_CHANGED;
+            mPhase = phase;
+        }
+
         @Override
         public void run() {
             switch (mType) {
@@ -2073,6 +2102,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     if (mDownloadListener != null) {
                         mDownloadListener.onGet509();
                     }
+                    IpSwitchController.getInstance().reportDownloadFailure("509");
                     break;
                 }
                 case TYPE_ON_PAGE_DOWNLOAD: {
@@ -2092,6 +2122,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         if (mDownloadListener != null) {
                             mDownloadListener.onGetPage(info);
                         }
+                        IpSwitchController.getInstance().reportDownloadSuccess();
                         List<DownloadInfo> list = getInfoListForLabel(info.label);
                         if (list != null) {
                             for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -2116,6 +2147,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                                 l.onUpdate(info, list, mWaitList);
                             }
                         }
+                        IpSwitchController.getInstance().reportDownloadFailure(mError);
                     }
                     break;
                 }
@@ -2148,12 +2180,15 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     info.networkCount = mDownloaded;
                     info.total = mTotal;
                     info.legacy = mTotal - mFinished;
+                    info.phase = DownloadInfo.PHASE_IDLE;
                     if (info.legacy == 0) {
                         info.state = DownloadInfo.STATE_FINISH;
                         Log.i(TAG, "[FINISH] 下载完成: " + galleryTitle + " (" + mFinished + "/" + mTotal + ")");
+                        IpSwitchController.getInstance().reportDownloadSuccess();
                     } else {
                         info.state = DownloadInfo.STATE_FAILED;
                         Log.w(TAG, "[FINISH] 下载失败，有未完成页面: " + galleryTitle + " (剩余: " + info.legacy + ")");
+                        IpSwitchController.getInstance().reportDownloadFailure("incomplete");
                     }
                     // Update in DB
                     EhDB.putDownloadInfo(info);
@@ -2199,6 +2234,24 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     // Start next download
                     requestEnsureDownload();
                     Log.d(TAG, "[FINISH] 确保下一个下载开始: " + galleryTitle);
+                    break;
+                }
+                case TYPE_ON_PHASE_CHANGED: {
+                    DownloadInfo info = mCurrentTask;
+                    if (info == null) {
+                        Log.e(TAG, "Current task is null for phase change");
+                    } else {
+                        info.phase = mPhase;
+                        if (mDownloadListener != null) {
+                            mDownloadListener.onPhaseChanged(info, mPhase);
+                        }
+                        List<DownloadInfo> list = getInfoListForLabel(info.label);
+                        if (list != null) {
+                            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                                l.onUpdate(info, list, mWaitList);
+                            }
+                        }
+                    }
                     break;
                 }
             }
@@ -2388,6 +2441,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
          * Download done
          */
         void onCancel(DownloadInfo info);
+
+        /**
+         * Download phase changed (copy vs download)
+         */
+        default void onPhaseChanged(DownloadInfo info, int phase) {}
     }
     
     public interface StartAllDownloadListener {

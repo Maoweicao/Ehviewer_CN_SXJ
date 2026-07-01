@@ -648,22 +648,10 @@ public class DownloadsScene extends ToolbarScene
             @Override
             public void onPageChanged(int newIndexPage) {
                 indexPage = newIndexPage;
-                // 设置页码切换标志
                 isPageChanging = true;
-                
-                // 页码切换时，延迟更新列表以避免与进度更新冲突
-                if (mAdapter != null) {
-                    mMainHandler.postDelayed(() -> {
-                        try {
-                            mAdapter.notifyDataSetChanged();
-                            // 重置页码切换标志
-                            isPageChanging = false;
-                        } catch (Exception e) {
-                            android.util.Log.e("DownloadsScene", "Error updating adapter after page change: " + e.getMessage());
-                            isPageChanging = false;
-                        }
-                    }, 150); // 延迟150ms执行，确保页码切换完�?
-                }
+                mMainHandler.postDelayed(() -> {
+                    isPageChanging = false;
+                }, 300);
             }
 
             @Override
@@ -679,14 +667,7 @@ public class DownloadsScene extends ToolbarScene
         final GeneralItemAnimator animator = new DraggableItemAnimator();
         mRecyclerView.setItemAnimator(animator);
 
-        mRecyclerView.setItemViewCacheSize(100);
-        try {
-            mRecyclerView.setDrawingCacheEnabled(true);
-            mRecyclerView.setDrawingCacheQuality(View.DRAWING_CACHE_QUALITY_HIGH);
-        } catch (Exception e) {
-            // 忽略硬件位图相关错误
-            android.util.Log.w("DownloadsScene", "Error setting drawing cache: " + e.getMessage());
-        }
+        mRecyclerView.setItemViewCacheSize(4);
         mRecyclerView.setLayoutManager(mLayoutManager);
         mRecyclerView.setSelector(Ripple.generateRippleDrawable(context, !AttrResources.getAttrBoolean(context, androidx.appcompat.R.attr.isLightTheme), new ColorDrawable(Color.TRANSPARENT)));
         mRecyclerView.setDrawSelectorOnTop(true);
@@ -884,6 +865,9 @@ public class DownloadsScene extends ToolbarScene
             mFabLayout = null;
         }
 
+        if (mOriginalAdapter != null) {
+            mOriginalAdapter.clearCaches();
+        }
         mRecyclerView = null;
         mViewTransition = null;
         mAdapter = null;
@@ -1713,6 +1697,11 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onAdd(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {
+        if (isPageChanging) {
+            mMainHandler.postDelayed(() -> onAdd(info, list, position), 200);
+            return;
+        }
+
         if (mList != list) {
             // 如果列表不匹配，尝试在当前列表中查找是否已存在该项目
             boolean found = false;
@@ -1762,6 +1751,11 @@ public class DownloadsScene extends ToolbarScene
     @Override
     public void onReplace(@NonNull DownloadInfo newInfo, @NonNull DownloadInfo oldInfo) {
         if (mList == null) {
+            return;
+        }
+
+        if (isPageChanging) {
+            mMainHandler.postDelayed(() -> onReplace(newInfo, oldInfo), 200);
             return;
         }
         
@@ -2237,6 +2231,10 @@ public class DownloadsScene extends ToolbarScene
         doNotScroll = false;
         updateAdapter();
         updatePaginationIndicator(true);
+        needInitPage = false;
+        if (myPageChangeListener != null) {
+            myPageChangeListener.setNeedInitPage(false);
+        }
         updateTitle();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {
@@ -2268,6 +2266,10 @@ public class DownloadsScene extends ToolbarScene
         doNotScroll = false;
         updateAdapter();
         updatePaginationIndicator(true);
+        needInitPage = false;
+        if (myPageChangeListener != null) {
+            myPageChangeListener.setNeedInitPage(false);
+        }
         updateTitle();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {
@@ -2286,6 +2288,10 @@ public class DownloadsScene extends ToolbarScene
         doNotScroll = false;
         updateAdapter();
         updatePaginationIndicator(true);
+        needInitPage = false;
+        if (myPageChangeListener != null) {
+            myPageChangeListener.setNeedInitPage(false);
+        }
         updateTitle();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {

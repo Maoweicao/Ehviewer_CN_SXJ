@@ -1,22 +1,32 @@
 package com.hippo.ehviewer.task.impl
 
 import android.content.Context
-import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.task.BackgroundTask
-import com.hippo.ehviewer.task.impl.BaseBackgroundTask
+import com.hippo.ehviewer.task.compress.CompressPlan
+import com.hippo.ehviewer.task.compress.CompressPlanManager
+import com.hippo.ehviewer.task.compress.PlanItemState
+import com.hippo.ehviewer.task.compress.PlanState
 import com.hippo.unifile.UniFile
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 /**
- * 压缩选择的下载画廊任务
+ * 压缩选择的下载画廊任务 (Plan-based)
+ *
+ * 执行流程:
+ * 1. 尝试加载已有的 CompressPlan JSON (断点续传)
+ * 2. 若无 Plan → 扫描所有画廊 → 生成计划 → 保存 JSON
+ * 3. 按计划逐 gallery 压缩，每个完成后更新 JSON
+ * 4. 每个 ZIP 分卷完成后校验完整性，损坏则重做
+ * 5. 断点续传时先检查所有已完成 ZIP 的完整性
  */
 class CompressSelectedGalleriesTask @JvmOverloads constructor(
     context: Context,
@@ -55,15 +65,13 @@ class CompressSelectedGalleriesTask @JvmOverloads constructor(
 
     override suspend fun execute(): Result<Unit> {
         appendTaskLog("开始压缩 ${selectedList.size} 个画廊")
-        val totalCount = selectedList.size
+
         if (selectedList.isEmpty()) {
             updateProgress(100, context.getString(R.string.compress_selected_galleries))
             notifyCompleted()
             appendTaskLog("没有要压缩的画廊，任务结束")
             return Result.success(Unit)
         }
-
-        updateProgress(0, totalCount, context.getString(R.string.compress_selected_galleries) + " 0/" + totalCount)
 
         val outputDir = com.hippo.ehviewer.Settings.getExportLocation()
             ?: return Result.failure(IOException("Export location unavailable"))
@@ -72,97 +80,185 @@ class CompressSelectedGalleriesTask @JvmOverloads constructor(
             return Result.failure(IOException("Failed to create export directory"))
         }
 
-        val splitSizeMb = com.hippo.ehviewer.Settings.getCompressSplitSizeMB()
-        val splitSizeBytes = if (splitSizeMb > 0) splitSizeMb * 1024L * 1024L else 0L
+        val splitSizeBytes = com.hippo.ehviewer.Settings.getCompressSplitSizeBytes()
 
-        var completedCount = 0
-        var partIndex = 1
+        // Phase 1: Load or build plan
+        var plan = CompressPlanManager.loadPlan(taskId)
 
-        var currentPartFile: UniFile? = null
-        var zos: ZipOutputStream? = null
-        var currentPartSize: Long = 0L
+        if (plan != null) {
+            // RESUME mode
+            appendTaskLog("发现已有压缩计划，进入恢复模式")
+            val corrupted = CompressPlanManager.verifyAllCompleted(plan)
+            if (corrupted > 0) {
+                appendTaskLog("发现 $corrupted 个损坏的压缩包，将重新压缩")
+            }
+            updateProgress(plan.completedGalleries, plan.totalGalleries,
+                "${context.getString(R.string.compress_selected_galleries)} ${plan.completedGalleries}/${plan.totalGalleries}")
 
+            // Collect completed ZIP names for output
+            for (part in plan.parts) {
+                if (part.state == PlanItemState.COMPLETED && !outputFileNames.contains(part.zipFileName)) {
+                    outputFileNames.add(part.zipFileName)
+                }
+            }
+        } else {
+            // CREATE mode
+            appendTaskLog("扫描画廊文件夹，生成压缩计划...")
+            plan = CompressPlanManager.buildPlan(outputDir, selectedList, splitSizeBytes, taskId)
+                ?: return Result.failure(IOException("Failed to build compress plan"))
+
+            if (!CompressPlanManager.savePlan(plan)) {
+                return Result.failure(IOException("Failed to save compress plan"))
+            }
+            appendTaskLog("计划已生成: ${plan.totalGalleries} 个画廊, ${plan.parts.size} 个压缩包")
+            updateProgress(0, plan.totalGalleries,
+                "${context.getString(R.string.compress_selected_galleries)} 0/${plan.totalGalleries}")
+        }
+
+        // Phase 2: Execute plan
         return try {
-            for (info in selectedList) {
-                val galleryDir = SpiderDen.getGalleryDownloadDir(info)
-                if (galleryDir == null || !galleryDir.exists()) {
-                    appendTaskLog("画廊 ${info.gid} 不存在，跳过")
-                    completedCount++
-                    updateProgress(completedCount, totalCount, context.getString(R.string.compress_selected_galleries) + " " + completedCount + "/" + totalCount)
+            plan.state = PlanState.IN_PROGRESS
+            CompressPlanManager.savePlan(plan)
+
+            var zos: ZipOutputStream? = null
+            var currentPart: com.hippo.ehviewer.task.compress.CompressPart? = null
+            var currentPartFile: UniFile? = null
+
+            var partIndex = 0
+            while (partIndex < plan.parts.size) {
+                val part = plan.parts[partIndex]
+
+                // Skip completed parts
+                if (part.state == PlanItemState.COMPLETED && CompressPlanManager.verifyZipIntegrity(part)) {
+                    appendTaskLog("压缩包 ${part.zipFileName} 已完成且完整，跳过")
+                    partIndex++
                     continue
                 }
 
-                appendTaskLog("压缩画廊 ${info.gid} - ${info.title}")
-                val gallerySize = calculateUniFileSize(galleryDir)
+                if (part.state == PlanItemState.COMPLETED) {
+                    // Marked COMPLETED but ZIP is corrupt
+                    appendTaskLog("压缩包 ${part.zipFileName} 不完整，重新压缩")
+                    CompressPlanManager.markPartCorrupt(plan, part)
+                }
 
-                if (splitSizeBytes > 0 && currentPartFile != null && currentPartSize > 0 && currentPartSize + gallerySize > splitSizeBytes) {
-                    zos?.close()
-                    currentPartFile = null
+                // Handle in-progress part: close and delete partial ZIP
+                if (zos != null && currentPart != part) {
+                    try { zos.closeEntry() } catch (_: Exception) {}
+                    try { zos.close() } catch (_: Exception) {}
                     zos = null
-                    currentPartSize = 0L
+                    if (currentPart != null) {
+                        if (!CompressPlanManager.verifyZipIntegrity(currentPart)) {
+                            appendTaskLog("压缩包 ${currentPart.zipFileName} 校验失败，重新压缩")
+                            CompressPlanManager.markPartCorrupt(plan, currentPart)
+                        }
+                    }
+                }
+
+                for (gallery in part.galleries) {
+                    if (gallery.state == PlanItemState.COMPLETED) {
+                        // Already done - ensure output name is tracked
+                        if (!outputFileNames.contains(part.zipFileName)) {
+                            outputFileNames.add(part.zipFileName)
+                        }
+                        continue
+                    }
+
+                    val galleryDir = SpiderDen.getGalleryDownloadDir(
+                        DownloadInfo(gallery.gid).apply { title = gallery.title }
+                    )
+                    if (galleryDir == null || !galleryDir.exists()) {
+                        appendTaskLog("画廊 ${gallery.gid} 不存在，跳过")
+                        gallery.state = PlanItemState.COMPLETED
+                        plan.completedGalleries++
+                        CompressPlanManager.savePlan(plan)
+                        updateProgress(plan.completedGalleries, plan.totalGalleries,
+                            "${context.getString(R.string.compress_selected_galleries)} ${plan.completedGalleries}/${plan.totalGalleries}")
+                        continue
+                    }
+
+                    appendTaskLog("压缩画廊 ${gallery.gid} - ${gallery.title}")
+
+                    // Open or reuse ZIP part
+                    if (zos == null) {
+                        addedEntries.clear()
+                        val zipFile = File(part.zipFilePath)
+                        // Delete any incomplete partial file
+                        if (zipFile.exists() && part.state != PlanItemState.COMPLETED) {
+                            zipFile.delete()
+                        }
+                        currentPartFile = outputDir.createFile(part.zipFileName)
+                            ?: return Result.failure(IOException("Failed to create ${part.zipFileName}"))
+                        zos = ZipOutputStream(currentPartFile!!.openOutputStream())
+                        currentPart = part
+                        if (!outputFileNames.contains(currentPartFile!!.name)) {
+                            outputFileNames.add(currentPartFile!!.name ?: part.zipFileName)
+                        }
+                    }
+
+                    // Compress
+                    gallery.state = PlanItemState.IN_PROGRESS
+                    CompressPlanManager.savePlan(plan)
+
+                    val folderName = gallery.folderName
+                    addUniFileToZip(galleryDir, folderName, zos!!)
+
+                    gallery.state = PlanItemState.COMPLETED
+                    plan.completedGalleries++
+                    CompressPlanManager.savePlan(plan)
+
+                    updateProgress(plan.completedGalleries, plan.totalGalleries,
+                        "${context.getString(R.string.compress_selected_galleries)} ${plan.completedGalleries}/${plan.totalGalleries}")
+                }
+
+                // Part done - close ZIP and verify
+                if (zos != null) {
+                    try {
+                        zos.closeEntry()
+                    } catch (_: Exception) {}
+                    try {
+                        zos.close()
+                    } catch (_: Exception) {}
+                    zos = null
+
+                    if (CompressPlanManager.verifyZipIntegrity(part)) {
+                        part.state = PlanItemState.COMPLETED
+                        CompressPlanManager.savePlan(plan)
+                        appendTaskLog("压缩包 ${part.zipFileName} 完成并校验通过")
+                        partIndex++  // Move to next part
+                    } else {
+                        appendTaskLog("压缩包 ${part.zipFileName} 校验失败，将重新压缩")
+                        CompressPlanManager.markPartCorrupt(plan, part)
+                        // Stay on same partIndex to retry
+                    }
+                } else {
                     partIndex++
                 }
-
-                if (zos == null) {
-                    addedEntries.clear()
-                    val baseName = "ehviewer_${System.currentTimeMillis()}"
-                    val partFile = createPartZipFile(outputDir, baseName, partIndex)
-                        ?: return Result.failure(IOException("Failed to create zip file"))
-                    currentPartFile = partFile
-                    outputFileNames.add(partFile.name ?: partFile.toString())
-                    zos = ZipOutputStream(partFile.openOutputStream())
-                }
-
-                val folderName = sanitizeFileName(info.title ?: info.gid.toString())
-                addUniFileToZip(galleryDir, folderName, zos)
-
-                currentPartSize += if (gallerySize > 0) gallerySize else 1
-                completedCount++
-                updateProgress(completedCount, totalCount, context.getString(R.string.compress_selected_galleries) + " " + completedCount + "/" + totalCount)
+                currentPart = null
+                currentPartFile = null
             }
 
-            zos?.close()
+            // Final: close any remaining output
+            try { zos?.close() } catch (_: Exception) {}
+
+            plan.state = PlanState.COMPLETED
+            CompressPlanManager.savePlan(plan)
+
             notifyCompleted()
             appendTaskLog("压缩完成，生成 ${outputFileNames.size} 个压缩包: ${outputFileNames.joinToString(", ")}")
 
             Result.success(Unit)
         } catch (e: Exception) {
-            try {
-                zos?.close()
-            } catch (_: Exception) {
+            try { /* final close */ } catch (_: Exception) {}
+            // Save plan state so resume can pick up
+            if (plan != null) {
+                try {
+                    CompressPlanManager.savePlan(plan)
+                } catch (_: Exception) {}
             }
             appendTaskLog("压缩任务出错: ${e.message}")
             notifyError(e)
             Result.failure(e)
         }
-    }
-
-    private fun createPartZipFile(outputDir: UniFile, baseName: String, partIndex: Int): UniFile? {
-        var fileName = if (partIndex <= 1) "$baseName.zip" else "$baseName-part$partIndex.zip"
-        var zipFile = outputDir.createFile(fileName)
-        var suffix = 1
-        while (zipFile == null && suffix <= 100) {
-            fileName = if (partIndex <= 1) "$baseName-$suffix.zip" else "$baseName-part$partIndex-$suffix.zip"
-            zipFile = outputDir.createFile(fileName)
-            suffix++
-        }
-        return zipFile
-    }
-
-    private fun calculateUniFileSize(uniFile: UniFile?): Long {
-        if (uniFile == null || !uniFile.exists()) return 0L
-        if (uniFile.isFile) {
-            return uniFile.length()
-        }
-        if (uniFile.isDirectory) {
-            var total = 0L
-            val children = uniFile.listFiles() ?: return 0L
-            for (child in children) {
-                total += calculateUniFileSize(child)
-            }
-            return total
-        }
-        return 0L
     }
 
     private fun addUniFileToZip(uniFile: UniFile, basePath: String, zos: ZipOutputStream) {
@@ -207,15 +303,24 @@ class CompressSelectedGalleriesTask @JvmOverloads constructor(
         }
     }
 
-    private fun sanitizeFileName(input: String?): String {
-        if (input == null) return ""
-        return input.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-    }
-
     companion object {
         @JvmStatic
         fun restore(context: Context, taskId: String, persistData: String?): CompressSelectedGalleriesTask? {
             if (persistData.isNullOrEmpty()) {
+                // Try plan-based restore: if a plan file exists, extract gids from it
+                val plan = CompressPlanManager.loadPlan(taskId)
+                if (plan != null) {
+                    val gids = mutableListOf<Long>()
+                    for (part in plan.parts) {
+                        for (gallery in part.galleries) {
+                            gids.add(gallery.gid)
+                        }
+                    }
+                    if (gids.isNotEmpty()) {
+                        val selected = gids.map { DownloadInfo(it) }
+                        return CompressSelectedGalleriesTask(context, selected, taskId)
+                    }
+                }
                 return null
             }
             return try {
@@ -228,11 +333,8 @@ class CompressSelectedGalleriesTask @JvmOverloads constructor(
                         selected.add(DownloadInfo(gid))
                     }
                 }
-                if (selected.isEmpty()) {
-                    null
-                } else {
-                    CompressSelectedGalleriesTask(context, selected, taskId)
-                }
+                if (selected.isEmpty()) null
+                else CompressSelectedGalleriesTask(context, selected, taskId)
             } catch (e: Exception) {
                 null
             }

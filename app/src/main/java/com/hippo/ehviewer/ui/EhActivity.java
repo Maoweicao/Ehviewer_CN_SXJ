@@ -91,7 +91,14 @@ public abstract class EhActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            applyEdgeToEdgeSystemBars();
+            // 使用边缘到边缘布局，确保内容不被系统栏遮挡
+            // 移除 SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION 以适配三键导航模式
+            getWindow().getDecorView().setSystemUiVisibility(
+                    getWindow().getDecorView().getSystemUiVisibility()
+                            | android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            );
+            // 设置导航栏透明以支持全屏沉浸式布局，配合 fitsSystemWindows 处理内边距
+            getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             getWindow().setNavigationBarContrastEnforced(false);
