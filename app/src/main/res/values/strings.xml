@@ -1654,4 +1654,12 @@
     <string name="progressive_merge_preparing">Preparing merge…</string>
     <string name="progressive_ignore">Ignore</string>
     <string name="progressive_view_in_downloads">View in Downloads</string>
+    <string name="settings_download_show_folder_time">Show folder time</string>
+    <string name="settings_download_show_folder_time_summary">Show folder time in download cards</string>
+    <string name="settings_download_show_folder_size">Show folder size</string>
+    <string name="settings_download_show_folder_size_summary">Show folder size in download cards</string>
+    <string name="settings_download_merge_on_download">Merge duplicates on download</string>
+    <string name="settings_download_merge_on_download_summary">Merge duplicate galleries when downloading</string>
+    <string name="merge_duplicate_gallery_single_title">Merge duplicate gallery</string>
+    <string name="merge_duplicate_gallery_single_summary">Merge duplicate gallery &quot;%1$s&quot;?</string>
 </resources>

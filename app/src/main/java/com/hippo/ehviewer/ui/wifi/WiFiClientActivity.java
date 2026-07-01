@@ -32,8 +32,8 @@ import android.os.Message;
 import android.text.format.Formatter;
 import android.util.Log;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.TextView;
+import android.widget.EditText;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -46,7 +46,6 @@ import com.hippo.ehviewer.Analytics;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
-import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.data.wifi.WiFiDataHand;
 import com.hippo.ehviewer.client.wifi.ConnectThread;
@@ -71,7 +70,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class WiFiClientActivity extends EhActivity {
+public class WiFiClientActivity extends AppCompatActivity {
 
     private final int pCode = 88888;
 
@@ -85,6 +84,7 @@ public class WiFiClientActivity extends EhActivity {
     private WifiManager wifiManager;
 
     private TextView statusInit;
+    private EditText ipAddressInput;
 
     private WiFiClientHandler handler;
 
@@ -113,9 +113,10 @@ public class WiFiClientActivity extends EhActivity {
         textState = findViewById(R.id.status_info);
         receiveMessage = findViewById(R.id.receive_message);
         statusInit = findViewById(R.id.status_init);
-        ipAddressInput = findViewById(R.id.ip_address_input);
 
-        String initText = getString(R.string.wifi_connected_info, wifiManager.getConnectionInfo().getSSID(), getIp(), getWifiRouteIPAddress(this));
+        String initText = "已连接到：" + wifiManager.getConnectionInfo().getSSID() +
+                "\nIP:" + getIp()
+                + "\n路由：" + getWifiRouteIPAddress(this);
         statusInit.setText(initText);
 
         if (handler == null) {
@@ -124,12 +125,6 @@ public class WiFiClientActivity extends EhActivity {
         connectSocket();
         listenerThread = new ListenerThread(PORT, handler);
         listenerThread.start();
-    }
-
-    @Override
-    protected int getThemeResId(int theme) {
-        // 使用父类的默认实现，支持自适应主题切换
-        return super.getThemeResId(theme);
     }
 
     @Override
@@ -142,32 +137,31 @@ public class WiFiClientActivity extends EhActivity {
     }
 
     private void connectSocket() {
-        connectSocketWithIP(getWifiRouteIPAddress(WiFiClientActivity.this));
-    }
-
-    private void connectSocketWithIP(String targetIP) {
-        ExecutorManager.getNetworkExecutor().execute(() -> {
+        new Thread(() -> {
             try {
-                Socket socket = new Socket(targetIP, PORT);
+                Socket socket = new Socket(getWifiRouteIPAddress(WiFiClientActivity.this), PORT);
                 connectThread = new ConnectThread(getApplicationContext(), socket, handler, IS_CLIENT);
                 connectThread.setFileChunkReceiver(this::applyFileChunk);
                 connectThread.start();
             } catch (IOException e) {
                 e.printStackTrace();
-                runOnUiThread(() -> textState.setText(getString(R.string.wifi_connection_failed)));
+                runOnUiThread(() -> textState.setText("通信连接失败"));
                 try {
                     Thread.sleep(2000);
-                    runOnUiThread(() -> textState.setText(getString(R.string.wifi_try_reconnect)));
-                    connectSocketWithIP(targetIP);
+                    runOnUiThread(() -> textState.setText("尝试重新链接"));
+                    connectSocket();
                 } catch (InterruptedException ex) {
                     ex.printStackTrace();
                 }
             }
-        });
+
+        }).start();
     }
 
-    private void connectAuto(View view) {
-        String text = getString(R.string.wifi_connected_info, wifiManager.getConnectionInfo().getSSID(), getIp(), getWifiRouteIPAddress(this));
+    private void connect(View view) {
+        String text = "已连接到：" + wifiManager.getConnectionInfo().getSSID() +
+                "\nIP:" + getIp()
+                + "\n路由：" + getWifiRouteIPAddress(this);
         statusInit.setText(text);
     }
 
@@ -362,13 +356,13 @@ public class WiFiClientActivity extends EhActivity {
 
     private void dealWithFavoriteInfo(WiFiDataHand response) {
         JSONArray jsonArray = response.getData().getJSONArray(FAVORITE_INFO_DATA_KEY);
-        ExecutorManager.getIoExecutor().execute(() -> {
+        new Thread(()->{
             for (int i = 0; i < jsonArray.size(); i++) {
                 EhDB.putLocalFavorite(GalleryInfo.galleryInfoFromJson(jsonArray.getJSONObject(i)));
             }
             connectThread.dataProcessed(response);
             updateReceiveMessage(getString(R.string.wifi_server_receive_message, response.toString()));
-        });
+        }).start();
     }
 
     private void dealWithDownloadInfo(WiFiDataHand response) {
@@ -391,14 +385,14 @@ public class WiFiClientActivity extends EhActivity {
     private void dealWithDownloadLabel(WiFiDataHand response) {
         JSONArray jsonArray = response.getData().getJSONArray(DOWNLOAD_LABEL_KEY);
         DownloadManager manager = EhApplication.getDownloadManager();
-        ExecutorManager.getBackgroundExecutor().execute(() -> {
+        new Thread(()->{
             for (int i = 0; i < jsonArray.size(); i++) {
                 manager.addLabelInSyncThread(jsonArray.getString(i));
             }
             connectThread.dataProcessed(response);
             updateReceiveMessage(getString(R.string.wifi_server_receive_message, response.toString()));
             EventBus.getDefault().post(downloadInfoNeedRefresh());
-       });
+       }).start();
     }
 
     private void dealWithQuickSearch(WiFiDataHand response) {
@@ -410,12 +404,12 @@ public class WiFiClientActivity extends EhActivity {
             JSONObject object = jsonArray.getJSONObject(i);
             quickSearchList.add(QuickSearch.quickSearchFromJson(object));
         }
-        ExecutorManager.getIoExecutor().execute(() -> {
+        new Thread(()->{
             EhDB.takeOverQuickSearchList(quickSearchList);
             connectThread.dataProcessed(response);
             updateReceiveMessage(getString(R.string.wifi_server_receive_message, response.toString()));
             EventBus.getDefault().post(bookmarkDrawNeedRefresh());
-        });
+        }).start();
     }
 
     public void updateReceiveMessage(String message){

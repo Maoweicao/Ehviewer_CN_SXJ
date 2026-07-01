@@ -2610,7 +2610,7 @@ public class DownloadsScene extends ToolbarScene
             }
 
             // Delete image files
-            boolean checked = mBuilder.isChecked();
+            checked = mBuilder.isChecked();
             Settings.putRemoveImageFiles(checked);
             if (checked) {
                 UniFile file = getExistingGalleryDownloadDir(mGalleryInfo);
