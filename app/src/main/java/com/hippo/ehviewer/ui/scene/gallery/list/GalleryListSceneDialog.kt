@@ -47,7 +47,7 @@ class GalleryListSceneDialog(val baseScene: BaseScene) {
             tagName
         }
         val builder = AlertDialog.Builder(
-            context!!
+            com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context!!)
         )
             .setTitle(title)
             .setItems(
@@ -85,7 +85,7 @@ class GalleryListSceneDialog(val baseScene: BaseScene) {
             return
         }
 
-        AlertDialog.Builder(context)
+        AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context))
             .setMessage(context.getString(R.string.filter_the_tag, tagName))
             .setPositiveButton(android.R.string.ok) { _: DialogInterface?, which: Int ->
                 if (which != DialogInterface.BUTTON_POSITIVE) {

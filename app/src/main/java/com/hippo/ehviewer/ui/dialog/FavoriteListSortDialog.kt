@@ -20,7 +20,7 @@ class FavoriteListSortDialog(private val scene: FavoritesScene) {
         } else {
             return
         }
-        val dialog = AlertDialog.Builder(scene.context)
+        val dialog = AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(scene.context))
             .setIcon(R.mipmap.ic_launcher)
             .setTitle(R.string.order)
             .setSingleChoiceItems(

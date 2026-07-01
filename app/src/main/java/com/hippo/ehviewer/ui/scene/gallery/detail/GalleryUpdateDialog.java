@@ -37,7 +37,7 @@ public class GalleryUpdateDialog {
             dialog.show();
         }
         this.galleryDetail = galleryDetail;
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        AlertDialog.Builder builder = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context));
         builder.setSingleChoiceItems(galleryDetail.getUpdateVersionName(), -1, (dia, index) -> {
 //            GalleryInfo gi = (GalleryInfo) galleryDetail.getNewGalleryDetail(index);
 //            if (gi == null) {
@@ -60,7 +60,7 @@ public class GalleryUpdateDialog {
         if (choseDialog != null) {
             choseDialog.show();
         }
-        AlertDialog.Builder builder = new AlertDialog.Builder(context);
+        AlertDialog.Builder builder = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context));
         choseDialog = builder.setTitle(R.string.gallery_update_dialog_title)
                 .setMessage(R.string.gallery_update_dialog_message)
                 .setNeutralButton(R.string.cancel, (dialog, which) -> {

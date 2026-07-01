@@ -65,7 +65,7 @@ public class DownloadProgressDialog {
         dialogLayout.addView(progressBar);
         dialogLayout.addView(messageText);
 
-        dialog = new AlertDialog.Builder(context)
+        dialog = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context))
                 .setTitle(R.string.download_dialog_title)
                 .setView(dialogLayout)
                 .setCancelable(false)

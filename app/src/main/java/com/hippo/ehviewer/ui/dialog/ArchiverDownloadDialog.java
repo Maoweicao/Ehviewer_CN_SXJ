@@ -130,7 +130,7 @@ public class ArchiverDownloadDialog implements
 
     public void showDialog() {
 
-        dialog = new AlertDialog.Builder(context)
+        dialog = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context))
 
                 .setTitle(R.string.dialog_archiver_title)
 

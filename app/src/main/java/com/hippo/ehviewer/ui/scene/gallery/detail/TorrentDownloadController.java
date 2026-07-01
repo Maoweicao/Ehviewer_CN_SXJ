@@ -79,7 +79,7 @@ class TorrentDownloadController {
             return;
         }
         TorrentListDialogHelper helper = new TorrentListDialogHelper(torrentUrl, okHttpClient);
-        Dialog dialog = new AlertDialog.Builder(context)
+        Dialog dialog = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context))
                 .setTitle(R.string.torrents)
                 .setView(R.layout.dialog_torrent_list)
                 .setOnDismissListener(helper)
@@ -188,7 +188,7 @@ class TorrentDownloadController {
             if (torrentDownloadView.getParent() != null) {
                 ((ViewGroup) torrentDownloadView.getParent()).removeView(torrentDownloadView);
             }
-            downLoadAlertDialog = new AlertDialog.Builder(context)
+            downLoadAlertDialog = new AlertDialog.Builder(com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context))
                     .setView(torrentDownloadView)
                     .setCancelable(false)
                     .show();
