@@ -217,7 +217,7 @@ public class HistoryScene extends ToolbarScene
     }
 
     private void showClearAllDialog() {
-        new AlertDialog.Builder(getEHContext())
+        new AlertDialog.Builder(getDialogContext())
                 .setMessage(R.string.clear_all_history)
                 .setPositiveButton(R.string.clear_all, new DialogInterface.OnClickListener() {
                     @Override
@@ -279,7 +279,7 @@ public class HistoryScene extends ToolbarScene
         }
 
         final GalleryInfo gi = mLazyList.get(position);
-        new AlertDialog.Builder(context)
+        new AlertDialog.Builder(getDialogContext())
                 .setTitle(EhUtils.getSuitableTitle(gi))
                 .setItems(R.array.gallery_list_menu_entries, new DialogInterface.OnClickListener() {
                     @Override

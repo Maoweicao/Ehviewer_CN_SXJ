@@ -183,7 +183,7 @@ public final class QuickSearchScene extends ToolbarScene {
             }
 
             final QuickSearch quickSearch = mQuickSearchList.get(position);
-            new AlertDialog.Builder(context)
+            new AlertDialog.Builder(getDialogContext())
                     .setTitle(R.string.delete_quick_search_title)
                     .setMessage(getString(R.string.delete_quick_search_message, quickSearch.name))
                     .setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {

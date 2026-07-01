@@ -85,7 +85,7 @@ class GetProfileScene : SolidScene() {
             Log.e(TAG, "WebView/CookieManager init failed", t)
             val root = FrameLayout(context!!)
             root.post {
-                AlertDialog.Builder(context!!)
+                AlertDialog.Builder(getDialogContext()!!)
                     .setTitle(R.string.webview_unavailable_title)
                     .setMessage(R.string.webview_unavailable_message)
                     .setPositiveButton(android.R.string.ok) { _, _ -> finish() }

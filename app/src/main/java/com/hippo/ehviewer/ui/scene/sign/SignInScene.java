@@ -357,7 +357,7 @@ public final class SignInScene extends SolidScene implements EditText.OnEditorAc
             return;
         }
 
-        new AlertDialog.Builder(context)
+        new AlertDialog.Builder(getDialogContext())
                 .setTitle(R.string.sign_in_failed)
                 .setMessage(ExceptionUtils.getReadableString(e) + "\n\n" + getString(R.string.sign_in_failed_tip))
                 .setPositiveButton(R.string.get_it, null)

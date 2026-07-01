@@ -1,0 +1,11 @@
+# OCR Server Requirements
+# Install: pip install -r requirements_ocr.txt
+# Test: python ocr_server.py
+
+flask>=3.0.0
+paddleocr>=2.7.0
+paddlepaddle>=2.6.0
+paddle2onnx>=1.0.0
+onnxruntime>=1.16.0
+Pillow>=10.0.0
+numpy>=1.24.0

@@ -216,7 +216,7 @@ public class GalleryPreviewsScene extends ToolbarScene implements EasyRecyclerVi
                 int pages = mHelper.getPages();
                 if (pages > 0 && mHelper.canGoTo()) {
                     GoToDialogHelper helper = new GoToDialogHelper(pages, mHelper.getPageForTop());
-                    AlertDialog dialog = new AlertDialog.Builder(context).setTitle(R.string.go_to)
+                    AlertDialog dialog = new AlertDialog.Builder(getDialogContext()).setTitle(R.string.go_to)
                             .setView(R.layout.dialog_go_to)
                             .setPositiveButton(android.R.string.ok, null)
                             .create();

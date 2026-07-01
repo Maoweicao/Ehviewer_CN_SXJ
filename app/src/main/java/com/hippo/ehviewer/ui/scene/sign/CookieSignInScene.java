@@ -222,7 +222,7 @@ public class CookieSignInScene extends SolidScene implements EditText.OnEditorAc
         hideSoftInput();
 
         if (!checkIpbMemberId(ipbMemberId) || !(checkIpbPassHash(ipbPassHash))) {
-            new AlertDialog.Builder(context).setTitle(R.string.waring)
+            new AlertDialog.Builder(getDialogContext()).setTitle(R.string.waring)
                     .setMessage(R.string.wrong_cookie_warning)
                     .setNegativeButton(R.string.i_dont_think_so, null)
                     .setPositiveButton(R.string.i_will_check_it, (dialog, which) -> {

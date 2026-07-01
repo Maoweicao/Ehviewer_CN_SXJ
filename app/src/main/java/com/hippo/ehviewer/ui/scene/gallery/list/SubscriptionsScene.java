@@ -227,7 +227,7 @@ public final class SubscriptionsScene extends ToolbarScene {
             }
 
             final UserTag userTag = userTagList.userTags.get(position);
-            new AlertDialog.Builder(context)
+            new AlertDialog.Builder(getDialogContext())
                     .setTitle(R.string.delete_subscription_title)
                     .setMessage(getString(R.string.delete_quick_search_message, userTag.tagName))
                     .setPositiveButton(android.R.string.ok, (dialog,i)->deleteTag(userTag)).show();

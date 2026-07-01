@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_basic"
+        app:allowDividerAbove="false">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_translate_enabled"
+            android:title="@string/lab_ai_translate_enable"
+            android:summary="@string/lab_ai_translate_enable_summary"
+            android:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_ocr"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="ai_ocr_lan_url"
+            android:title="@string/lab_ai_ocr_lan_url"
+            android:summary="@string/lab_ai_ocr_lan_url_summary"
+            app:allowDividerAbove="false" />
+
+        <Preference
+            android:key="ai_ocr_test"
+            android:title="@string/lab_ai_ocr_test"
+            android:summary="@string/lab_ai_ocr_test_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_service"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="ai_translate_provider"
+            android:title="@string/lab_ai_translate_provider"
+            android:summary="@string/lab_ai_translate_provider_summary"
+            android:entries="@array/translate_provider_entries"
+            android:entryValues="@array/translate_provider_values"
+            android:defaultValue="custom" />
+
+        <Preference
+            android:key="ai_translate_api_key"
+            android:title="@string/lab_ai_translate_api_key"
+            android:summary="@string/lab_ai_translate_api_key_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ai_translate_api_url"
+            android:title="@string/lab_ai_translate_api_url"
+            android:summary="@string/lab_ai_translate_api_url_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ai_translate_model"
+            android:title="@string/lab_ai_translate_model"
+            android:summary="@string/lab_ai_translate_model_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ai_translate_test"
+            android:title="@string/lab_ai_translate_test"
+            android:summary="@string/lab_ai_translate_test_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_advanced"
+        app:allowDividerAbove="true">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_translate_auto_detect"
+            android:title="@string/lab_ai_translate_auto_detect"
+            android:summary="@string/lab_ai_translate_auto_detect_summary"
+            android:defaultValue="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_translate_skip_animated"
+            android:title="@string/lab_ai_translate_skip_animated"
+            android:summary="@string/lab_ai_translate_skip_animated_summary"
+            android:defaultValue="true"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_display"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="ai_translate_overlay_alpha"
+            android:title="@string/lab_ai_translate_overlay_alpha"
+            android:summary="@string/lab_ai_translate_overlay_alpha_summary"
+            android:entries="@array/overlay_alpha_entries"
+            android:entryValues="@array/overlay_alpha_values"
+            android:defaultValue="180" />
+
+        <ListPreference
+            android:key="ai_translate_font_size"
+            android:title="@string/lab_ai_translate_font_size"
+            android:summary="@string/lab_ai_translate_font_size_summary"
+            android:entries="@array/font_size_entries"
+            android:entryValues="@array/font_size_values"
+            android:defaultValue="14" />
+
+        <ListPreference
+            android:key="ai_translate_position"
+            android:title="@string/lab_ai_translate_position"
+            android:summary="@string/lab_ai_translate_position_summary"
+            android:entries="@array/translate_position_entries"
+            android:entryValues="@array/translate_position_values"
+            android:defaultValue="0" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_translate_cache"
+        app:allowDividerAbove="true">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_translate_cache_enabled"
+            android:title="@string/lab_ai_translate_cache_enable"
+            android:summary="@string/lab_ai_translate_cache_enable_summary"
+            android:defaultValue="true" />
+
+        <ListPreference
+            android:key="ai_translate_cache_expire"
+            android:title="@string/lab_ai_translate_cache_expire"
+            android:summary="@string/lab_ai_translate_cache_expire_summary"
+            android:entries="@array/cache_expire_entries"
+            android:entryValues="@array/cache_expire_values"
+            android:defaultValue="7" />
+
+        <Preference
+            android:key="ai_translate_cache_clear"
+            android:title="@string/lab_ai_translate_cache_clear"
+            android:summary="@string/lab_ai_translate_cache_clear_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

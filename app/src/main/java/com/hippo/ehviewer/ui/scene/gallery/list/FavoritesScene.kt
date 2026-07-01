@@ -473,7 +473,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                         items[1] = getString(R.string.local_favorites)
                         val favCat = Settings.getFavCat()
                         System.arraycopy(favCat, 0, items, 2, 10)
-                        AlertDialog.Builder(context!!)
+                        AlertDialog.Builder(getDialogContext()!!)
                             .setTitle(R.string.default_favorites_collection)
                             .setItems(items, object : DialogInterface.OnClickListener {
                                 override fun onClick(dialog: DialogInterface?, which: Int) {
@@ -773,7 +773,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                     urlAppend!!
                 )
             })
-            jumpSelectorDialog = AlertDialog.Builder(context).setView(linearLayout).create()
+            jumpSelectorDialog = AlertDialog.Builder(getDialogContext()!!).setView(linearLayout).create()
         }
         mJumpDateSelector!!.setFoundMessage(mHelper!!.resultCount)
         jumpSelectorDialog!!.show()
@@ -898,7 +898,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             3 -> {
                 // Delete
                 val helper: DeleteDialogHelper = DeleteDialogHelper()
-                AlertDialog.Builder(context)
+                AlertDialog.Builder(getDialogContext()!!)
                     .setTitle(R.string.delete_favorites_dialog_title)
                     .setMessage(
                         getString(
@@ -918,7 +918,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                 val array = arrayOfNulls<String>(11)
                 array[0] = getString(R.string.local_favorites)
                 System.arraycopy(Settings.getFavCat(), 0, array, 1, 10)
-                AlertDialog.Builder(context)
+                AlertDialog.Builder(getDialogContext()!!)
                     .setTitle(R.string.move_favorites_dialog_title)
                     .setItems(array, helper)
                     .setOnCancelListener(helper)

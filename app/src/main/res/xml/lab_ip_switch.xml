@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/lab_ip_switch_basic"
+        app:allowDividerAbove="false">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ip_switch_enabled"
+            android:title="@string/lab_ip_switch_enable"
+            android:summary="@string/lab_ip_switch_enable_summary"
+            android:defaultValue="false" />
+
+        <Preference
+            android:key="ip_subscription_manage"
+            android:title="@string/lab_ip_subscription_manage"
+            android:summary="@string/lab_ip_subscription_manage_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ip_switch_strategy"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="ip_download_threshold"
+            android:title="@string/lab_ip_download_threshold"
+            android:summary="@string/lab_ip_download_threshold_summary"
+            android:entries="@array/ip_threshold_entries"
+            android:entryValues="@array/ip_threshold_values"
+            android:defaultValue="50" />
+
+        <ListPreference
+            android:key="ip_block_duration"
+            android:title="@string/lab_ip_block_duration"
+            android:summary="@string/lab_ip_block_duration_summary"
+            android:entries="@array/ip_block_duration_entries"
+            android:entryValues="@array/ip_block_duration_values"
+            android:defaultValue="30" />
+
+        <ListPreference
+            android:key="ip_switch_strategy"
+            android:title="@string/lab_ip_switch_strategy_title"
+            android:summary="@string/lab_ip_switch_strategy_summary"
+            android:entries="@array/ip_switch_strategy_entries"
+            android:entryValues="@array/ip_switch_strategy_values"
+            android:defaultValue="0" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ip_switch_advanced"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="ip_refresh_interval"
+            android:title="@string/lab_ip_refresh_interval"
+            android:summary="@string/lab_ip_refresh_interval_summary"
+            android:entries="@array/ip_refresh_interval_entries"
+            android:entryValues="@array/ip_refresh_interval_values"
+            android:defaultValue="60" />
+
+        <Preference
+            android:key="ip_node_list"
+            android:title="@string/lab_ip_node_list"
+            android:summary="@string/lab_ip_node_list_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ip_pool_status"
+            android:title="@string/lab_ip_pool_status"
+            android:summary="@string/lab_ip_pool_status_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ip_pool_clear"
+            android:title="@string/lab_ip_pool_clear"
+            android:summary="@string/lab_ip_pool_clear_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

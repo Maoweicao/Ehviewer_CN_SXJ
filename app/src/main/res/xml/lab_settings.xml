@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/lab_warning"
+        app:allowDividerAbove="false">
+
+        <Preference
+            android:key="lab_warning_description"
+            android:title="@string/lab_warning_title"
+            android:summary="@string/lab_warning_description"
+            android:selectable="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_features"
+        app:allowDividerAbove="true">
+
+        <com.hippo.ehviewer.ui.fragment.lab.LabPreference
+            android:key="lab_ip_switch"
+            android:title="@string/lab_ip_switch"
+            android:summary="@string/lab_ip_switch_summary"
+            app:allowDividerAbove="true"
+            app:fragment="com.hippo.ehviewer.ui.fragment.lab.IpSwitchFragment" />
+
+        <com.hippo.ehviewer.ui.fragment.lab.LabPreference
+            android:key="lab_ai_translate"
+            android:title="@string/lab_ai_translate"
+            android:summary="@string/lab_ai_translate_summary"
+            app:allowDividerAbove="true"
+            app:fragment="com.hippo.ehviewer.ui.fragment.lab.AiTranslateFragment" />
+
+        <com.hippo.ehviewer.preference.ProgressiveManagerPreference
+            android:key="lab_progressive_manager"
+            app:allowDividerAbove="true"
+            app:iconSpaceReserved="false" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>
