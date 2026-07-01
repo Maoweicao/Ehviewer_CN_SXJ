@@ -2841,19 +2841,36 @@ public class DownloadsScene extends ToolbarScene
         }
 
         try {
-            // 使用兼容的对话框主题上下文
-            Context dialogContext = new android.view.ContextThemeWrapper(context, 
-                androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert);
+            // 根据配置的主题选择对话框主题
+            int dialogTheme;
+            boolean isDarkMode;
+            
+            if (Settings.isThemeAutoSwitchAvailable()) {
+                // 自动主题切换模式下，根据系统当前模式判断
+                int nightModeFlags = getResources().getConfiguration().uiMode & 
+                    android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+                isDarkMode = nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+            } else {
+                // 手动主题模式
+                int theme = Settings.getTheme();
+                isDarkMode = (theme == Settings.THEME_DARK || theme == Settings.THEME_BLACK);
+            }
+            
+            if (isDarkMode) {
+                dialogTheme = androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert;
+            } else {
+                dialogTheme = androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert;
+            }
+            Context dialogContext = new android.view.ContextThemeWrapper(context, dialogTheme);
 
-        // 创建弹窗视图 - 使用新的布局
-        View dialogView = LayoutInflater.from(dialogContext).inflate(R.layout.dialog_sort_filter_v2, null);
-        View advancedFilterToggleRow = dialogView.findViewById(R.id.advanced_filter_toggle_row);
-        TextView advancedFilterToggleIcon = dialogView.findViewById(R.id.advanced_filter_toggle_icon);
-        View advancedFilterContentContainer = dialogView.findViewById(R.id.advanced_filter_content_container);
+            // 创建弹窗视图 - 使用新的布局
+            View dialogView = LayoutInflater.from(dialogContext).inflate(R.layout.dialog_sort_filter_v2, null);
+            View advancedFilterToggleRow = dialogView.findViewById(R.id.advanced_filter_toggle_row);
+            View advancedFilterContentContainer = dialogView.findViewById(R.id.advanced_filter_content_container);
 
-        // 高级筛选面板默认展开
-        setSectionExpanded(advancedFilterContentContainer, advancedFilterToggleIcon, true);
-        advancedFilterToggleRow.setOnClickListener(v -> toggleSection(advancedFilterContentContainer, advancedFilterToggleIcon));
+            // 隐藏抽屉切换栏，始终保持展开状态
+            advancedFilterToggleRow.setVisibility(View.GONE);
+            advancedFilterContentContainer.setVisibility(View.VISIBLE);
         
         // 获取CategoryTable
         DownloadCategoryTable categoryTable = dialogView.findViewById(R.id.category_table);
