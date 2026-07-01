@@ -2835,15 +2835,18 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
-        try {
-
-        // 如果弹窗已经存在，直接显�?
+        // 如果弹窗已经存在，直接显示
         if (mSortFilterDialog != null && mSortFilterDialog.isShowing()) {
             return;
         }
 
+        try {
+            // 使用兼容的对话框主题上下文
+            Context dialogContext = new android.view.ContextThemeWrapper(context, 
+                androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert);
+
         // 创建弹窗视图 - 使用新的布局
-        View dialogView = LayoutInflater.from(context).inflate(R.layout.dialog_sort_filter_v2, null);
+        View dialogView = LayoutInflater.from(dialogContext).inflate(R.layout.dialog_sort_filter_v2, null);
         View advancedFilterToggleRow = dialogView.findViewById(R.id.advanced_filter_toggle_row);
         TextView advancedFilterToggleIcon = dialogView.findViewById(R.id.advanced_filter_toggle_icon);
         View advancedFilterContentContainer = dialogView.findViewById(R.id.advanced_filter_content_container);
@@ -2978,7 +2981,7 @@ public class DownloadsScene extends ToolbarScene
         });
 
         // 创建弹窗
-        mSortFilterDialog = new AlertDialog.Builder(context)
+        mSortFilterDialog = new AlertDialog.Builder(dialogContext)
                 .setTitle(R.string.advanced_filter)
                 .setView(dialogView)
                 .create();
