@@ -60,11 +60,16 @@ public class AppConfig {
 
     @Nullable
     public static File getExternalAppDir() {
-        if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-            File dir = new File(Environment.getExternalStorageDirectory(), APP_DIRNAME);
-            return FileUtils.ensureDirectory(dir) ? dir : null;
+        try {
+            if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
+                File dir = new File(Environment.getExternalStorageDirectory(), APP_DIRNAME);
+                return FileUtils.ensureDirectory(dir) ? dir : null;
+            }
+            return null;
+        } catch (OutOfMemoryError e) {
+            android.util.Log.w("AppConfig", "OOM in getExternalAppDir", e);
+            return null;
         }
-        return null;
     }
 
     /**

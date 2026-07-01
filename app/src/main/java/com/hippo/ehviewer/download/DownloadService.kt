@@ -991,7 +991,11 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
                 val now = SystemClock.currentThreadTimeMillis()
                 if (now - mLastTime > DELAY) {
                     // Wait long enough, do it now
-                    mNotifyManager!!.notify(mId, mBuilder.build())
+                    try {
+                        mNotifyManager!!.notify(mId, mBuilder.build())
+                    } catch (e: OutOfMemoryError) {
+                        android.util.Log.w("DownloadService", "OOM in notify", e)
+                    }
                 } else {
                     // Too quick, post delay
                     mOps = OPS_NOTIFY
@@ -1027,14 +1031,18 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
                 if (now - mLastTime > DELAY) {
                     // Wait long enough, do it now
                     if (mService != null) {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                            mService!!.startForeground(
-                                mId,
-                                mBuilder.build(),
-                                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                            )
-                        } else {
-                            mService!!.startForeground(mId, mBuilder.build())
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                mService!!.startForeground(
+                                    mId,
+                                    mBuilder.build(),
+                                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                                )
+                            } else {
+                                mService!!.startForeground(mId, mBuilder.build())
+                            }
+                        } catch (e: OutOfMemoryError) {
+                            android.util.Log.w("DownloadService", "OOM in startForeground", e)
                         }
                     }
                 } else {
@@ -1048,20 +1056,24 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
 
         override fun run() {
             mPosted = false
-            when (mOps) {
-                OPS_NOTIFY -> mNotifyManager!!.notify(mId, mBuilder.build())
-                OPS_CANCEL -> mNotifyManager!!.cancel(mId)
-                OPS_START_FOREGROUND -> if (mService != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        mService!!.startForeground(
-                            mId,
-                            mBuilder.build(),
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                        )
-                    } else {
-                        mService!!.startForeground(mId, mBuilder.build())
+            try {
+                when (mOps) {
+                    OPS_NOTIFY -> mNotifyManager!!.notify(mId, mBuilder.build())
+                    OPS_CANCEL -> mNotifyManager!!.cancel(mId)
+                    OPS_START_FOREGROUND -> if (mService != null) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                            mService!!.startForeground(
+                                mId,
+                                mBuilder.build(),
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                            )
+                        } else {
+                            mService!!.startForeground(mId, mBuilder.build())
+                        }
                     }
                 }
+            } catch (e: OutOfMemoryError) {
+                android.util.Log.w("DownloadService", "OOM in notification run", e)
             }
         }
 

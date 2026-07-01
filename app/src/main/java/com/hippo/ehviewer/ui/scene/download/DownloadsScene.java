@@ -2835,6 +2835,8 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
+        try {
+
         // 如果弹窗已经存在，直接显�?
         if (mSortFilterDialog != null && mSortFilterDialog.isShowing()) {
             return;
@@ -3098,7 +3100,15 @@ public class DownloadsScene extends ToolbarScene
             mSortFilterDialog.dismiss();
         });
 
-        mSortFilterDialog.show();
+        try {
+            mSortFilterDialog.show();
+        } catch (Exception e) {
+            Log.e("DownloadsScene", "Failed to show sort filter dialog", e);
+            Toast.makeText(requireContext(), R.string.error_unknown, Toast.LENGTH_SHORT).show();
+        }
+        } catch (Exception e) {
+            Log.e("DownloadsScene", "Failed to create sort filter dialog", e);
+        }
     }
 
     private void applySortAndFilter() {
