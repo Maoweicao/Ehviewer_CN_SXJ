@@ -150,9 +150,16 @@ public class DownloadLabelsScene extends ToolbarScene {
         return R.menu.scene_download_label;
     }
 
+    /**
+     * 获取与当前主题兼容的对话框上下文
+     */
+    public Context getDialogContext() {
+        return com.hippo.ehviewer.utils.DialogUtils.getDialogContext(getEHContext());
+    }
+
     @Override
     public boolean onMenuItemClick(MenuItem item) {
-        Context context = getEHContext();
+        Context context = getDialogContext();
         if (null == context) {
             return false;
         }
@@ -291,7 +298,7 @@ public class DownloadLabelsScene extends ToolbarScene {
         @Override
         public void onClick(View v) {
             int position = getAdapterPosition();
-            Context context = getEHContext();
+            Context context = getDialogContext();
             if (null == context || null == mList || null == mRecyclerView) {
                 return;
             }

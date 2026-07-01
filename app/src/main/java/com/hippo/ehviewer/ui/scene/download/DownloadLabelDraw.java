@@ -42,6 +42,13 @@ public class DownloadLabelDraw {
         this.context = scene.getEHContext();
     }
 
+    /**
+     * 获取与当前主题兼容的对话框上下文
+     */
+    private Context getDialogContext() {
+        return com.hippo.ehviewer.utils.DialogUtils.getDialogContext(context);
+    }
+
     public View createView(){
         view = inflater.inflate(R.layout.bookmarks_draw, container, false);
         assert context != null;
@@ -69,7 +76,9 @@ public class DownloadLabelDraw {
                     for (int i = 0, n = list.size(); i < n; i++) {
                         items[i + 2] = list.get(i).getLabel();
                     }
-                    new AlertDialog.Builder(context)
+                    Context dialogCtx = getDialogContext();
+                    if (dialogCtx == null) return true;
+                    new AlertDialog.Builder(dialogCtx)
                             .setTitle(R.string.default_download_label)
                             .setItems(items, (dialog, which) -> {
                                 if (which == 0) {

@@ -930,7 +930,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 if (currentInfo.archiveUri != null && currentInfo.archiveUri.startsWith("content://")) {
                     // Show info dialog for imported archive
                     String message = mScene.getString(R.string.imported_archive_info_message) + "\n\n" + currentInfo.archiveUri;
-                    new AlertDialog.Builder(context)
+                    new AlertDialog.Builder(mScene.getDialogContext())
                             .setTitle(R.string.imported_archive_info_title)
                             .setMessage(message)
                             .setPositiveButton(android.R.string.ok, null)

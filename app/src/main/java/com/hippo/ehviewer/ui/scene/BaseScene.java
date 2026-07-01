@@ -244,6 +244,15 @@ public abstract class BaseScene extends SceneFragment {
         return null != mThemeContext ? mThemeContext : super.getContext();
     }
 
+    /**
+     * 获取与当前主题兼容的对话框上下文
+     * 解决深色/黑色主题下 AlertDialog 崩溃的问题
+     */
+    @Nullable
+    public Context getDialogContext() {
+        return com.hippo.ehviewer.utils.DialogUtils.getDialogContext(getEHContext());
+    }
+
     @Nullable
     public Resources getResources2() {
         Context context = getEHContext();

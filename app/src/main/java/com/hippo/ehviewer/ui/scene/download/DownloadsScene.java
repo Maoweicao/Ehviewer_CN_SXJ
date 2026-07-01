@@ -887,6 +887,13 @@ public class DownloadsScene extends ToolbarScene
         return R.menu.scene_download;
     }
 
+    /**
+     * 获取与当前主题兼容的对话框上下文
+     */
+    public Context getDialogContext() {
+        return com.hippo.ehviewer.utils.DialogUtils.getDialogContext(getEHContext());
+    }
+
     @SuppressLint("NonConstantResourceId")
     @Override
     public boolean onMenuItemClick(MenuItem item) {
@@ -913,12 +920,12 @@ public class DownloadsScene extends ToolbarScene
                 return true;
             }
             case R.id.action_reset_reading_progress: {
-                Context context = getEHContext();
+                Context context = getDialogContext();
                 if (context == null) {
                     return false;
                 }
                 if (searching) {
-                    UiThreadHelper.showToastSafely(context, R.string.download_searching, Toast.LENGTH_LONG);
+                    UiThreadHelper.showToastSafely(getEHContext(), R.string.download_searching, Toast.LENGTH_LONG);
                     return true;
                 }
                 new AlertDialog.Builder(context)
@@ -1008,8 +1015,23 @@ public class DownloadsScene extends ToolbarScene
             mSearchDialog = null;
         }
         
+        // 使用与当前主题兼容的对话框上下文
+        boolean isDarkMode;
+        if (Settings.isThemeAutoSwitchAvailable()) {
+            int nightModeFlags = getResources().getConfiguration().uiMode & 
+                android.content.res.Configuration.UI_MODE_NIGHT_MASK;
+            isDarkMode = nightModeFlags == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+        } else {
+            int theme = Settings.getTheme();
+            isDarkMode = (theme == Settings.THEME_DARK || theme == Settings.THEME_BLACK);
+        }
+        int dialogTheme = isDarkMode ? 
+            androidx.appcompat.R.style.Theme_AppCompat_Dialog_Alert : 
+            androidx.appcompat.R.style.Theme_AppCompat_Light_Dialog_Alert;
+        Context dialogContext = new android.view.ContextThemeWrapper(context, dialogTheme);
+        
         // 创建增强的搜索对话框
-        View dialogView = LayoutInflater.from(context).inflate(R.layout.download_search_dialog_v2, null);
+        View dialogView = LayoutInflater.from(dialogContext).inflate(R.layout.download_search_dialog_v2, null);
         
         // 获取各个组件
         SearchBar searchBar = dialogView.findViewById(R.id.download_search_bar);
@@ -1129,7 +1151,7 @@ public class DownloadsScene extends ToolbarScene
             mSearchDialog.dismiss();
         });
 
-        mSearchDialog = new AlertDialog.Builder(context)
+        mSearchDialog = new AlertDialog.Builder(dialogContext)
                 .setView(dialogView)
                 .setCancelable(true)
                 .create();
@@ -1383,6 +1405,7 @@ public class DownloadsScene extends ToolbarScene
         if (null == context || null == activity || null == recyclerView) {
             return;
         }
+        Context dialogContext = getDialogContext();
 
         if (0 == position) {
             recyclerView.checkAll();
