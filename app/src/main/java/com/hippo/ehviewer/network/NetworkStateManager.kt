@@ -1,0 +1,294 @@
+package com.hippo.ehviewer.network
+
+import android.annotation.SuppressLint
+import android.app.Application
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.EhProxySelector
+import com.hippo.ehviewer.Settings
+
+/**
+ * Centralized network state manager that monitors connectivity changes
+ * and notifies registered components. Coordinates connection pool eviction,
+ * download pause/resume, and auto-recovery after network restoration.
+ */
+@SuppressLint("StaticFieldLeak")
+object NetworkStateManager {
+    private const val TAG = "NetworkStateManager"
+    private const val RECONNECT_SETTLE_MS = 2000L
+
+    enum class State {
+        ONLINE_WIFI,
+        ONLINE_METERED,
+        OFFLINE,
+        TRANSITIONING
+    }
+
+    interface Listener {
+        fun onNetworkStateChanged(newState: State) {}
+        fun onNetworkLost() {}
+        fun onNetworkRecovered() {}
+    }
+
+    @Volatile
+    var currentState: State = State.ONLINE_WIFI
+        private set
+
+    @Volatile
+    var isVpnActive: Boolean = false
+        private set
+
+    private var connectivityManager: ConnectivityManager? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var lastNetwork: Network? = null
+    private var appContext: Application? = null
+    private val listeners = mutableListOf<Listener>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var initialized = false
+    private val pendingRecovery = Runnable { checkRecovery() }
+
+    fun isOnline(): Boolean = currentState != State.OFFLINE
+
+    fun isMetered(): Boolean = currentState == State.ONLINE_METERED
+
+    fun addListener(listener: Listener) {
+        synchronized(listeners) {
+            if (!listeners.contains(listener)) {
+                listeners.add(listener)
+            }
+        }
+    }
+
+    fun removeListener(listener: Listener) {
+        synchronized(listeners) {
+            listeners.remove(listener)
+        }
+    }
+
+    fun init(application: Application) {
+        if (initialized) return
+        initialized = true
+        appContext = application
+
+        connectivityManager = application.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
+
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                super.onAvailable(network)
+                Log.i(TAG, "Network available: $network")
+                handleNetworkAvailable(network)
+            }
+
+            override fun onLost(network: Network) {
+                super.onLost(network)
+                Log.w(TAG, "Network lost: $network")
+                handleNetworkLost(network)
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                capabilities: NetworkCapabilities
+            ) {
+                super.onCapabilitiesChanged(network, capabilities)
+                val isUnmetered = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+                val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                val isValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                val hasVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                Log.i(TAG, "Network caps: network=$network, unmetered=$isUnmetered, internet=$hasInternet, validated=$isValidated, vpn=$hasVpn")
+
+                // Detect VPN state change and update proxy selector
+                if (hasVpn != isVpnActive) {
+                    isVpnActive = hasVpn
+                    Log.i(TAG, "VPN state changed: active=$hasVpn")
+                    NetworkLogger.logBackground("NetworkStateManager: VPN state changed: active=$hasVpn")
+                    // Update proxy selector to pick up VPN proxy or revert to direct
+                    handler.post {
+                        try {
+                            EhApplication.getEhProxySelector(appContext!!).updateProxy()
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to update proxy selector on VPN change", e)
+                        }
+                    }
+                }
+
+                if (hasInternet && isValidated) {
+                    val newState = if (isUnmetered) State.ONLINE_WIFI else State.ONLINE_METERED
+                    if (lastNetwork != null && lastNetwork != network) {
+                        transitionTo(State.TRANSITIONING)
+                        flushConnections()
+                    }
+                    transitionTo(newState)
+                } else if (!hasInternet) {
+                    transitionTo(State.OFFLINE)
+                }
+                lastNetwork = network
+            }
+        }
+
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        try {
+            connectivityManager?.registerNetworkCallback(request, networkCallback!!)
+            Log.i(TAG, "Network callback registered")
+            NetworkLogger.logBackground("NetworkStateManager: callback registered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register network callback", e)
+        }
+    }
+
+    fun destroy() {
+        initialized = false
+        handler.removeCallbacksAndMessages(null)
+        try {
+            networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to unregister network callback", e)
+        }
+        networkCallback = null
+        connectivityManager = null
+        lastNetwork = null
+        appContext = null
+        isVpnActive = false
+        synchronized(listeners) { listeners.clear() }
+    }
+
+    private fun handleNetworkAvailable(network: Network) {
+        if (lastNetwork != null && lastNetwork != network) {
+            transitionTo(State.TRANSITIONING)
+            flushConnections()
+        }
+
+        handler.postDelayed({
+            try {
+                val caps = connectivityManager?.getNetworkCapabilities(network)
+                if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    val isUnmetered = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+                    val newState = if (isUnmetered) State.ONLINE_WIFI else State.ONLINE_METERED
+                    val wasOffline = currentState == State.TRANSITIONING || currentState == State.OFFLINE
+                    transitionTo(newState)
+                    if (wasOffline) {
+                        notifyNetworkRecovered()
+                    }
+                }
+            } catch (_: Exception) {}
+        }, RECONNECT_SETTLE_MS)
+
+        lastNetwork = network
+    }
+
+    private fun handleNetworkLost(network: Network) {
+        if (lastNetwork == network) {
+            lastNetwork = null
+        }
+        handler.removeCallbacks(pendingRecovery)
+        handler.postDelayed(pendingRecovery, 500L)
+    }
+
+    private fun checkRecovery() {
+        val activeNetwork = connectivityManager?.activeNetwork
+        if (activeNetwork == null) {
+            transitionTo(State.OFFLINE)
+            notifyNetworkLost()
+        }
+    }
+
+    private fun flushConnections() {
+        try {
+            EhApplication.onNetworkChanged()
+            Log.i(TAG, "Connections flushed for network switch")
+            NetworkLogger.logBackground("NetworkStateManager: connections flushed after network switch")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to flush connections", e)
+        }
+    }
+
+    private fun transitionTo(newState: State) {
+        if (currentState == newState) return
+        val oldState = currentState
+        currentState = newState
+        Log.i(TAG, "State transition: $oldState -> $newState")
+        NetworkLogger.logBackground("NetworkStateManager: state $oldState -> $newState")
+
+        handler.post {
+            synchronized(listeners) {
+                listeners.toList()
+            }.forEach { listener ->
+                try {
+                    listener.onNetworkStateChanged(newState)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Listener error", e)
+                }
+            }
+        }
+    }
+
+    private fun notifyNetworkLost() {
+        handler.post {
+            Log.i(TAG, "Network lost, notifying listeners")
+            NetworkLogger.logBackground("NetworkStateManager: network lost")
+            synchronized(listeners) {
+                listeners.toList()
+            }.forEach { listener ->
+                try {
+                    listener.onNetworkLost()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Listener onNetworkLost error", e)
+                }
+            }
+        }
+    }
+
+    private fun notifyNetworkRecovered() {
+        handler.post {
+            Log.i(TAG, "Network recovered, notifying listeners")
+            NetworkLogger.logBackground("NetworkStateManager: network recovered")
+            synchronized(listeners) {
+                listeners.toList()
+            }.forEach { listener ->
+                try {
+                    listener.onNetworkRecovered()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Listener onNetworkRecovered error", e)
+                }
+            }
+        }
+    }
+
+    /**
+     * Determine whether downloads should pause based on current network
+     * state and the user's metered-network policy setting.
+     */
+    fun shouldPauseDownloads(): Boolean {
+        return when (currentState) {
+            State.OFFLINE -> true
+            State.ONLINE_METERED -> {
+                Settings.getMeteredNetworkPolicy() == Settings.METERED_POLICY_PAUSE
+            }
+            State.ONLINE_WIFI -> false
+            State.TRANSITIONING -> true
+        }
+    }
+
+    fun getPauseReason(): String? {
+        return when {
+            currentState == State.OFFLINE -> "Network offline"
+            currentState == State.TRANSITIONING -> "Network transitioning"
+            currentState == State.ONLINE_METERED &&
+                Settings.getMeteredNetworkPolicy() == Settings.METERED_POLICY_PAUSE -> "Metered network (paused per settings)"
+            else -> null
+        }
+    }
+}

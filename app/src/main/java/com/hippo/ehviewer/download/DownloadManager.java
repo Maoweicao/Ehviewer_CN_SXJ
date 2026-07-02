@@ -63,9 +63,9 @@ import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.Image1;
 import com.hippo.unifile.UniFile;
 import com.hippo.util.ExecutorManager;
+import com.hippo.util.FileUtils;
 import com.hippo.util.IoThreadPoolExecutor;
 import com.hippo.lib.yorozuya.ConcurrentPool;
-import com.hippo.lib.yorozuya.FileUtils;
 import com.hippo.lib.yorozuya.MathUtils;
 import com.hippo.lib.yorozuya.ObjectUtils;
 import com.hippo.lib.yorozuya.SimpleHandler;
@@ -658,28 +658,234 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
     }
 
+    /**
+     * 使用 shell 命令复制文件（比 Java IO 快 2-3 倍）
+     * 
+     * @param sourceFile 源文件路径
+     * @param destFile   目标文件路径
+     * @return 是否成功
+     */
+    private boolean copyFileWithShell(@NonNull String sourceFile, @NonNull String destFile) {
+        try {
+            // 使用 cp 命令，保留文件属性，显示进度
+            String[] command = {"cp", "-f", sourceFile, destFile};
+            java.lang.Process process = Runtime.getRuntime().exec(command);
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                Log.d(TAG, "[SHELL] 文件复制成功: " + sourceFile + " -> " + destFile);
+                return true;
+            } else {
+                Log.w(TAG, "[SHELL] 文件复制失败: exitCode=" + exitCode);
+                return false;
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "[SHELL] Shell 复制失败，回退到 Java IO", e);
+            return false;
+        }
+    }
+
+    /**
+     * 复制文件（优先使用 shell 命令，失败则回退到 Java IO）
+     * 
+     * @param sourceFile 源文件
+     * @param destFile   目标文件
+     * @return 是否成功
+     */
+    private boolean copyFileFast(@NonNull java.io.File sourceFile, @NonNull java.io.File destFile) {
+        // 确保目标目录存在
+        java.io.File destDir = destFile.getParentFile();
+        if (destDir != null && !destDir.exists()) {
+            destDir.mkdirs();
+        }
+
+        // 优先使用 shell 命令
+        if (copyFileWithShell(sourceFile.getAbsolutePath(), destFile.getAbsolutePath())) {
+            return true;
+        }
+
+        // 回退到 Java IO
+        try {
+            return FileUtils.copyFile(sourceFile, destFile, false);
+        } catch (Exception e) {
+            Log.e(TAG, "[COPY] Java IO 复制失败", e);
+            return false;
+        }
+    }
+
     private void processCopyInfo(DownloadInfo info) {
         try {
-            Log.i(TAG, "[COPY] 开始复制任务: " + EhUtils.getSuitableTitle(info) + " (GID: " + info.gid + ")");
+            String galleryTitle = EhUtils.getSuitableTitle(info);
+            Log.i(TAG, "[COPY] 开始增量复制任务: " + galleryTitle + " (GID: " + info.gid + ")");
             info.state = DownloadInfo.STATE_DOWNLOAD;
             info.networkCount = 0;
-            // 实际复制逻辑：这里只用本地数据库文件信息模拟把本地存在图片标为已下载
-            DownloadedFileManager.GalleryFileCheckResult checkResult = DownloadedFileManager.getInstance().checkGalleryFilesExist(info.gid);
-            if (checkResult != null) {
-                info.total = checkResult.totalFiles;
-                info.copyCount = checkResult.validFiles;
-                info.finished = checkResult.validFiles;
-                info.downloaded = checkResult.validFiles;
-                info.legacy = info.total - info.finished;
-            }
-            if (info.legacy <= 0) {
-                info.state = DownloadInfo.STATE_FINISH;
-            } else {
-                // 未全部复制完仍然视为失败或等待后续下载（本实现简单标记为失败）
+
+            // 获取目标下载目录
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+            if (downloadDir == null) {
+                Log.e(TAG, "[COPY] 无法获取下载目录: " + galleryTitle);
                 info.state = DownloadInfo.STATE_FAILED;
+                EhDB.putDownloadInfo(info);
+                notifyCopyFailed(info);
+                return;
             }
+
+            // 确保下载目录存在
+            if (!downloadDir.exists()) {
+                downloadDir.ensureDir();
+            }
+
+            // 获取本地已存在的文件列表
+            DownloadedFileManager.GalleryFileCheckResult checkResult = 
+                DownloadedFileManager.getInstance().checkGalleryFilesExist(info.gid);
+            
+            if (checkResult == null || checkResult.totalFiles == 0) {
+                Log.w(TAG, "[COPY] 没有找到本地文件记录: " + galleryTitle);
+                info.state = DownloadInfo.STATE_FAILED;
+                EhDB.putDownloadInfo(info);
+                notifyCopyFailed(info);
+                return;
+            }
+
+            info.total = checkResult.totalFiles;
+
+            // 获取需要复制的文件列表
+            List<DownloadedFile> files = DownloadedFileManager.getInstance().getGalleryFiles(info.gid);
+            
+            // 检查源文件目录是否与目标目录一致
+            // 如果一致，直接标记为完成，无需复制
+            boolean sameDirectory = false;
+            if (files != null && !files.isEmpty()) {
+                DownloadedFile firstFile = files.get(0);
+                String sourcePath = firstFile.getPath();
+                java.io.File sourceFile = new java.io.File(sourcePath);
+                java.io.File sourceDir = sourceFile.getParentFile();
+                
+                // 获取目标目录的本地路径
+                String destDirPath = downloadDir.getUri().getPath();
+                if (sourceDir != null && destDirPath != null) {
+                    java.io.File destDir = new java.io.File(destDirPath);
+                    try {
+                        // 比较规范化后的绝对路径
+                        String sourceCanonical = sourceDir.getCanonicalPath();
+                        String destCanonical = destDir.getCanonicalPath();
+                        sameDirectory = sourceCanonical.equals(destCanonical);
+                    } catch (Exception e) {
+                        Log.w(TAG, "[COPY] 比较目录路径失败", e);
+                    }
+                }
+                
+                if (sameDirectory) {
+                    // 源目录和目标目录一致，直接标记为完成
+                    Log.i(TAG, "[COPY] 源目录与目标目录一致，跳过复制: " + galleryTitle);
+                    info.finished = info.total;
+                    info.downloaded = info.total;
+                    info.copyCount = info.total;
+                    info.legacy = 0;
+                    info.state = DownloadInfo.STATE_FINISH;
+                    EhDB.putDownloadInfo(info);
+                    
+                    // 通知监听器
+                    List<DownloadInfo> list = getInfoListForLabel(info.label);
+                    if (list != null) {
+                        for (DownloadInfoListener l : mDownloadInfoListeners) {
+                            l.onUpdate(info, list, mWaitList);
+                        }
+                    }
+                    if (mDownloadListener != null) {
+                        mDownloadListener.onFinish(info);
+                    }
+                    return;
+                }
+            }
+
+            int copiedCount = 0;
+            int failedCount = 0;
+            
+            for (DownloadedFile file : files) {
+                String sourcePath = file.getPath();
+                java.io.File sourceFile = new java.io.File(sourcePath);
+                
+                // 检查源文件是否存在
+                if (!sourceFile.exists() || !sourceFile.canRead()) {
+                    Log.w(TAG, "[COPY] 源文件不存在或无法读取: " + sourcePath);
+                    failedCount++;
+                    continue;
+                }
+
+                // 生成目标文件名
+                String filename = file.getFilename();
+                UniFile destFile = downloadDir.findFile(filename);
+                
+                // 如果目标文件已存在，检查大小是否一致
+                if (destFile != null && destFile.exists()) {
+                    long destSize = destFile.length();
+                    if (destSize == sourceFile.length()) {
+                        Log.d(TAG, "[COPY] 目标文件已存在且大小一致，跳过: " + filename);
+                        copiedCount++;
+                        continue;
+                    }
+                }
+
+                // 创建目标文件
+                if (destFile == null) {
+                    destFile = downloadDir.createFile(filename);
+                }
+                
+                if (destFile == null) {
+                    Log.e(TAG, "[COPY] 无法创建目标文件: " + filename);
+                    failedCount++;
+                    continue;
+                }
+
+                // 获取目标文件的本地路径
+                String destPath = destFile.getUri().getPath();
+                if (destPath == null) {
+                    Log.e(TAG, "[COPY] 无法获取目标文件路径: " + filename);
+                    failedCount++;
+                    continue;
+                }
+
+                // 使用快速复制（优先 shell 命令）
+                java.io.File destJavaFile = new java.io.File(destPath);
+                if (copyFileFast(sourceFile, destJavaFile)) {
+                    copiedCount++;
+                    Log.d(TAG, "[COPY] 文件复制成功: " + filename + " (" + copiedCount + "/" + info.total + ")");
+                    
+                    // 更新进度
+                    info.finished = copiedCount;
+                    info.downloaded = copiedCount;
+                    info.copyCount = copiedCount;
+                    
+                    // 通知进度更新
+                    notifyCopyProgress(info, copiedCount, info.total);
+                } else {
+                    Log.e(TAG, "[COPY] 文件复制失败: " + filename);
+                    failedCount++;
+                }
+            }
+
+            // 更新最终状态
+            info.finished = copiedCount;
+            info.downloaded = copiedCount;
+            info.copyCount = copiedCount;
+            info.legacy = info.total - copiedCount;
+
+            if (failedCount == 0 && copiedCount == info.total) {
+                info.state = DownloadInfo.STATE_FINISH;
+                Log.i(TAG, "[COPY] 增量复制完成: " + galleryTitle + " (全部 " + copiedCount + " 个文件)");
+            } else if (copiedCount > 0) {
+                // 部分成功，标记为完成（剩余文件将通过正常下载完成）
+                info.state = DownloadInfo.STATE_FINISH;
+                Log.i(TAG, "[COPY] 增量复制部分完成: " + galleryTitle + " (成功 " + copiedCount + "/" + info.total + ")");
+            } else {
+                info.state = DownloadInfo.STATE_FAILED;
+                Log.w(TAG, "[COPY] 增量复制失败: " + galleryTitle + " (成功 " + copiedCount + "/" + info.total + ")");
+            }
+
+            // 保存到数据库
             EhDB.putDownloadInfo(info);
 
+            // 通知监听器
             List<DownloadInfo> list = getInfoListForLabel(info.label);
             if (list != null) {
                 for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -695,9 +901,39 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 }
             }
 
-            Log.i(TAG, "[COPY] 复制任务完成: " + EhUtils.getSuitableTitle(info) + " (状态: " + info.state + ")");
+            Log.i(TAG, "[COPY] 复制任务完成: " + galleryTitle + " (状态: " + info.state + ")");
         } catch (Exception e) {
             Log.e(TAG, "[COPY] 复制任务失败: " + EhUtils.getSuitableTitle(info), e);
+            info.state = DownloadInfo.STATE_FAILED;
+            EhDB.putDownloadInfo(info);
+            notifyCopyFailed(info);
+        }
+    }
+
+    /**
+     * 通知复制进度
+     */
+    private void notifyCopyProgress(DownloadInfo info, int copied, int total) {
+        if (mDownloadListener != null) {
+            // 复用下载进度通知
+            info.finished = copied;
+            info.downloaded = copied;
+            mDownloadListener.onDownload(info);
+        }
+    }
+
+    /**
+     * 通知复制失败
+     */
+    private void notifyCopyFailed(DownloadInfo info) {
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
+        }
+        if (mDownloadListener != null) {
+            mDownloadListener.onCancel(info);
         }
     }
 
@@ -1400,13 +1636,6 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         for (DownloadInfoListener l : mDownloadInfoListeners) {
             l.onAdd(info, list, 0);
         }
-
-        // 如果添加的是等待状态的任务，确保下载管理器继续处理
-        if (info.state == DownloadInfo.STATE_WAIT) {
-            requestEnsureDownload();
-        }
-
-        Log.i(TAG, "[DOWNLOAD] 下载任务添加完成: " + galleryTitle + " (标签: " + label + ", 状态: " + state + ")");
 
         // 如果添加的是等待状态的任务，确保下载管理器继续处理
         if (info.state == DownloadInfo.STATE_WAIT) {
@@ -2478,6 +2707,35 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     public void onAppForeground() {
         Log.d(TAG, "应用进入前台，恢复正常下载线程优先级");
         SpiderQueen.notifyAppForegroundState(true);
+    }
+
+    /** 标记下载因网络问题暂停 */
+    private volatile boolean mNetworkPaused = false;
+
+    /**
+     * 通知网络丢失，暂停当前下载
+     */
+    public void notifyNetworkLost() {
+        SpiderQueen.notifyNetworkChanged();
+        if (mCurrentTask != null && mCurrentSpider != null) {
+            Log.w(TAG, "网络丢失，暂停当前下载: " + EhUtils.getSuitableTitle(mCurrentTask));
+            mNetworkPaused = true;
+            stopCurrentDownloadInternal();
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdateAll();
+            }
+        }
+    }
+
+    /**
+     * 通知网络恢复，自动恢复之前因网络问题暂停的下载
+     */
+    public void notifyNetworkRecovered() {
+        if (mNetworkPaused) {
+            Log.i(TAG, "网络恢复，自动恢复下载");
+            mNetworkPaused = false;
+            requestEnsureDownload();
+        }
     }
 
     /**

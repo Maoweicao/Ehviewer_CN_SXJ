@@ -39,6 +39,7 @@ import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.GetText;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.network.NetworkLogger;
+import com.hippo.ehviewer.network.NetworkStateManager;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhRequestBuilder;
@@ -1653,10 +1654,28 @@ public final class SpiderQueen implements Runnable {
             boolean forceHtml = false;
             boolean interrupt = false;
             boolean leakSkipHathKey = false;
+            int transientErrorCount = 0;
+            final java.util.Random retryRandom = new java.util.Random();
 
             for (int i = 0; i < 5; i++) {
                 String imageUrl = null;
                 String localShowKey;
+
+                // Exponential backoff with jitter on transient errors (not on first attempt)
+                if (i > 0 && transientErrorCount > 0 && !forceHtml) {
+                    long backoffMs = (long) (1000 * Math.pow(3, i - 1)) + retryRandom.nextInt(500);
+                    if (DEBUG_LOG) {
+                        Log.d(TAG, "Retry #" + i + " for page " + index + ", backoff " + backoffMs + "ms");
+                    }
+                    try {
+                        Thread.sleep(backoffMs);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        error = "Interrupted";
+                        interrupt = true;
+                        break;
+                    }
+                }
 
                 // Check show key
                 synchronized (showKeyLock) {
@@ -1991,6 +2010,7 @@ public final class SpiderQueen implements Runnable {
                     e.printStackTrace();
                     error = GetText.getString(R.string.error_socket);
                     forceHtml = true;
+                    transientErrorCount++;
                 } catch (OutOfMemoryError oom) {
                     Log.e(TAG, "OOM during image download for page " + index, oom);
                     error = "Out of memory";
@@ -2021,6 +2041,20 @@ public final class SpiderQueen implements Runnable {
 
         // false for stop
         private boolean runInternal() {
+            // Check network state before attempting download
+            if (!NetworkStateManager.INSTANCE.isOnline()) {
+                Log.w(TAG, "Network offline, waiting before retry...");
+                try {
+                    Thread.sleep(3000);
+                } catch (InterruptedException e) {
+                    return false;
+                }
+                // If still offline after wait, skip this cycle
+                if (!NetworkStateManager.INSTANCE.isOnline()) {
+                    return true; // Continue but skip this cycle
+                }
+            }
+
             // Check available memory before processing
             Runtime runtime = Runtime.getRuntime();
             long freeMemory = runtime.freeMemory();

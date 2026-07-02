@@ -60,6 +60,7 @@ import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
 import com.hippo.ehviewer.util.MiuiOptimizationHelper;
 import com.hippo.ehviewer.network.NetworkLogger;
+import com.hippo.ehviewer.network.NetworkStateManager;
 import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.Image1;
 //import com.hippo.lib.image.ImageBitmap;
@@ -183,6 +184,7 @@ public class EhApplication extends RecordingApplication {
         StatusCodeException.initialize(this);
         Settings.initialize(this);
         NetworkLogger.INSTANCE.init(this);  // 初始化网络日志系统
+        NetworkStateManager.INSTANCE.init(this);  // 初始化网络状态管理器
         ArchiverDownloadCompleter.resumePendingDownloads(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
@@ -419,6 +421,7 @@ public class EhApplication extends RecordingApplication {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mEhProxySelector == null) {
             application.mEhProxySelector = new EhProxySelector();
+            application.mEhProxySelector.initContext(application);
         }
         return application.mEhProxySelector;
     }
@@ -750,8 +753,18 @@ public class EhApplication extends RecordingApplication {
             }
         }
 
+        // 更新代理选择器（网络变化可能导致系统代理改变，如VPN连接/断开）
+        if (app.mEhProxySelector != null) {
+            try {
+                app.mEhProxySelector.updateProxy();
+                Log.i(TAG, "Proxy selector updated after network change");
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to update proxy selector", e);
+            }
+        }
+
         NetworkLogger.INSTANCE.logBackground(
-            "Network changed - OkHttp pools evicted, DNS cache cleared");
+            "Network changed - OkHttp pools evicted, DNS cache cleared, proxy updated");
     }
 
     @NonNull

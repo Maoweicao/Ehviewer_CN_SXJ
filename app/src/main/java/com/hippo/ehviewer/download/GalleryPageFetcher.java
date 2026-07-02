@@ -26,9 +26,11 @@ import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.dao.DownloadInfo;
+import com.hippo.ehviewer.network.NetworkStateManager;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -44,15 +46,34 @@ import okhttp3.OkHttpClient;
 public class GalleryPageFetcher {
 
     private static final String TAG = "GalleryPageFetcher";
-    private static final int TIMEOUT_SECONDS = 10;
-    private static final int MAX_RETRIES = 1;
+    private static final int PER_REQUEST_TIMEOUT_SECONDS = 15;
+    private static final int MAX_RETRIES = 2;
+    private static final long GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = 5;
+    private static final Random JITTER_RANDOM = new Random();
+
+    /** Per-request client with stricter timeout for batch fetch operations */
+    private static volatile OkHttpClient sBatchClient;
+    private static final Object sBatchClientLock = new Object();
+
+    private static OkHttpClient getBatchClient(Context context) {
+        if (sBatchClient == null) {
+            synchronized (sBatchClientLock) {
+                if (sBatchClient == null) {
+                    sBatchClient = EhApplication.getOkHttpClient(context).newBuilder()
+                            .callTimeout(PER_REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                            .build();
+                }
+            }
+        }
+        return sBatchClient;
+    }
 
     /**
      * Fetch page count for a single DownloadInfo from the network.
      *
      * @param context Application context
      * @param info    DownloadInfo with gid and token
-     * @return page count, or -1 on failure
+     * @return page count, or -1 on failure, -2 if gallery removed
      */
     public static int fetchPages(Context context, DownloadInfo info) {
         return fetchPagesInternal(context, info, MAX_RETRIES);
@@ -61,7 +82,7 @@ public class GalleryPageFetcher {
     private static int fetchPagesInternal(Context context, DownloadInfo info, int retriesLeft) {
         try {
             String url = EhUrl.getGalleryDetailUrl(info.gid, info.token);
-            OkHttpClient okHttpClient = EhApplication.getOkHttpClient(context);
+            OkHttpClient okHttpClient = getBatchClient(context);
             GalleryDetail detail = EhEngine.getGalleryDetail(null, okHttpClient, url);
 
             if (detail != null && detail.pages > 0) {
@@ -69,13 +90,21 @@ public class GalleryPageFetcher {
                 return detail.pages;
             }
         } catch (Throwable e) {
-            if (retriesLeft > 0 && !isGalleryGone(e)) {
-                Log.w(TAG, "Retry fetching pages for GID=" + info.gid + ", retries left: " + (retriesLeft - 1));
-                return fetchPagesInternal(context, info, retriesLeft - 1);
-            }
             if (isGalleryGone(e)) {
                 Log.i(TAG, "Gallery GID=" + info.gid + " has been removed (404/Gone)");
-                return -2; // -2 means gallery removed
+                return -2;
+            }
+            if (retriesLeft > 0 && isTransientError(e)) {
+                long delay = calculateBackoff(MAX_RETRIES - retriesLeft);
+                Log.w(TAG, "Retry fetching pages for GID=" + info.gid
+                        + " after " + delay + "ms, retries left: " + (retriesLeft - 1));
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return -1;
+                }
+                return fetchPagesInternal(context, info, retriesLeft - 1);
             }
             Log.w(TAG, "Failed to fetch pages for GID=" + info.gid + ": " + e.getMessage());
         }
@@ -96,6 +125,33 @@ public class GalleryPageFetcher {
     }
 
     /**
+     * Check if the exception is a transient network error worth retrying.
+     */
+    private static boolean isTransientError(Throwable e) {
+        if (e == null) return false;
+        String msg = e.getMessage();
+        if (msg == null) return false;
+        return msg.contains("timeout")
+                || msg.contains("SocketTimeoutException")
+                || msg.contains("StreamResetException")
+                || msg.contains("stream was reset")
+                || msg.contains("Canceled")
+                || msg.contains("Connection")
+                || msg.contains("ConnectException")
+                || msg.contains("InterruptedIOException");
+    }
+
+    /**
+     * Calculate exponential backoff with jitter.
+     * Attempt 0: ~1s + jitter, Attempt 1: ~3s + jitter
+     */
+    private static long calculateBackoff(int attempt) {
+        long base = (long) (1000 * Math.pow(3, attempt));
+        long jitter = JITTER_RANDOM.nextLong() % 500;
+        return Math.max(500, base + jitter);
+    }
+
+    /**
      * Batch fetch page counts for multiple DownloadInfo objects with controlled concurrency.
      * Only fetches for items where total == 0 (unknown page count).
      * Writes fetched page counts back to DB via EhDB.putDownloadInfo.
@@ -106,7 +162,6 @@ public class GalleryPageFetcher {
      * @return number of successfully fetched page counts
      */
     public static int fetchPagesBatch(Context context, List<DownloadInfo> infos, int concurrency) {
-        // Filter items that need page count fetching
         List<DownloadInfo> needFetch = new ArrayList<>();
         for (DownloadInfo info : infos) {
             if (info.total <= 0) {
@@ -146,18 +201,31 @@ public class GalleryPageFetcher {
             });
         }
 
-        // Wait for all tasks or timeout
+        // Wait for all tasks with a capped timeout
+        long totalTimeout = Math.min(
+                (long) PER_REQUEST_TIMEOUT_SECONDS * needFetch.size() / concurrency + 10,
+                300 // hard cap at 5 minutes
+        );
         try {
-            boolean completed = latch.await(TIMEOUT_SECONDS * needFetch.size() / concurrency + 10,
-                    TimeUnit.SECONDS);
+            boolean completed = latch.await(totalTimeout, TimeUnit.SECONDS);
             if (!completed) {
-                Log.w(TAG, "Page fetch batch timed out, some items may not have page counts");
+                Log.w(TAG, "Page fetch batch timed out after " + totalTimeout + "s, "
+                        + successCount.get() + "/" + needFetch.size() + " succeeded so far");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             Log.w(TAG, "Page fetch batch interrupted");
         } finally {
-            executor.shutdownNow();
+            // Graceful shutdown: try to let in-flight requests finish
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
         Log.i(TAG, "Page fetch batch complete: " + successCount.get()

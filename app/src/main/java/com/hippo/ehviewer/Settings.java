@@ -1157,6 +1157,19 @@ public class Settings {
         putBoolean(KEY_SYNC_DOWNLOAD_WHILE_READING, value);
     }
 
+    public static final String KEY_METERED_NETWORK_POLICY = "metered_network_policy";
+    public static final int METERED_POLICY_PAUSE = 0;
+    public static final int METERED_POLICY_CONTINUE = 1;
+    private static final int DEFAULT_METERED_NETWORK_POLICY = METERED_POLICY_PAUSE;
+
+    public static int getMeteredNetworkPolicy() {
+        return getIntFromStr(KEY_METERED_NETWORK_POLICY, DEFAULT_METERED_NETWORK_POLICY);
+    }
+
+    public static void putMeteredNetworkPolicy(int value) {
+        putIntToStr(KEY_METERED_NETWORK_POLICY, value);
+    }
+
     private static final String KEY_RECENT_DOWNLOAD_LABEL = "recent_download_label";
     private static final String DEFAULT_RECENT_DOWNLOAD_LABEL = null;
 

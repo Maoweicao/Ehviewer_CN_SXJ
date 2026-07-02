@@ -415,6 +415,8 @@
     <string name="download_remove_dialog_message_2">Remove %1$d items from download list ?</string>
     <string name="download_remove_progress">Deleting %1$d/%2$d</string>
     <string name="download_remove_dialog_check_text">Delete image files</string>
+    <string name="download_delete_favorite_confirm_title">Confirm Delete</string>
+    <string name="download_delete_favorite_confirm_message">Some selected items are favorited. Delete them too?</string>
     <string name="stat_download_action_stop_all">Stop all</string>
     <string name="drawer_download_label_title">Label</string>
     <string name="default_download_label_name">Default</string>
@@ -677,6 +679,10 @@
     <string name="settings_download_download_order_by_asc_summary">Download in sequence when downloading all galleries</string>
     <string name="settings_download_sync_while_reading">Sync download while reading</string>
     <string name="settings_download_sync_while_reading_summary">When browsing an undownloaded gallery, automatically save viewed images to the download directory</string>
+    <string name="settings_download_metered_network_policy">Metered network behavior</string>
+    <string name="settings_download_metered_network_policy_summary">What to do when downloads are running on a metered (mobile data) network</string>
+    <string name="settings_download_metered_policy_pause">Pause downloads</string>
+    <string name="settings_download_metered_policy_continue">Continue downloading</string>
     <string name="settings_download_restore_download_items">Restore download items</string>
     <string name="settings_download_restore_download_items_summary">Restore download items that have complete .ehviewer metadata files from download location</string>
     <string name="settings_download_restore_download_items_detail">Recovers download items with valid .ehviewer files by fetching complete gallery info from API</string>

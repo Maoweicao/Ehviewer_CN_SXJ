@@ -24,10 +24,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -40,13 +36,14 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadInfo
-import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.ui.MainActivity
 import com.hippo.ehviewer.util.MiuiOptimizationHelper
 import com.hippo.ehviewer.network.NetworkLogger
+import com.hippo.ehviewer.network.NetworkStateManager
 import com.hippo.scene.StageActivity
 import com.hippo.util.ReadableTime
 import com.hippo.lib.yorozuya.FileUtils
@@ -56,7 +53,7 @@ import com.hippo.lib.yorozuya.collect.SparseJBArray
 import com.hippo.lib.yorozuya.collect.SparseJLArray
 
 @SuppressLint("UnspecifiedImmutableFlag")
-class DownloadService : Service(), DownloadManager.DownloadListener {
+class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStateManager.Listener {
     private var mNotifyManager: NotificationManager? = null
     private var mDownloadManager: DownloadManager? = null
     private var mDownloadingBuilder: NotificationCompat.Builder? = null
@@ -71,10 +68,6 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
     
     // WifiLock 用于保持WiFi高性能模式（HyperOS/Android 14+ 后台WiFi会被降速）
     private var mWifiLock: WifiManager.WifiLock? = null
-    
-    // 网络回调用于监听网络状态（针对小米系统优化）
-    private var mNetworkCallback: ConnectivityManager.NetworkCallback? = null
-    private var mConnectivityManager: ConnectivityManager? = null
     
     // 定时刷新锁的 Runnable - 每5分钟重新获取锁，防止WakeLock超时（10分钟）后失效
     private val mLockRefreshRunnable = Runnable { refreshLocks() }
@@ -144,8 +137,8 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         // 初始化 WifiLock（用于防止后台WiFi降速，HyperOS/Android 14+）
         initWifiLock()
         
-        // 初始化网络监听（针对小米系统优化）
-        initNetworkCallback()
+        // 注册网络状态监听（使用全局 NetworkStateManager）
+        NetworkStateManager.addListener(this)
         
         mDownloadManager = EhApplication.getDownloadManager(applicationContext)
         mDownloadManager!!.setDownloadListener(this)
@@ -170,7 +163,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         releaseWifiLock()
         
         // 释放网络监听
-        releaseNetworkCallback()
+        NetworkStateManager.removeListener(this)
 
         mNotifyManager = null
         if (mDownloadManager != null) {
@@ -214,7 +207,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         stopLockRefresh()
         releaseWakeLock()
         releaseWifiLock()
-        releaseNetworkCallback()
+        NetworkStateManager.removeListener(this)
         stopSelf()
         super.onTaskRemoved(rootIntent)
     }
@@ -844,123 +837,54 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
     }
     
     /**
-     * 初始化网络回调
-     * 监听网络切换（WiFi↔移动数据、VPN 连接/断开），触发连接池刷新和 DNS 重建
+     * NetworkStateManager.Listener: network state changed.
+     * Handles auto-pause on network loss / metered, auto-resume on WiFi recovery.
      */
-    private fun initNetworkCallback() {
-        try {
-            mConnectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                ?: return
-
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return
-
-            mNetworkCallback = object : ConnectivityManager.NetworkCallback() {
-                /** 记录上次的网络对象，用于检测网络是否真的变化了 */
-                private var lastNetwork: Network? = null
-
-                override fun onAvailable(network: Network) {
-                    super.onAvailable(network)
-                    Log.i(TAG, "Network available: $network")
-                    NetworkLogger.logBackground("Network available: $network")
-
-                    // 新的网络接口出现（包括 VPN），刷新连接池
-                    if (lastNetwork != null && lastNetwork != network) {
-                        onNetworkSwitched(network, "available")
-                    }
-                    lastNetwork = network
-                }
-
-                override fun onLost(network: Network) {
-                    super.onLost(network)
-                    Log.w(TAG, "Network lost: $network")
-                    NetworkLogger.logBackground("Network lost: $network")
-
-                    // 网络丢失时刷新连接，确保旧连接被清除
-                    flushNetworkConnections("lost")
-                    lastNetwork = null
-                }
-
-                override fun onCapabilitiesChanged(
-                    network: Network,
-                    networkCapabilities: NetworkCapabilities
-                ) {
-                    super.onCapabilitiesChanged(network, networkCapabilities)
-                    val isUnmetered = networkCapabilities.hasCapability(
-                        NetworkCapabilities.NET_CAPABILITY_NOT_METERED
-                    )
-                    val hasInternet = networkCapabilities.hasCapability(
-                        NetworkCapabilities.NET_CAPABILITY_INTERNET
-                    )
-                    Log.i(TAG, "Network caps changed: $network, unmetered=$isUnmetered, internet=$hasInternet")
-                    NetworkLogger.logBackground(
-                        "Network caps changed: $network, unmetered=$isUnmetered, internet=$hasInternet"
-                    )
-
-                    // 如果网络对象变了（例如 VPN 接管），刷新连接
-                    if (lastNetwork != null && lastNetwork != network) {
-                        onNetworkSwitched(network, "capabilities changed")
-                    }
-                    lastNetwork = network
-                }
-
-                private fun onNetworkSwitched(network: Network, reason: String) {
-                    Log.i(TAG, "Network switched ($reason), flushing connections")
-                    NetworkLogger.logBackground("Network switched ($reason) - flushing OkHttp pools + DNS cache")
-                    flushNetworkConnections(reason)
+    override fun onNetworkStateChanged(newState: NetworkStateManager.State) {
+        Log.i(TAG, "NetworkStateManager state changed: $newState")
+        when (newState) {
+            NetworkStateManager.State.OFFLINE -> {
+                Log.w(TAG, "Network offline, downloads will be paused by SpiderWorker timeout")
+                NetworkLogger.logBackground("DownloadService: network offline, pausing active downloads")
+                mDownloadManager?.notifyNetworkLost()
+            }
+            NetworkStateManager.State.ONLINE_METERED -> {
+                if (Settings.getMeteredNetworkPolicy() == Settings.METERED_POLICY_PAUSE) {
+                    Log.i(TAG, "Metered network + policy=PAUSE, pausing downloads")
+                    NetworkLogger.logBackground("DownloadService: metered network, pausing per settings")
+                    mDownloadManager?.notifyNetworkLost()
+                } else {
+                    Log.i(TAG, "Metered network + policy=CONTINUE, resuming downloads")
+                    NetworkLogger.logBackground("DownloadService: metered network, continuing per settings")
+                    mDownloadManager?.notifyNetworkRecovered()
                 }
             }
-
-            // 注册网络回调 - 不限制 transport 类型，所有网络变化都监听
-            val networkRequest = NetworkRequest.Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                .build()
-
-            mConnectivityManager?.registerNetworkCallback(networkRequest, mNetworkCallback!!)
-            Log.i(TAG, "Network callback registered (all transports)")
-            NetworkLogger.logBackground("Network callback registered")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize network callback", e)
+            NetworkStateManager.State.ONLINE_WIFI -> {
+                Log.i(TAG, "WiFi online, resuming downloads")
+                NetworkLogger.logBackground("DownloadService: WiFi online, resuming downloads")
+                mDownloadManager?.notifyNetworkRecovered()
+            }
+            NetworkStateManager.State.TRANSITIONING -> {
+                Log.i(TAG, "Network transitioning, pausing active downloads")
+                NetworkLogger.logBackground("DownloadService: network transitioning")
+                // Don't pause on transitioning - the settle delay in NetworkStateManager
+                // will handle the final state transition
+            }
         }
     }
 
-    /**
-     * 刷新所有网络连接
-     * VPN 切换后调用，清除旧网络接口上的 TCP 连接和 DNS 缓存
-     */
-    private fun flushNetworkConnections(reason: String) {
-        try {
-            EhApplication.onNetworkChanged()
-
-            // 重新绑定 WifiLock 到新网络（如果需要）
-            if (mWifiLock?.isHeld == true) {
-                mWifiLock!!.release()
-                mWifiLock!!.acquire()
-                Log.i(TAG, "WifiLock rebound after network change ($reason)")
-                NetworkLogger.logBackground("WifiLock rebound after network change ($reason)")
-            }
-
-            // 通知 SpiderQueen 网络已切换，保活需要重新开始
-            SpiderQueen.notifyNetworkChanged()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to flush network connections", e)
-            NetworkLogger.logError("Failed to flush network connections: $reason", e)
-        }
+    override fun onNetworkLost() {
+        Log.w(TAG, "Network lost completely")
+        NetworkLogger.logBackground("DownloadService: network lost completely")
+        mDownloadManager?.notifyNetworkLost()
     }
 
-    /**
-     * 释放网络回调
-     */
-    private fun releaseNetworkCallback() {
-        try {
-            if (mNetworkCallback != null && mConnectivityManager != null) {
-                mConnectivityManager?.unregisterNetworkCallback(mNetworkCallback!!)
-                mNetworkCallback = null
-                mConnectivityManager = null
-                Log.i(TAG, "Network callback unregistered")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to unregister network callback", e)
-        }
+    override fun onNetworkRecovered() {
+        Log.i(TAG, "Network recovered, resuming downloads")
+        NetworkLogger.logBackground("DownloadService: network recovered, resuming downloads")
+        acquireWakeLock()
+        acquireWifiLock()
+        mDownloadManager?.notifyNetworkRecovered()
     }
 
     // TODO Include all notification in one delay

@@ -23,6 +23,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.text.TextUtils
 import android.view.View
@@ -133,18 +134,21 @@ class AppHelper {
             val connectivityManager =
                 context.getSystemService<ConnectivityManager>(ConnectivityManager::class.java)
 
-            val network = connectivityManager.activeNetwork
-            //don't know why always returns null:
-            val networkInfo = connectivityManager.getNetworkInfo(network)
-            val result =
-                networkInfo != null && networkInfo.getType() == ConnectivityManager.TYPE_VPN
-            if (result) {
-                try {
-                    Toast.makeText(context, R.string.network_remind, Toast.LENGTH_LONG).show()
-                } catch (_: RuntimeException) {
+            try {
+                val network = connectivityManager.activeNetwork ?: return true
+                val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return true
+                val hasVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                if (hasVpn) {
+                    try {
+                        Toast.makeText(context, R.string.network_remind, Toast.LENGTH_LONG).show()
+                    } catch (_: RuntimeException) {
+                    }
                 }
+                return !hasVpn
+            } catch (e: Exception) {
+                // Fallback: assume no VPN
+                return true
             }
-            return !result
         }
 
         @JvmStatic
