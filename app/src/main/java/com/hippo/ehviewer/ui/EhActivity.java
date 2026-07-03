@@ -31,13 +31,24 @@ import com.google.firebase.analytics.FirebaseAnalytics;
 import com.hippo.content.ContextLocalWrapper;
 import com.hippo.ehviewer.Analytics;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import java.util.Locale;
 
 public abstract class EhActivity extends AppCompatActivity {
 
     @StyleRes
-    protected abstract int getThemeResId(int theme);
+    protected int getThemeResId(int theme) {
+        switch (theme) {
+            case Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme;
+            case Settings.THEME_DARK:
+                return R.style.AppTheme_Dark;
+            case Settings.THEME_BLACK:
+                return R.style.AppTheme_Black;
+        }
+    }
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {

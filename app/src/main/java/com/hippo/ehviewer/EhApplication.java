@@ -291,9 +291,12 @@ public class EhApplication extends RecordingApplication {
      */
     public static void onNetworkChanged() {
         try {
-            OkHttpClient client = getOkHttpClient(sApplication);
-            if (client != null) {
-                client.connectionPool().evictAll();
+            EhApplication app = getInstance();
+            if (app != null) {
+                OkHttpClient client = getOkHttpClient(app);
+                if (client != null) {
+                    client.connectionPool().evictAll();
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Failed to flush connections on network change", e);

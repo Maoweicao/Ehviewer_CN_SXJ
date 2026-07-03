@@ -68,7 +68,7 @@ public class SpiderInfo {
     /** Reject absurdly long tokens from corrupt files before putting them in the map. */
     private static final int MAX_STORED_PTOKEN_CHARS = 1024;
 
-    static final String TOKEN_FAILED = "failed";
+    public static final String TOKEN_FAILED = "failed";
 
     public int startPage = 0;
     public long gid = -1;

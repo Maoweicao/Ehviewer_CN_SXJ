@@ -34,6 +34,7 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhUrl;
+import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
@@ -540,10 +541,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      */
     public void notifyNetworkLost() {
         Log.w(TAG, "Network lost, pausing active downloads");
-        // Pause current downloading
-        if (mCurrentTask != null) {
-            mCurrentTask.pause();
-        }
+        // Stop all downloads
+        stopAllDownload();
     }
 
     /**
@@ -565,15 +564,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             return false;
         }
         try {
-            // Re-fetch gallery detail from server
-            GalleryInfo galleryInfo = EhEngine.getGalleryDetail(null, EhApplication.getOkHttpClient(mContext),
-                    EhUrl.getGalleryDetailUrl(gid, info.token, 0, false), gid, info.token);
-            if (galleryInfo != null) {
-                info.title = galleryInfo.title;
-                info.titleJpn = galleryInfo.titleJpn;
-                info.category = galleryInfo.category;
-                info.thumb = galleryInfo.thumb;
-                info.pages = galleryInfo.pages;
+            String url = EhUrl.getGalleryDetailUrl(gid, info.token);
+            GalleryDetail galleryDetail = EhEngine.getGalleryDetail(null, EhApplication.getOkHttpClient(mContext), url);
+            if (galleryDetail != null) {
+                info.title = galleryDetail.title;
+                info.titleJpn = galleryDetail.titleJpn;
+                info.category = galleryDetail.category;
+                info.thumb = galleryDetail.thumb;
+                info.pages = galleryDetail.pages;
                 EhDB.putDownloadInfo(info);
                 Log.i(TAG, "repairGalleryInfo: success for gid=" + gid);
                 return true;
@@ -582,6 +580,22 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             Log.e(TAG, "repairGalleryInfo: failed for gid=" + gid, e);
         }
         return false;
+    }
+
+    /**
+     * Called when app comes to foreground
+     */
+    public void onAppForeground() {
+        Log.i(TAG, "App foreground, resuming downloads");
+        ensureDownload();
+    }
+
+    /**
+     * Called when app goes to background
+     */
+    public void onAppBackground() {
+        Log.i(TAG, "App background");
+        // No-op for now, downloads continue in background
     }
 
     public void addDownload(List<DownloadInfo> downloadInfoList) {

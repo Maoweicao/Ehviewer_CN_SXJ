@@ -1131,6 +1131,8 @@ public final class SpiderQueen implements Runnable {
         void onGetImageSuccess(int index, Image image);
 
         void onGetImageFailure(int index, String error);
+
+        default void onPhaseChanged(int phase) {}
     }
 
     private static class AutoCloseInputStream extends InputStream {

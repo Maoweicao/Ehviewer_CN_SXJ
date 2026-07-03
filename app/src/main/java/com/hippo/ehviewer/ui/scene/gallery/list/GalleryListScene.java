@@ -101,7 +101,7 @@ import com.hippo.ehviewer.client.parser.GalleryListParser;
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.QuickSearch;
-import com.hippo.ehviewer.download.DownloadInfoListener;
+import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.event.SomethingNeedRefresh;
 import com.hippo.ehviewer.milestone.MilestoneManager;
@@ -311,7 +311,7 @@ public final class GalleryListScene extends BaseScene
     private ShowcaseView mShowcaseView;
     private GalleryListSceneDialog tagDialog;
     private DownloadManager mDownloadManager;
-    private DownloadInfoListener mDownloadInfoListener;
+    private DownloadManager.DownloadInfoListener mDownloadInfoListener;
     private FavouriteStatusRouter mFavouriteStatusRouter;
     private FavouriteStatusRouter.Listener mFavouriteStatusRouterListener;
 
@@ -371,7 +371,7 @@ public final class GalleryListScene extends BaseScene
         mDownloadManager = EhApplication.getDownloadManager(context);
         mFavouriteStatusRouter = EhApplication.getFavouriteStatusRouter(context);
 
-        mDownloadInfoListener = new DownloadInfoListener() {
+        mDownloadInfoListener = new DownloadManager.DownloadInfoListener() {
 
             @Override
             public void onAdd(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {

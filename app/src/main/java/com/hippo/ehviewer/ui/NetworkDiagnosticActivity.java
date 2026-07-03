@@ -32,8 +32,15 @@ public class NetworkDiagnosticActivity extends EhActivity {
 
     @Override
     protected int getThemeResId(int theme) {
-        // 使用父类的默认实现，支持自适应主题切换
-        return super.getThemeResId(theme);
+        switch (theme) {
+            case Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme;
+            case Settings.THEME_DARK:
+                return R.style.AppTheme_Dark;
+            case Settings.THEME_BLACK:
+                return R.style.AppTheme_Black;
+        }
     }
 
     @Override
