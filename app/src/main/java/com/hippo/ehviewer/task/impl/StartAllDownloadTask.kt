@@ -53,44 +53,14 @@ class StartAllDownloadTask(context: Context) : BaseBackgroundTask(context) {
             
             DownloadService.startAllDownloads(context)
 
-            // 使用 DownloadManager 的 startAllDownload 方法，并提供监听器
-            var isCompleted = false
-            downloadManager.startAllDownload(object : DownloadManager.StartAllDownloadListener {
-                override fun onStart() {
-                    // 开始时的处理
-                }
-                
-                override fun onProgress(current: Int, total: Int, title: String) {
-                    // 更新进度 - 基于所有扫描到的项目
-                    updateProgress(
-                        5 + (current * 90 / total),
-                        context.getString(R.string.start_all_download_progress, 
-                            current, total, title)
-                    )
-                }
-                
-                override fun onComplete(totalStarted: Int) {
-                    updateProgress(95, context.getString(R.string.start_all_download_finalizing))
-                    // startAllDownload() 方法会自动调用 ensureDownload()，所以不需要手动调用
-                    updateProgress(100, context.getString(R.string.start_all_download_completed, totalStarted))
-                    
-                    // 使用Handler延迟执行，而不是delay
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        notifyCompleted()
-                        isCompleted = true
-                    }, 1000)
-                }
-                
-                override fun onError(error: String) {
-                    notifyError(Exception(error))
-                    isCompleted = true
-                }
-            })
+            // 使用 DownloadManager 的 startAllDownload 方法
+            downloadManager.startAllDownload()
             
-            // 等待下载完成
-            while (!isCompleted) {
-                delay(100)
-            }
+            updateProgress(95, context.getString(R.string.start_all_download_finalizing))
+            updateProgress(100, context.getString(R.string.start_all_download_completed, totalCount))
+            
+            delay(1000)
+            notifyCompleted()
             
             Result.success(Unit)
             

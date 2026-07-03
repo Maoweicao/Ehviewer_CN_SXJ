@@ -29,8 +29,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.Analytics;
+import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.client.EhEngine;
+import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
@@ -477,7 +480,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
     }
 
-    void startAllDownload() {
+    public void startAllDownload() {
         boolean update = false;
         // Start all STATE_NONE and STATE_FAILED item
         LinkedList<DownloadInfo> allInfoList = mAllInfoList;
@@ -518,6 +521,67 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             // Ensure download
             ensureDownload();
         }
+    }
+
+    /**
+     * Check if there are any active downloads (downloading or waiting)
+     */
+    public boolean hasActiveDownload() {
+        for (DownloadInfo info : mAllInfoList) {
+            if (info.state == DownloadInfo.STATE_DOWNLOAD || info.state == DownloadInfo.STATE_WAIT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Notify that network is lost - pause active downloads
+     */
+    public void notifyNetworkLost() {
+        Log.w(TAG, "Network lost, pausing active downloads");
+        // Pause current downloading
+        if (mCurrentTask != null) {
+            mCurrentTask.pause();
+        }
+    }
+
+    /**
+     * Notify that network is recovered - resume downloads
+     */
+    public void notifyNetworkRecovered() {
+        Log.i(TAG, "Network recovered, resuming downloads");
+        // Resume download
+        ensureDownload();
+    }
+
+    /**
+     * Repair gallery info by re-fetching from server
+     */
+    public boolean repairGalleryInfo(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) {
+            Log.w(TAG, "repairGalleryInfo: download info not found for gid=" + gid);
+            return false;
+        }
+        try {
+            // Re-fetch gallery detail from server
+            GalleryInfo galleryInfo = EhEngine.getGalleryDetail(null, EhApplication.getOkHttpClient(mContext),
+                    EhUrl.getGalleryDetailUrl(gid, info.token, 0, false), gid, info.token);
+            if (galleryInfo != null) {
+                info.title = galleryInfo.title;
+                info.titleJpn = galleryInfo.titleJpn;
+                info.category = galleryInfo.category;
+                info.thumb = galleryInfo.thumb;
+                info.pages = galleryInfo.pages;
+                EhDB.putDownloadInfo(info);
+                Log.i(TAG, "repairGalleryInfo: success for gid=" + gid);
+                return true;
+            }
+        } catch (Throwable e) {
+            Log.e(TAG, "repairGalleryInfo: failed for gid=" + gid, e);
+        }
+        return false;
     }
 
     public void addDownload(List<DownloadInfo> downloadInfoList) {
@@ -1486,6 +1550,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
          * Download done
          */
         void onCancel(DownloadInfo info);
+
+        /**
+         * Phase changed (copy/download)
+         */
+        default void onPhaseChanged(DownloadInfo info, int phase) {}
     }
 
 }

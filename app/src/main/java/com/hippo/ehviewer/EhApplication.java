@@ -286,6 +286,20 @@ public class EhApplication extends RecordingApplication {
         }
     }
 
+    /**
+     * Called when network changes to flush connections and DNS cache.
+     */
+    public static void onNetworkChanged() {
+        try {
+            OkHttpClient client = getOkHttpClient(sApplication);
+            if (client != null) {
+                client.connectionPool().evictAll();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to flush connections on network change", e);
+        }
+    }
+
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
