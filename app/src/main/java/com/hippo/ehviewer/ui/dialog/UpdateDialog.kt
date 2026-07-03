@@ -14,6 +14,7 @@ import androidx.core.net.toUri
 import com.alibaba.fastjson.JSONObject
 import com.hippo.ehviewer.Analytics
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.utils.DialogUtils
 import com.hippo.ehviewer.client.EhRequestBuilder
 import com.hippo.ehviewer.updater.AppUpdater
 import com.hippo.lib.yorozuya.IOUtils
@@ -51,7 +52,7 @@ class UpdateDialog(private val activity: Activity) {
                 if (!isActivityAlive()) {
                     return@execute
                 }
-                val alertDialog = AlertDialog.Builder(activity)
+                val alertDialog = AlertDialog.Builder(DialogUtils.getDialogContext(activity))
                     .setIcon(R.mipmap.ic_launcher)
                     .setTitle(R.string.update_fail)
                     .setMessage(R.string.update_fail_info)
@@ -89,7 +90,7 @@ class UpdateDialog(private val activity: Activity) {
                 if (!isActivityAlive()) {
                     return@execute
                 }
-                val alertDialog = AlertDialog.Builder(activity).apply {
+                val alertDialog = AlertDialog.Builder(DialogUtils.getDialogContext(activity)).apply {
                     setIcon(R.mipmap.ic_launcher)
                     setTitle(title)
                     setItems(contentSts) { _, _ ->

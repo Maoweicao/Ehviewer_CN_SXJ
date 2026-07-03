@@ -446,6 +446,8 @@ Url</string>
     <string name="download_remove_dialog_message">¿Eliminar %1$s de la lista de descargas?</string>
     <string name="download_remove_dialog_message_2">¿Eliminar %1$d elementos de la lista de descargas?</string>
     <string name="download_remove_dialog_check_text">Eliminar archivos de imagen</string>
+    <string name="download_delete_favorite_confirm_title">Confirmar eliminación</string>
+    <string name="download_delete_favorite_confirm_message">Algunos elementos seleccionados están en favoritos. ¿Eliminarlos también?</string>
     <string name="download_reset_reading_progress">Restablecer progreso de lectura</string>
     <string name="reset_reading_progress_message">¿Restablecer el progreso de lectura de todas las galerías descargadas?</string>
     <string name="stat_download_action_stop_all">Detener todo</string>

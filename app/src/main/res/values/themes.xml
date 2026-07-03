@@ -67,6 +67,7 @@
         <item name="home_shadow">@color/home_shadow_color</item>
 
         <item name="iconColor">@color/icon_color</item>
+        <item name="alertDialogTheme">@style/AlertDialogTheme.Light</item>
     </style>
 
     <style name="AppTheme" parent="BaseTheme">
@@ -138,6 +139,7 @@
         <item name="home_shadow">@color/home_shadow_color_dark</item>
 
         <item name="iconColor">@color/icon_color_dark</item>
+        <item name="alertDialogTheme">@style/AlertDialogTheme.Dark</item>
     </style>
 
     <style name="AppTheme.Dark" parent="BaseTheme.Dark"></style>
@@ -203,6 +205,7 @@
         <item name="home_shadow">@color/home_shadow_color_black</item>
 
         <item name="iconColor">@color/icon_color_black</item>
+        <item name="alertDialogTheme">@style/AlertDialogTheme.Black</item>
     </style>
 
     <style name="AppTheme.Black" parent="BaseTheme.Black"></style>
@@ -260,6 +263,24 @@
         <item name="android:windowBackground">@color/trans</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowFullscreen">true</item>
+    </style>
+
+    <!-- ============ -->
+    <!-- Dialog Theme -->
+    <!-- ============ -->
+    <style name="AlertDialogTheme.Light" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="android:windowBackground">@color/white</item>
+        <item name="colorBackgroundFloating">@color/white</item>
+    </style>
+
+    <style name="AlertDialogTheme.Dark" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="android:windowBackground">@color/grey_850</item>
+        <item name="colorBackgroundFloating">@color/grey_850</item>
+    </style>
+
+    <style name="AlertDialogTheme.Black" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="colorBackgroundFloating">@android:color/black</item>
     </style>
 
     <!-- ============ -->

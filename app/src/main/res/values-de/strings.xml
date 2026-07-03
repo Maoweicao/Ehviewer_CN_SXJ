@@ -448,6 +448,8 @@ Bitte geben Sie spezielle Cookies ein, um sich anzumelden.</string>
     <string name="download_remove_dialog_message">%1$s aus der Download-Liste entfernen?</string>
     <string name="download_remove_dialog_message_2">%1$d Elemente aus der Download-Liste entfernen?</string>
     <string name="download_remove_dialog_check_text">Bilddateien löschen</string>
+    <string name="download_delete_favorite_confirm_title">Löschen bestätigen</string>
+    <string name="download_delete_favorite_confirm_message">Einige ausgewählte Elemente sind favorisiert. Auch diese löschen?</string>
     <string name="stat_download_action_stop_all">Stoppen Sie alles</string>
     <string name="drawer_download_label_title">Etikett</string>
     <string name="default_download_label_name">Standard</string>

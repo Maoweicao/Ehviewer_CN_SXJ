@@ -477,6 +477,8 @@ exhentai: ログイン済みのユーザーのみ利用可能</string>
     <string name="download_remove_dialog_message">ダウンロードリストから%1$sを削除しますか？</string>
     <string name="download_remove_dialog_message_2">ダウンロードリストから%1$d個のアイテムを削除しますか？</string>
     <string name="download_remove_dialog_check_text">画像ファイルを削除する</string>
+    <string name="download_delete_favorite_confirm_title">削除の確認</string>
+    <string name="download_delete_favorite_confirm_message">選択した項目中にお気に入りのギャラリーがあります。一緒に削除しますか？</string>
     <string name="stat_download_action_stop_all">すべてを停止してください</string>
     <string name="drawer_download_label_title">ラベル</string>
     <string name="default_download_label_name">デフォルト</string>

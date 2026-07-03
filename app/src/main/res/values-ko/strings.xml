@@ -448,6 +448,8 @@ exhentai: 로그인한 사용자만 이용 가능</string>
     <string name="download_remove_dialog_message">다운로드 목록에서 %1$s를 제거하시겠습니까?</string>
     <string name="download_remove_dialog_message_2">다운로드 목록에서 %1$d개의 항목을 제거하시겠습니까?</string>
     <string name="download_remove_dialog_check_text">이미지 파일 삭제</string>
+    <string name="download_delete_favorite_confirm_title">삭제 확인</string>
+    <string name="download_delete_favorite_confirm_message">선택한 항목 중 즐겨찾기에 추가된 갤러리가 있습니다. 함께 삭제하시겠습니까?</string>
     <string name="stat_download_action_stop_all">모두 멈춰</string>
     <string name="drawer_download_label_title">라벨</string>
     <string name="default_download_label_name">기본값</string>

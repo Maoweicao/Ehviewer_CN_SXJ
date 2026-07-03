@@ -12,7 +12,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.hippo.ehviewer.EhApplication
-import com.hippo.ehviewer.EhProxySelector
 import com.hippo.ehviewer.Settings
 
 /**
@@ -23,7 +22,6 @@ import com.hippo.ehviewer.Settings
 @SuppressLint("StaticFieldLeak")
 object NetworkStateManager {
     private const val TAG = "NetworkStateManager"
-    private const val RECONNECT_SETTLE_MS = 2000L
 
     enum class State {
         ONLINE_WIFI,
@@ -53,6 +51,7 @@ object NetworkStateManager {
     private val listeners = mutableListOf<Listener>()
     private val handler = Handler(Looper.getMainLooper())
     private var initialized = false
+    private var firstNetworkDetected = false
     private val pendingRecovery = Runnable { checkRecovery() }
 
     fun isOnline(): Boolean = currentState != State.OFFLINE
@@ -74,7 +73,8 @@ object NetworkStateManager {
     }
 
     fun init(application: Application) {
-        if (initialized) return
+        // Double guard: prevent re-registration even if initialized flag corrupts
+        if (initialized || connectivityManager != null) return
         initialized = true
         appContext = application
 
@@ -112,24 +112,23 @@ object NetworkStateManager {
                     isVpnActive = hasVpn
                     Log.i(TAG, "VPN state changed: active=$hasVpn")
                     NetworkLogger.logBackground("NetworkStateManager: VPN state changed: active=$hasVpn")
-                    // Update proxy selector to pick up VPN proxy or revert to direct
-                    handler.post {
-                        try {
-                            EhApplication.getEhProxySelector(appContext!!).updateProxy()
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to update proxy selector on VPN change", e)
-                        }
-                    }
                 }
 
+                // Only transition when capabilities are fully validated,
+                // and skip the initial discovery phase to avoid false transitions
                 if (hasInternet && isValidated) {
                     val newState = if (isUnmetered) State.ONLINE_WIFI else State.ONLINE_METERED
-                    if (lastNetwork != null && lastNetwork != network) {
-                        transitionTo(State.TRANSITIONING)
+
+                    // Only trigger network switch logic if we already had a stable network
+                    if (firstNetworkDetected && lastNetwork != null && lastNetwork != network) {
+                        Log.i(TAG, "Real network switch detected, flushing connections")
+                        NetworkLogger.logBackground("NetworkStateManager: real network switch, flushing connections")
                         flushConnections()
                     }
+
                     transitionTo(newState)
-                } else if (!hasInternet) {
+                    firstNetworkDetected = true
+                } else if (!hasInternet && firstNetworkDetected) {
                     transitionTo(State.OFFLINE)
                 }
                 lastNetwork = network
@@ -151,6 +150,7 @@ object NetworkStateManager {
 
     fun destroy() {
         initialized = false
+        firstNetworkDetected = false
         handler.removeCallbacksAndMessages(null)
         try {
             networkCallback?.let { connectivityManager?.unregisterNetworkCallback(it) }
@@ -166,25 +166,11 @@ object NetworkStateManager {
     }
 
     private fun handleNetworkAvailable(network: Network) {
-        if (lastNetwork != null && lastNetwork != network) {
-            transitionTo(State.TRANSITIONING)
+        // Only trigger a switch if we already had a stable network and this is a new one
+        if (firstNetworkDetected && lastNetwork != null && lastNetwork != network) {
+            Log.i(TAG, "New network available after switch, flushing connections")
             flushConnections()
         }
-
-        handler.postDelayed({
-            try {
-                val caps = connectivityManager?.getNetworkCapabilities(network)
-                if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
-                    val isUnmetered = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-                    val newState = if (isUnmetered) State.ONLINE_WIFI else State.ONLINE_METERED
-                    val wasOffline = currentState == State.TRANSITIONING || currentState == State.OFFLINE
-                    transitionTo(newState)
-                    if (wasOffline) {
-                        notifyNetworkRecovered()
-                    }
-                }
-            } catch (_: Exception) {}
-        }, RECONNECT_SETTLE_MS)
 
         lastNetwork = network
     }

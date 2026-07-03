@@ -991,6 +991,8 @@
     <string name="download_remove_dialog_message">從下載列表移除 %s ？</string>
     <string name="download_remove_dialog_message_2">從下載列表移除 %d 項？</string>
     <string name="download_remove_dialog_check_text">刪除圖檔</string>
+    <string name="download_delete_favorite_confirm_title">確認刪除</string>
+    <string name="download_delete_favorite_confirm_message">選取的項目中有收藏的畫廊，確定一併刪除嗎？</string>
     <string name="stat_download_action_stop_all">全部停止</string>
     <string name="drawer_download_label_title">標籤</string>
     <string name="default_download_label_name">預設</string>

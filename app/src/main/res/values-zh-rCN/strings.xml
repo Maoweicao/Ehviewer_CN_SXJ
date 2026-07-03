@@ -444,6 +444,8 @@
     <string name="download_remove_dialog_message">是否从下载列表中移除%1$s？</string>
     <string name="download_remove_dialog_message_2">从下载列表中移除 %1$d 个项目吗？</string>
     <string name="download_remove_dialog_check_text">删除图像文件</string>
+    <string name="download_delete_favorite_confirm_title">确认删除</string>
+    <string name="download_delete_favorite_confirm_message">选中的项目中有收藏的画廊，确定一并删除吗？</string>
     <string name="stat_download_action_stop_all">停止一切</string>
     <string name="drawer_download_label_title">标签</string>
     <string name="default_download_label_name">默认</string>

@@ -54,13 +54,8 @@ import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
 import com.hippo.ehviewer.download.ArchiverDownloadCompleter;
 import com.hippo.ehviewer.download.DownloadManager;
-import com.hippo.ehviewer.download.DownloadLogger;
-import com.hippo.ehviewer.DownloadedFileManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
-import com.hippo.ehviewer.util.MiuiOptimizationHelper;
-import com.hippo.ehviewer.network.NetworkLogger;
-import com.hippo.ehviewer.network.NetworkStateManager;
 import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.Image1;
 //import com.hippo.lib.image.ImageBitmap;
@@ -90,7 +85,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -183,31 +177,14 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
-        NetworkLogger.INSTANCE.init(this);  // 初始化网络日志系统
-        NetworkStateManager.INSTANCE.init(this);  // 初始化网络状态管理器
         ArchiverDownloadCompleter.resumePendingDownloads(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
         AppConfig.initialize(this);
         SpiderDen.initialize(this);
         EhDB.initialize(this);
-        DownloadedFileManager.initialize(this);
-        DownloadLogger.initialize(this);
-        BackgroundTaskManager.initialize(this);
         EhEngine.initialize();
         BitmapUtils.initialize(this);
-
-        // Initialize lab managers
-        if (Settings.getLabEnabled()) {
-            com.hippo.ehviewer.lab.ip.IpPoolManager.getInstance();
-            com.hippo.ehviewer.lab.ip.SubscriptionManager.getInstance();
-            if (Settings.getIpSwitchEnabled()) {
-                com.hippo.ehviewer.lab.ip.SubscriptionManager.getInstance().startAutoRefresh();
-            }
-            if (Settings.getAiTranslateEnabled()) {
-                com.hippo.ehviewer.lab.translate.AiTranslateManager.getInstance().initialize();
-            }
-        }
 //        Image1.initialize(this);
         Image.initialize(this);
         Native.initialize();
@@ -248,18 +225,6 @@ public class EhApplication extends RecordingApplication {
 
                 try{
                     AppConfig.deleteOldParseErrorFiles();
-                } catch (Throwable ignored) {
-                }
-
-                // 针对 HyperOS/Android 14+ 请求电池优化豁免
-                try {
-                    if (MiuiOptimizationHelper.INSTANCE.needsAggressiveOptimization()
-                            && !MiuiOptimizationHelper.INSTANCE.isBatteryOptimizationExempted(EhApplication.this)) {
-                        // 在后台线程检查，然后回到主线程请求豁免
-                        SimpleHandler.getInstance().post(() -> {
-                            MiuiOptimizationHelper.INSTANCE.requestBatteryOptimizationExemption(EhApplication.this);
-                        });
-                    }
                 } catch (Throwable ignored) {
                 }
 
@@ -327,22 +292,6 @@ public class EhApplication extends RecordingApplication {
 
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             clearMemoryCache();
-            
-            // 刷新下载日志
-            try {
-                DownloadLogger logger = DownloadLogger.getInstance();
-                if (logger != null) {
-                    logger.flushLogs();
-                }
-            } catch (Exception e) {
-                // 忽略异常，避免影响应用正常运行
-            }
-        }
-
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
-            // Critical memory pressure - request GC
-            System.gc();
-            System.runFinalization();
         }
     }
 
@@ -421,7 +370,6 @@ public class EhApplication extends RecordingApplication {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mEhProxySelector == null) {
             application.mEhProxySelector = new EhProxySelector();
-            application.mEhProxySelector.initContext(application);
         }
         return application.mEhProxySelector;
     }
@@ -433,11 +381,11 @@ public class EhApplication extends RecordingApplication {
 //            Dispatcher dispatcher = new Dispatcher();
 //            dispatcher.setMaxRequestsPerHost(4);
             
-            // 创建优化的连接池 - 针对后台长时间下载优化
-            // 增加空闲连接数和保活时间，避免后台切回时连接被回收后重建
+            // 创建优化的连接池 - 针对后台下载优化
+            // 最多保持 10 个连接，每个连接保持 5 分钟，适合后台长时间下载
             ConnectionPool connectionPool = new ConnectionPool(
-                    20,  // 最大空闲连接数（从10提升到20，适应多线程下载）
-                    10,  // 连接保活时间（从5分钟提升到10分钟，防止后台短暂切换时断连）
+                    10,  // 最大空闲连接数
+                    5,   // 连接保活时间（分钟）
                     TimeUnit.MINUTES
             );
             
@@ -447,11 +395,9 @@ public class EhApplication extends RecordingApplication {
                     .connectTimeout(10, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
                     .writeTimeout(10, TimeUnit.SECONDS)
-                    .callTimeout(10, TimeUnit.SECONDS)
-                    .connectionPool(connectionPool)  // 优化的连接池
+//                    .callTimeout(10, TimeUnit.SECONDS)
+                    .connectionPool(connectionPool)  // 添加优化的连接池
                     .retryOnConnectionFailure(true)  // 连接失败时重试
-                    // HTTP/2 连接使用 ping 保活，防止后台连接被 NAT/代理断开
-                    .pingInterval(5, TimeUnit.MINUTES)
                     .cookieJar(getEhCookieStore(application))
                     .cache(getOkHttpCache(application))
 //                    .hostnameVerifier((hostname, session) -> true)
@@ -478,42 +424,6 @@ public class EhApplication extends RecordingApplication {
                             } catch (Throwable t) {
                                 Log.e(TAG, "CookieManager/WebView sync skipped", t);
                             }
-                        }
-                        return response;
-                    })
-                    .addNetworkInterceptor(chain -> {
-                        // 网络活动日志拦截器 - 记录所有 HTTP 请求/响应
-                        if (!NetworkLogger.INSTANCE.getEnabled()) {
-                            return chain.proceed(chain.request());
-                        }
-                        okhttp3.Request request = chain.request();
-                        long startTime = System.currentTimeMillis();
-                        okhttp3.Response response;
-                        try {
-                            response = chain.proceed(request);
-                            long duration = System.currentTimeMillis() - startTime;
-                            String logMsg = String.format(Locale.getDefault(),
-                                "[%s] %s %s → %d (%dms, %dB)",
-                                request.method(),
-                                request.url().encodedPath(),
-                                request.url().host(),
-                                response.code(),
-                                duration,
-                                response.body() != null ? response.body().contentLength() : -1
-                            );
-                            NetworkLogger.INSTANCE.logOkHttp(logMsg);
-                        } catch (Exception e) {
-                            long duration = System.currentTimeMillis() - startTime;
-                            String logMsg = String.format(Locale.getDefault(),
-                                "[%s] %s %s → FAIL (%dms, %s)",
-                                request.method(),
-                                request.url().encodedPath(),
-                                request.url().host(),
-                                duration,
-                                e.toString()
-                            );
-                            NetworkLogger.INSTANCE.logError(logMsg, e);
-                            throw e;
                         }
                         return response;
                     })
@@ -566,14 +476,6 @@ public class EhApplication extends RecordingApplication {
     public static OkHttpClient getImageOkHttpClient(@NonNull Context context) {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mImageOkHttpClient == null) {
-            // 图片下载也使用优化的连接池
-            ConnectionPool imageConnectionPool = new ConnectionPool(
-                    10, 5, TimeUnit.MINUTES
-            );
-
-            // Use a separate cache for image downloads to reduce DiskLruCache contention
-            Cache imageCache = new Cache(new File(application.getCacheDir(), "image_cache"), 50L * 1024L * 1024L);
-
             OkHttpClient.Builder builder = new OkHttpClient.Builder()
                     .followRedirects(false)
                     .followSslRedirects(false)
@@ -581,10 +483,8 @@ public class EhApplication extends RecordingApplication {
                     .readTimeout(20, TimeUnit.SECONDS)
                     .writeTimeout(20, TimeUnit.SECONDS)
                     .callTimeout(20, TimeUnit.SECONDS)
-                    .connectionPool(imageConnectionPool)
-                    .pingInterval(5, TimeUnit.MINUTES)
                     .cookieJar(getEhCookieStore(application))
-                    .cache(imageCache)
+                    .cache(getOkHttpCache(application))
 //                    .hostnameVerifier((hostname, session) -> true)
                     .dns(new EhHosts(application))
                     .addNetworkInterceptor(sprocket -> {
@@ -648,7 +548,7 @@ public class EhApplication extends RecordingApplication {
     }
 
     private static int getMemoryCacheMaxSize() {
-        return Math.min(12 * 1024 * 1024, (int) OSUtils.getAppMaxMemory());
+        return Math.min(20 * 1024 * 1024, (int) OSUtils.getAppMaxMemory());
     }
 
     @NonNull
@@ -720,53 +620,6 @@ public class EhApplication extends RecordingApplication {
         return application.mHosts;
     }
 
-    /**
-     * 网络切换时刷新 OkHttp 连接池和 DNS 缓存
-     * VPN 切换后必须调用，否则旧连接仍绑定在旧网络接口上
-     */
-    public static void onNetworkChanged() {
-        EhApplication app = instance;
-        if (app == null) return;
-
-        // 刷新 OkHttp 主客户端连接池
-        if (app.mOkHttpClient != null) {
-            app.mOkHttpClient.connectionPool().evictAll();
-            Log.i(TAG, "NetworkLogger: OkHttp connection pool evicted for main client");
-        }
-
-        // 刷新图片客户端连接池
-        if (app.mImageOkHttpClient != null) {
-            app.mImageOkHttpClient.connectionPool().evictAll();
-            Log.i(TAG, "NetworkLogger: OkHttp connection pool evicted for image client");
-        }
-
-        // 刷新 DNS 缓存（清空自定义 hosts 数据库中的条目）
-        // 这样下次 lookup 会重新走 DoH 或系统 DNS
-        if (app.mHosts != null) {
-            try {
-                // 只清除非手动添加的条目，保留用户自定义 hosts
-                // 这里我们清除所有缓存过的 DNS 条目
-                app.mHosts.deleteAll();  // 需要新增 deleteAll 方法
-                Log.i(TAG, "NetworkLogger: DNS cache cleared");
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to clear DNS cache", e);
-            }
-        }
-
-        // 更新代理选择器（网络变化可能导致系统代理改变，如VPN连接/断开）
-        if (app.mEhProxySelector != null) {
-            try {
-                app.mEhProxySelector.updateProxy();
-                Log.i(TAG, "Proxy selector updated after network change");
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to update proxy selector", e);
-            }
-        }
-
-        NetworkLogger.INSTANCE.logBackground(
-            "Network changed - OkHttp pools evicted, DNS cache cleared, proxy updated");
-    }
-
     @NonNull
     public static FavouriteStatusRouter getFavouriteStatusRouter() {
         return getFavouriteStatusRouter(getInstance());
@@ -807,8 +660,7 @@ public class EhApplication extends RecordingApplication {
     public static Cache getOkHttpCache(@NonNull Context context) {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mOkHttpCache == null) {
-            // Increase cache size to 100MB to reduce DiskLruCache lock contention
-            application.mOkHttpCache = new Cache(new File(application.getCacheDir(), "http_cache"), 100L * 1024L * 1024L);
+            application.mOkHttpCache = new Cache(new File(application.getCacheDir(), "http_cache"), 50L * 1024L * 1024L);
         }
         return application.mOkHttpCache;
     }

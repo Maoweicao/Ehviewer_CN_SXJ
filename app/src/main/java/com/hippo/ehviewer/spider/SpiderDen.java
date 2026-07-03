@@ -128,37 +128,27 @@ public final class SpiderDen {
      */
     @Nullable
     public static UniFile getExistingGalleryDownloadDir(GalleryInfo galleryInfo) {
-        try {
-            UniFile dir = Settings.getDownloadLocation();
-            if (dir == null) {
-                return null;
-            }
-            String dirname = findDownloadDirname(galleryInfo, dir);
-            return dirname != null ? dir.subFile(dirname) : null;
-        } catch (OutOfMemoryError e) {
-            android.util.Log.w("SpiderDen", "OOM in getExistingGalleryDownloadDir", e);
+        UniFile dir = Settings.getDownloadLocation();
+        if (dir == null) {
             return null;
         }
+        String dirname = findDownloadDirname(galleryInfo, dir);
+        return dirname != null ? dir.subFile(dirname) : null;
     }
 
     public static UniFile getGalleryDownloadDir(GalleryInfo galleryInfo) {
-        try {
-            UniFile dir = Settings.getDownloadLocation();
-            if (dir != null) {
-                String dirname = findDownloadDirname(galleryInfo, dir);
+        UniFile dir = Settings.getDownloadLocation();
+        if (dir != null) {
+            String dirname = findDownloadDirname(galleryInfo, dir);
 
-                // Create it
-                if (null == dirname) {
-                    dirname = FileUtils.sanitizeFilename(galleryInfo.gid + "-" + EhUtils.getSuitableTitle(galleryInfo));
-                    EhDB.putDownloadDirname(galleryInfo.gid, dirname);
-                }
-
-                return dir.subFile(dirname);
-            } else {
-                return null;
+            // Create it
+            if (null == dirname) {
+                dirname = FileUtils.sanitizeFilename(galleryInfo.gid + "-" + EhUtils.getSuitableTitle(galleryInfo));
+                EhDB.putDownloadDirname(galleryInfo.gid, dirname);
             }
-        } catch (OutOfMemoryError e) {
-            android.util.Log.w("SpiderDen", "OOM in getGalleryDownloadDir", e);
+
+            return dir.subFile(dirname);
+        } else {
             return null;
         }
     }
@@ -239,12 +229,7 @@ public final class SpiderDen {
                 return sCache != null;
             case SpiderQueen.MODE_DOWNLOAD:
                 synchronized (mDownloadDirLock) {
-                    try {
-                        return mDownloadDir != null && mDownloadDir.isDirectory();
-                    } catch (OutOfMemoryError e) {
-                        android.util.Log.w("SpiderDen", "OOM in isReady", e);
-                        return false;
-                    }
+                    return mDownloadDir != null && mDownloadDir.isDirectory();
                 }
             default:
                 return false;

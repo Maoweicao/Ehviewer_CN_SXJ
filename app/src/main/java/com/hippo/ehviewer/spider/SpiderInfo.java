@@ -52,9 +52,23 @@ public class SpiderInfo {
 
     private static final String VERSION_STR = "VERSION";
     private static final int VERSION = 2;
+
     /** Upper bound for pages from local file; prevents OOM from corrupted spider_info. */
     private static final int MAX_SPIDER_INFO_PAGES = 100_000;
-    public static final String TOKEN_FAILED = "failed";
+
+    /** Header fields (version, gid, token, counts) should stay tiny; cap lines to bound memory. */
+    private static final int MAX_SPIDER_INFO_HEADER_LINE = 8192;
+
+    /**
+     * One stored line is "{index} {pToken}"; real pTokens are short. Keeps per-line read small so
+     * pages × lineSize cannot exhaust the heap (default readAsciiLine allows 128KB per line).
+     */
+    private static final int MAX_PTOKEN_FILE_LINE = 2048;
+
+    /** Reject absurdly long tokens from corrupt files before putting them in the map. */
+    private static final int MAX_STORED_PTOKEN_CHARS = 1024;
+
+    static final String TOKEN_FAILED = "failed";
 
     public int startPage = 0;
     public long gid = -1;
@@ -112,7 +126,7 @@ public class SpiderInfo {
 
     @Nullable
     public static SpiderInfo read(@Nullable InputStream is) {
-        if (is == null) {
+        if (null == is) {
             return null;
         }
 
@@ -120,11 +134,11 @@ public class SpiderInfo {
         try {
             spiderInfo = new SpiderInfo();
             // Get version
-            String line = IOUtils.readAsciiLine(is);
+            String line = IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE);
             int version = getVersion(line);
             if (version == VERSION) {
                 // Read next line
-                line = IOUtils.readAsciiLine(is);
+                line = IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE);
             } else if (version == 1) {
                 // pass
             } else {
@@ -134,74 +148,47 @@ public class SpiderInfo {
             // Start page
             spiderInfo.startPage = getStartPage(line);
             // Gid
-            line = IOUtils.readAsciiLine(is);
-            if (line == null || line.isEmpty()) return null;
-            spiderInfo.gid = Long.parseLong(line);
+            spiderInfo.gid = Long.parseLong(IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE));
             // Token
-            spiderInfo.token = IOUtils.readAsciiLine(is);
+            spiderInfo.token = IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE);
             // Deprecated, mode, skip it
-            IOUtils.readAsciiLine(is);
+            IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE);
             // Preview pages
-            line = IOUtils.readAsciiLine(is);
-            if (line == null || line.isEmpty()) return null;
-            spiderInfo.previewPages = Integer.parseInt(line);
-            // Preview per page
-            line = IOUtils.readAsciiLine(is);
+            spiderInfo.previewPages = Integer.parseInt(IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE));
+            // Preview pre page
+            line = IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE);
             if (version == 1) {
                 // Skip it
             } else {
                 spiderInfo.previewPerPage = Integer.parseInt(line);
             }
             // Pages
-            line = IOUtils.readAsciiLine(is);
-            if (line == null || line.isEmpty()) return null;
-            spiderInfo.pages = Integer.parseInt(line);
+            spiderInfo.pages = Integer.parseInt(IOUtils.readAsciiLine(is, MAX_SPIDER_INFO_HEADER_LINE));
             // Check pages
             if (spiderInfo.pages <= 0 || spiderInfo.pages > MAX_SPIDER_INFO_PAGES) {
                 return null;
             }
+            // PToken (at most one line per page in valid files; cap lines to avoid OOM on corrupt files)
             spiderInfo.pTokenMap = new SparseArray<>(spiderInfo.pages);
-            int maxTokens = Math.min(spiderInfo.pages, MAX_SPIDER_INFO_PAGES);
-            for (int linesRead = 0; linesRead < maxTokens; linesRead++) {
+            for (int linesRead = 0; linesRead < spiderInfo.pages; linesRead++) {
                 try {
-                    line = IOUtils.readAsciiLine(is);
+                    line = IOUtils.readAsciiLine(is, MAX_PTOKEN_FILE_LINE);
                 } catch (EOFException e) {
                     break;
                 }
-                if (line == null || line.isEmpty()) {
-                    continue;
-                }
-                // Limit line length to prevent OOM from corrupted data
-                if (line.length() > 2048) {
-                    Log.w(TAG, "Line too long (" + line.length() + " chars), skipping");
-                    continue;
-                }
-                int pos = line.indexOf(' ');
-                if (pos > 0 && pos < line.length() - 1) {
-                    try {
-                        int index = Integer.parseInt(line.substring(0, pos));
-                        String pToken = line.substring(pos + 1);
-                        if (pToken.length() > 1000) {
-                            pToken = pToken.substring(0, 1000);
-                            Log.w(TAG, "PToken too long, truncated to 1000 chars");
-                        }
-                        if (!TextUtils.isEmpty(pToken)) {
-                            spiderInfo.pTokenMap.put(index, pToken);
-                        }
-                    } catch (NumberFormatException e) {
-                        Log.e(TAG, "Can't parse index: " + line.substring(0, Math.min(pos, 20)));
+                int pos = line.indexOf(" ");
+                if (pos > 0) {
+                    int index = Integer.parseInt(line.substring(0, pos));
+                    String pToken = line.substring(pos + 1);
+                    if (!TextUtils.isEmpty(pToken) && pToken.length() <= MAX_STORED_PTOKEN_CHARS) {
+                        spiderInfo.pTokenMap.put(index, pToken);
                     }
                 } else {
-                    Log.e(TAG, "Can't parse index and pToken, pos = " + pos + ", line length = " + line.length());
+                    Log.e(TAG, "Can't parse index and pToken, index = " + pos);
                 }
             }
         } catch (IOException | NumberFormatException e) {
-            Log.e(TAG, "Error reading spider info", e);
-        } catch (OutOfMemoryError e) {
-            // Don't include the exception in the log - printing stack trace
-            // allocates memory and can trigger a secondary OOM crash.
-            Log.e(TAG, "OOM while reading spider info");
-            return null;
+            // Ignore
         }
 
         if (spiderInfo == null || spiderInfo.gid == -1 || spiderInfo.token == null ||

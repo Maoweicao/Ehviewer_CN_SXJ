@@ -50,6 +50,7 @@ import com.hippo.ehviewer.ui.GalleryActivity;
 import com.hippo.ehviewer.ui.dialog.DownloadProgressDialog;
 import com.hippo.ehviewer.ui.scene.gallery.detail.GalleryDetailScene;
 import com.hippo.ehviewer.ui.scene.gallery.list.EnterGalleryDetailTransaction;
+import com.hippo.ehviewer.utils.DialogUtils;
 import com.hippo.lib.yorozuya.SimpleHandler;
 import com.hippo.util.ExecutorManager;
 import com.hippo.unifile.UniFile;
@@ -104,7 +105,7 @@ public final class CommonOperations {
             String newFavoriteName = slot >= 0 ? items[slot + 1] : null;
             doAddToFavorites(activity, galleryInfo, slot, new DelegateFavoriteCallback(listener, galleryInfo, newFavoriteName, slot));
         } else {
-            new ListCheckBoxDialogBuilder(activity, items,
+            new ListCheckBoxDialogBuilder(DialogUtils.getDialogContext(activity), items,
                     (builder, dialog, position) -> {
                         int slot1 = position - 1;
                         String newFavoriteName = (slot1 >= 0 && slot1 <= 9) ? items[slot1 + 1] : null;
@@ -258,7 +259,7 @@ public final class CommonOperations {
                             items[i + 1] = list.get(i).getLabel();
                         }
 
-                        new ListCheckBoxDialogBuilder(activity, items,
+                        new ListCheckBoxDialogBuilder(DialogUtils.getDialogContext(activity), items,
                                 (builder, dialog, position) -> {
                                     String label1;
                                     if (position == 0) {

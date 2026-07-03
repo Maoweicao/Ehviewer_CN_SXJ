@@ -839,12 +839,12 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
     /**
      * NetworkStateManager.Listener: network state changed.
      * Handles auto-pause on network loss / metered, auto-resume on WiFi recovery.
+     * Intentional: does NOT react to TRANSITIONING state — only acts on stable states.
      */
     override fun onNetworkStateChanged(newState: NetworkStateManager.State) {
-        Log.i(TAG, "NetworkStateManager state changed: $newState")
         when (newState) {
             NetworkStateManager.State.OFFLINE -> {
-                Log.w(TAG, "Network offline, downloads will be paused by SpiderWorker timeout")
+                Log.w(TAG, "Network offline, pausing active downloads")
                 NetworkLogger.logBackground("DownloadService: network offline, pausing active downloads")
                 mDownloadManager?.notifyNetworkLost()
             }
@@ -854,21 +854,18 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
                     NetworkLogger.logBackground("DownloadService: metered network, pausing per settings")
                     mDownloadManager?.notifyNetworkLost()
                 } else {
-                    Log.i(TAG, "Metered network + policy=CONTINUE, resuming downloads")
+                    Log.i(TAG, "Metered network + policy=CONTINUE, continuing downloads")
                     NetworkLogger.logBackground("DownloadService: metered network, continuing per settings")
-                    mDownloadManager?.notifyNetworkRecovered()
                 }
             }
             NetworkStateManager.State.ONLINE_WIFI -> {
-                Log.i(TAG, "WiFi online, resuming downloads")
-                NetworkLogger.logBackground("DownloadService: WiFi online, resuming downloads")
+                Log.i(TAG, "WiFi online, ready for downloads")
+                NetworkLogger.logBackground("DownloadService: WiFi online")
                 mDownloadManager?.notifyNetworkRecovered()
             }
             NetworkStateManager.State.TRANSITIONING -> {
-                Log.i(TAG, "Network transitioning, pausing active downloads")
-                NetworkLogger.logBackground("DownloadService: network transitioning")
-                // Don't pause on transitioning - the settle delay in NetworkStateManager
-                // will handle the final state transition
+                // 忽略过渡状态 —— 等待稳定后再决策
+                Log.d(TAG, "Network transitioning, waiting for stable state")
             }
         }
     }

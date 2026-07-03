@@ -1065,6 +1065,8 @@
     <string name="download_remove_dialog_message">Retirer %s de la liste de téléchargement ?</string>
     <string name="download_remove_dialog_message_2">Retirer %d articles de la liste de téléchargement ?</string>
     <string name="download_remove_dialog_check_text">Supprimer fichiers d\'image</string>
+    <string name="download_delete_favorite_confirm_title">Confirmer la suppression</string>
+    <string name="download_delete_favorite_confirm_message">Certains éléments sélectionnés sont en favoris. Les supprimer aussi ?</string>
     <string name="stat_download_action_stop_all">Arrêter tout</string>
     <string name="drawer_download_label_title">Label</string>
     <string name="default_download_label_name">Défaut</string>

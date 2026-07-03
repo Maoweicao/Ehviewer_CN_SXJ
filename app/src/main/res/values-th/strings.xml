@@ -463,6 +463,8 @@ exhentai: เปิดให้เฉพาะผู้ที่ลงชื่�
     <string name="download_remove_dialog_message">ลบ %1$s ออกจากรายการดาวน์โหลดหรือไม่?</string>
     <string name="download_remove_dialog_message_2">ลบ %1$d รายการออกจากรายการดาวน์โหลดหรือไม่?</string>
     <string name="download_remove_dialog_check_text">ลบไฟล์รูปภาพ</string>
+    <string name="download_delete_favorite_confirm_title">ยืนยันการลบ</string>
+    <string name="download_delete_favorite_confirm_message">บางรายการที่เลือกถูกเพิ่มในรายการโปรด ต้องการลบด้วยหรือไม่?</string>
     <string name="stat_download_action_stop_all">หยุดทั้งหมด</string>
     <string name="drawer_download_label_title">ป้าย</string>
     <string name="default_download_label_name">ค่าเริ่มต้น</string>

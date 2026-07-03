@@ -117,7 +117,9 @@ import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.callBack.DownloadSearchCallback;
 import com.hippo.ehviewer.client.EhConfig;
+import com.hippo.ehviewer.client.EhClient;
 import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
@@ -130,6 +132,8 @@ import com.hippo.ehviewer.sync.DownloadSpiderInfoExecutor;
 // removed unused background task imports
 import com.hippo.ehviewer.ui.GalleryActivity;
 import com.hippo.ehviewer.ui.MainActivity;
+import com.hippo.ehviewer.ui.CommonOperations;
+import com.hippo.ehviewer.ui.dialog.SelectItemWithIconAdapter;
 import com.hippo.ehviewer.ui.annotation.ViewLifeCircle;
 import com.hippo.ehviewer.ui.scene.ToolbarScene;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadAdapter;
@@ -144,10 +148,12 @@ import com.hippo.lib.yorozuya.ViewUtils;
 import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.ripple.Ripple;
 import com.hippo.unifile.UniFile;
+import com.hippo.util.AppHelper;
 import com.hippo.util.DrawableManager;
 import com.hippo.util.IoThreadPoolExecutor;
 import com.hippo.view.ViewTransition;
 import com.hippo.widget.FabLayout;
+import com.hippo.widget.LoadImageViewNew;
 import com.hippo.widget.ProgressView;
 import com.hippo.widget.SearchBarMover;
 import com.hippo.widget.recyclerview.AutoStaggeredGridLayoutManager;
@@ -1317,15 +1323,143 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public boolean onItemLongClick(EasyRecyclerView parent, View view, int position, long id) {
-        MyEasyRecyclerView recyclerView = mRecyclerView;
-        if (recyclerView == null) {
+        Context context = getEHContext();
+        MainActivity activity = getActivity2();
+        if (null == context || null == activity) {
             return false;
         }
 
-        if (!recyclerView.isInCustomChoice()) {
-            recyclerView.intoCustomChoiceMode();
+        List<DownloadInfo> list = mList;
+        if (list == null) {
+            return false;
         }
-        recyclerView.toggleItemChecked(position);
+        int pos = positionInList(position);
+        if (pos < 0 || pos >= list.size()) {
+            return false;
+        }
+
+        DownloadInfo info = list.get(pos);
+        final Context appContext = context.getApplicationContext();
+        boolean favourited = info.favoriteSlot != -2;
+        boolean pipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE);
+
+        CharSequence[] items;
+        int[] icons;
+        if (pipSupported && info.state == DownloadInfo.STATE_FINISH) {
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(R.string.delete_downloads),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+                    context.getString(R.string.pip_play),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    R.drawable.v_delete_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+                    R.drawable.v_fullscreen_exit_x24,
+            };
+        } else {
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(R.string.delete_downloads),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    R.drawable.v_delete_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+            };
+        }
+
+        String title = EhUtils.getSuitableTitle(info);
+
+        @SuppressLint("InflateParams") LinearLayout linearLayout = (LinearLayout) getLayoutInflater2().inflate(R.layout.gallery_item_dialog_coustom_title, null);
+
+        LoadImageViewNew imageViewNew = linearLayout.findViewById(R.id.dialog_thumb);
+        imageViewNew.load(EhCacheKeyFactory.getThumbKey(info.gid), info.thumb);
+
+        TextView textView = linearLayout.findViewById(R.id.title_text);
+        textView.setText(title);
+        textView.setOnClickListener(l -> {
+            AppHelper.copyPlainText(title, getEHContext());
+            Toast toast = Toast.makeText(getEHContext(), "标题文本已复制", Toast.LENGTH_SHORT);
+            toast.setGravity(Gravity.CENTER, 0, 0);
+            toast.show();
+        });
+
+        com.google.android.material.chip.ChipGroup chipGroup = linearLayout.findViewById(R.id.tab_tag_flow);
+        chipGroup.setVisibility(View.GONE);
+
+        DownloadInfo dlInfo = info;
+
+        new AlertDialog.Builder(getDialogContext())
+                .setCustomTitle(linearLayout)
+                .setAdapter(new SelectItemWithIconAdapter(context, items, icons), (dialog, which) -> {
+                    switch (which) {
+                        case 0: { // Read
+                            Intent intent = new Intent(activity, GalleryActivity.class);
+                            if (dlInfo.archiveUri != null && dlInfo.archiveUri.startsWith("content://")) {
+                                intent.setAction(Intent.ACTION_VIEW);
+                                intent.setData(Uri.parse(dlInfo.archiveUri));
+                            } else {
+                                intent.setAction(GalleryActivity.ACTION_EH);
+                                intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, dlInfo);
+                            }
+                            galleryActivityLauncher.launch(intent);
+                            break;
+                        }
+                        case 1: { // Delete
+                            new AlertDialog.Builder(getDialogContext())
+                                    .setTitle(R.string.download_remove_dialog_title)
+                                    .setMessage(getString(R.string.download_remove_dialog_message, title))
+                                    .setPositiveButton(android.R.string.ok, (dialog1, which1) -> {
+                                        if (mDownloadManager != null) {
+                                            mDownloadManager.deleteDownload(dlInfo.gid);
+                                        }
+                                    })
+                                    .show();
+                            break;
+                        }
+                        case 2: { // Favorites
+                            if (favourited) {
+                                CommonOperations.removeFromFavorites(activity, dlInfo, new EhClient.Callback<Void>() {
+                                    @Override
+                                    public void onSuccess(Void result) {
+                                        Toast.makeText(appContext, R.string.remove_from_favorite_success, Toast.LENGTH_SHORT).show();
+                                    }
+                                    @Override
+                                    public void onFailure(Exception e) {
+                                        Toast.makeText(appContext, R.string.remove_from_favorite_failure, Toast.LENGTH_LONG).show();
+                                    }
+                                    @Override
+                                    public void onCancel() {}
+                                });
+                            } else {
+                                CommonOperations.addToFavorites(activity, dlInfo, new EhClient.Callback<Void>() {
+                                    @Override
+                                    public void onSuccess(Void result) {
+                                        Toast.makeText(appContext, R.string.add_to_favorite_success, Toast.LENGTH_SHORT).show();
+                                    }
+                                    @Override
+                                    public void onFailure(Exception e) {
+                                        Toast.makeText(appContext, R.string.add_to_favorite_failure, Toast.LENGTH_LONG).show();
+                                    }
+                                    @Override
+                                    public void onCancel() {}
+                                }, false);
+                            }
+                            break;
+                        }
+                        case 3: { // PiP play
+                            Intent pipIntent = new Intent(activity, GalleryActivity.class);
+                            pipIntent.setAction(GalleryActivity.ACTION_EH);
+                            pipIntent.putExtra(GalleryActivity.KEY_GALLERY_INFO, dlInfo);
+                            startActivity(pipIntent);
+                            break;
+                        }
+                    }
+                }).show();
 
         return true;
     }
@@ -1467,7 +1601,7 @@ public class DownloadsScene extends ToolbarScene
                     if (downloadInfoList.isEmpty()) {
                         break;
                     }
-                    CheckBoxDialogBuilder builder = new CheckBoxDialogBuilder(context,
+                    CheckBoxDialogBuilder builder = new CheckBoxDialogBuilder(dialogContext,
                             getString(R.string.download_remove_dialog_message_2, gidList.size()),
                             getString(R.string.download_remove_dialog_check_text),
                             Settings.getRemoveImageFiles());
@@ -1492,7 +1626,7 @@ public class DownloadsScene extends ToolbarScene
 
                     MoveDialogHelper helper = new MoveDialogHelper(labels, downloadInfoList);
 
-                    new AlertDialog.Builder(context)
+                    new AlertDialog.Builder(dialogContext)
                             .setTitle(R.string.download_move_dialog_title)
                             .setItems(labels, helper)
                             .show();
@@ -2681,6 +2815,33 @@ public class DownloadsScene extends ToolbarScene
                 return;
             }
 
+            // Check if any selected items are favorited
+            boolean hasFavourited = false;
+            for (DownloadInfo info : mDownloadInfoList) {
+                if (info.favoriteSlot != -2) {
+                    hasFavourited = true;
+                    break;
+                }
+            }
+
+            if (hasFavourited) {
+                // Show secondary confirmation for favorite galleries
+                Context context = getDialogContext();
+                if (context == null) {
+                    return;
+                }
+                new AlertDialog.Builder(context)
+                        .setTitle(R.string.download_delete_favorite_confirm_title)
+                        .setMessage(R.string.download_delete_favorite_confirm_message)
+                        .setPositiveButton(android.R.string.ok, (dialog2, which2) -> executeRangeDelete())
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            } else {
+                executeRangeDelete();
+            }
+        }
+
+        private void executeRangeDelete() {
             // Cancel check mode
             if (mRecyclerView != null) {
                 mRecyclerView.outOfCustomChoiceMode();
@@ -2693,7 +2854,7 @@ public class DownloadsScene extends ToolbarScene
                 deleteGalleryFilesAsync(mDownloadInfoList);
             }
 
-            // 多个项目删档用后台任�?
+            // 多个项目删档用后台任务
             Context context = getActivity2();
             if (context == null) {
                 return;
