@@ -13,11 +13,11 @@ An E-Hentai Application for Android.
 点击前往下载：
 
 [//]: # (- [Appteka]&#40;https://appteka.store/app/acdr168648&#41;)
-- [百度云](https://pan.baidu.com/s/1P1-yyeTlmUmFQON_gXeWuQ) 提取码：uarn
-- [夸克网盘](https://pan.quark.cn/s/b14f69e08682) 提取码：Zbf7
-- [蓝奏云](https://wwbfg.lanzouu.com/iss0J3twy3gd)，电脑端可正常下载 提取码：61zn
+- [百度云](https://pan.baidu.com/s/19ZEEdF3waR3hkMghbmu7rw) 提取码：gxsj
+- [夸克网盘](https://pan.quark.cn/s/bffd976d75c4) 提取码：TJDR
+- [蓝奏云](https://wwbfg.lanzouu.com/iZPct3u2hxef)，电脑端可正常下载 提取码：1obh
 - [GitHub](https://github.com/xiaojieonly/Ehviewer_CN_SXJ/releases)
-- Torrent链接:magnet:?xt=urn:btih:f74e6a11875bd09328bbdb3f4a495c9aab8f77fc&xt=urn:btmh:1220afc47e54c541670d468c659aa00401e2d894a2ad381d28138219080e6eb2b5e0&dn=EhViewer-2.0.1.9.apk&xl=27739169
+- Torrent链接:magnet:?xt=urn:btih:76cf0c1951465d0ab5e4e6fc0b4f371aceec8f9c&xt=urn:btmh:12201dbee30e3448b93d0b725ba19c5fe6a19b042dd662fe9ef898d92c3e67ca6c80&dn=EhViewer-2.0.2.1.apk&xl=27747322
 
 
 点击前往赏饭：
@@ -31,7 +31,7 @@ Telegram通知群: https://t.me/Ehviewer_xiaojieonly_channel
 
 # Changelog
 ## 2026/07/01 
-### 新版发布2.0.1.9
+### 新版发布2.0.2.0
 
 - 修复底部导航栏导致的页面遮蔽问题
 - 修复浏览画廊时图片会自动下载到下载目录的问题

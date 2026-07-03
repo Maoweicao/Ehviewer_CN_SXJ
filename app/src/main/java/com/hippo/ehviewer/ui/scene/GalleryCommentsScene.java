@@ -42,12 +42,15 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -58,7 +61,6 @@ import com.hippo.easyrecyclerview.LinearDividerItemDecoration;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
-import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.UrlOpener;
 import com.hippo.ehviewer.client.EhClient;
 import com.hippo.ehviewer.client.EhRequest;
@@ -141,6 +143,8 @@ public final class GalleryCommentsScene extends ToolbarScene
     private boolean mShowAllComments = false;
     private boolean mRefreshingComments = false;
 
+    private int mOriginalSoftInputMode;
+
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -194,9 +198,9 @@ public final class GalleryCommentsScene extends ToolbarScene
      * @param inflater
      * @param container
      * @param savedInstanceState
-     * @return
+     * @return View
      */
-    @Nullable
+    @NonNull
     @Override
     public View onCreateView3(LayoutInflater inflater,
             @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -215,6 +219,7 @@ public final class GalleryCommentsScene extends ToolbarScene
         int paddingBottomFab = resources.getDimensionPixelOffset(R.dimen.gallery_padding_bottom_fab);
 
         Drawable drawable = DrawableManager.getVectorDrawable(context, R.drawable.big_sad_pandroid);
+        assert drawable != null;
         drawable.setBounds(0, 0, drawable.getIntrinsicWidth(), drawable.getIntrinsicHeight());
         tip.setCompoundDrawables(null, drawable, null, null);
 
@@ -246,9 +251,8 @@ public final class GalleryCommentsScene extends ToolbarScene
 
         addAboveSnackView(mEditPanel);
         addAboveSnackView(mFabLayout);
-        if (mFabLayout != null) {
-            mFabLayout.setShowFabFunctionName(Settings.getShowFabFunctionName());
-        }
+
+        setupEditPanelImeInsets();
 
         mViewTransition = new ViewTransition(mRecyclerView, tip);
 
@@ -266,6 +270,7 @@ public final class GalleryCommentsScene extends ToolbarScene
             mRecyclerView = null;
         }
         if (null != mEditPanel) {
+            ViewCompat.setOnApplyWindowInsetsListener(mEditPanel, null);
             removeAboveSnackView(mEditPanel);
             mEditPanel = null;
         }
@@ -286,6 +291,43 @@ public final class GalleryCommentsScene extends ToolbarScene
         super.onViewCreated(view, savedInstanceState);
         setTitle(R.string.gallery_comments);
         setNavigationIcon(R.drawable.v_arrow_left_dark_x24);
+    }
+
+    private void setupEditPanelImeInsets() {
+        if (mEditPanel == null) {
+            return;
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(mEditPanel, (v, insets) -> {
+            int imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) v.getLayoutParams();
+            if (lp.bottomMargin != imeBottom) {
+                lp.bottomMargin = imeBottom;
+                v.setLayoutParams(lp);
+            }
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(mEditPanel);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        MainActivity activity = getActivity2();
+        if (activity != null) {
+            mOriginalSoftInputMode = activity.getWindow().getAttributes().softInputMode;
+            activity.getWindow().setSoftInputMode(
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+                            | WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+    }
+
+    @Override
+    public void onPause() {
+        MainActivity activity = getActivity2();
+        if (activity != null) {
+            activity.getWindow().setSoftInputMode(mOriginalSoftInputMode);
+        }
+        super.onPause();
     }
 
     @Override
@@ -311,7 +353,7 @@ public final class GalleryCommentsScene extends ToolbarScene
 
 
 
-    private class InfoHolder extends RecyclerView.ViewHolder {
+    private static class InfoHolder extends RecyclerView.ViewHolder {
 
         private final TextView key;
         private final TextView value;
@@ -342,18 +384,19 @@ public final class GalleryCommentsScene extends ToolbarScene
             }
         }
 
-        AlertDialog.Builder builder = new AlertDialog.Builder(getDialogContext());
+        AlertDialog.Builder builder = new AlertDialog.Builder(context);
         context = builder.getContext();
         final LayoutInflater inflater = LayoutInflater.from(context);
         EasyRecyclerView rv = (EasyRecyclerView) inflater.inflate(R.layout.dialog_recycler_view, null);
         rv.setAdapter(new RecyclerView.Adapter<InfoHolder>() {
+            @NonNull
             @Override
-            public InfoHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            public InfoHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
                 return new InfoHolder(inflater.inflate(R.layout.item_drawer_favorites, parent, false));
             }
 
             @Override
-            public void onBindViewHolder(InfoHolder holder, int position) {
+            public void onBindViewHolder(@NonNull InfoHolder holder, int position) {
                 holder.key.setText(userArray[position]);
                 holder.value.setText(voteArray[position]);
             }
@@ -406,8 +449,9 @@ public final class GalleryCommentsScene extends ToolbarScene
             menuId.add(R.id.check_vote_status);
         }
 
-        new AlertDialog.Builder(getDialogContext())
-                .setItems(menu.toArray(new String[menu.size()]), new DialogInterface.OnClickListener() {
+        new AlertDialog.Builder(context)
+                .setItems(menu.toArray(new String[0]), new DialogInterface.OnClickListener() {
+                    @SuppressLint({"NonConstantResourceId", "NotifyDataSetChanged"})
                     @Override
                     public void onClick(DialogInterface dialog, int which) {
                         if (which < 0 || which >= menuId.size()) {
@@ -438,6 +482,7 @@ public final class GalleryCommentsScene extends ToolbarScene
                             case R.id.join_blacklist:
                                 EhDB.insertBlackList(BlackListUtils.parseBlacklist(comment));
                                 mCommentList.DeleteComment(position);
+                                assert mAdapter != null;
                                 mAdapter.notifyDataSetChanged();
                                 updateView(true);
                                 break;
@@ -454,8 +499,7 @@ public final class GalleryCommentsScene extends ToolbarScene
         }
 
         RecyclerView.ViewHolder holder = parent.getChildViewHolder(view);
-        if (holder instanceof ActualCommentHolder) {
-            ActualCommentHolder commentHolder = (ActualCommentHolder) holder;
+        if (holder instanceof ActualCommentHolder commentHolder) {
             ClickableSpan span = commentHolder.comment.getCurrentSpan();
             commentHolder.comment.clearCurrentSpan();
 
