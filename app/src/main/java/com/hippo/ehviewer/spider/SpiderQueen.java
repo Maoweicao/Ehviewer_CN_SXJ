@@ -1227,6 +1227,8 @@ public final class SpiderQueen implements Runnable {
             boolean interrupt = false;
             boolean leakSkipHathKey = false;
 
+            Log.d(TAG, "downloadImage: START gid=" + gid + ", index=" + index + ", pToken=" + pToken + ", force=" + force);
+
             for (int i = 0; i < 5; i++) {
                 String imageUrl = null;
                 String localShowKey;
@@ -1241,12 +1243,14 @@ public final class SpiderQueen implements Runnable {
 
                         // Try to get show key
                         pageUrl = getPageUrl(gid, index, pToken, pageUrl, skipHathKey);
+                        Log.d(TAG, "downloadImage: fetching pageUrl=" + pageUrl + ", attempt=" + i);
                         try {
                             GalleryPageParser.Result result = fetchPageResultFromHtml(index, pageUrl);
                             imageUrl = result.imageUrl;
                             skipHathKey = result.skipHathKey;
                             originImageUrl = result.originImageUrl;
                             localShowKey = result.showKey;
+                            Log.d(TAG, "downloadImage: page fetch SUCCESS, imageUrl=" + (imageUrl != null ? imageUrl.substring(0, Math.min(60, imageUrl.length())) : "null") + ", showKey=" + localShowKey);
 
                             if (!TextUtils.isEmpty(skipHathKey)) {
                                 if (skipHathKeys.contains(skipHathKey)) {
@@ -1262,10 +1266,12 @@ public final class SpiderQueen implements Runnable {
                             showKey.lazySet(result.showKey);
                         } catch (Image509Exception e) {
                             error = GetText.getString(R.string.error_509);
+                            Log.e(TAG, "downloadImage: 509 error at index=" + index);
                             break;
                         } catch (Throwable e) {
                             ExceptionUtils.throwIfFatal(e);
                             error = ExceptionUtils.getReadableString(e);
+                            Log.e(TAG, "downloadImage: page fetch FAILED at index=" + index + ", pageUrl=" + pageUrl + ", error=" + error, e);
                             break;
                         }
 
@@ -1558,6 +1564,7 @@ public final class SpiderQueen implements Runnable {
             // Remove download failed image
             mSpiderDen.remove(index);
 
+            Log.e(TAG, "downloadImage: FAILED gid=" + gid + ", index=" + index + ", pToken=" + pToken + ", error=" + error);
             updatePageState(index, STATE_FAILED, error);
             return !interrupt;
         }

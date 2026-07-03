@@ -116,6 +116,7 @@ public class EhEngine {
     private static void doThrowException(Call call, int code, @Nullable Headers headers,
                                          @Nullable String body, Throwable e) throws Throwable {
         if (call.isCanceled()) {
+            Log.w(TAG, "doThrowException: call cancelled");
             throw new CancelledException();
         }
 
@@ -123,20 +124,25 @@ public class EhEngine {
         if (headers != null && SAD_PANDA_DISPOSITION.equals(headers.get("Content-Disposition")) &&
                 SAD_PANDA_TYPE.equals(headers.get("Content-Type")) &&
                 SAD_PANDA_LENGTH.equals(headers.get("Content-Length"))) {
+            Log.w(TAG, "doThrowException: Sad Panda");
             throw new EhException("Sad Panda");
         }
 
         // Check kokomade
         if (body != null && body.contains(KOKOMADE_URL)) {
+            Log.w(TAG, "doThrowException: Kokomade");
             throw new EhException("今回はここまで\n\n" + GetText.getString(R.string.kokomade_tip));
         }
 
         if (e instanceof ParseException) {
             if (body != null && !body.contains("<")) {
+                Log.w(TAG, "doThrowException: non-HTML body: " + body.substring(0, Math.min(200, body.length())));
                 throw new EhException(body);
             } else if (TextUtils.isEmpty(body)) {
+                Log.w(TAG, "doThrowException: empty body");
                 throw new EhException(GetText.getString(R.string.error_empty_html));
             } else {
+                Log.w(TAG, "doThrowException: parse error, body length=" + body.length() + ", code=" + code);
                 if (Settings.getSaveParseErrorBody()) {
                     AppConfig.saveParseErrorBody((ParseException) e);
                 }
@@ -148,6 +154,7 @@ public class EhEngine {
         }
 
         if (code >= 400) {
+            Log.w(TAG, "doThrowException: HTTP error code=" + code);
             throw new StatusCodeException(code);
         }
 
@@ -1160,7 +1167,7 @@ public class EhEngine {
     public static GalleryPageParser.Result getGalleryPage(@Nullable EhClient.Task task,
                                                           OkHttpClient okHttpClient, String url, long gid, String token) throws Throwable {
         String referer = EhUrl.getGalleryDetailUrl(gid, token);
-        Log.d(TAG, url);
+        Log.d(TAG, "getGalleryPage: url=" + url);
         Request request = new EhRequestBuilder(url, referer).build();
         Call call = okHttpClient.newCall(request);
 
@@ -1178,9 +1185,11 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            Log.d(TAG, "getGalleryPage: response code=" + code + ", body length=" + body.length() + ", url=" + url);
             return GalleryPageParser.parse(body);
         } catch (Throwable e) {
             ExceptionUtils.throwIfFatal(e);
+            Log.e(TAG, "getGalleryPage FAILED: code=" + code + ", bodyLen=" + (body != null ? body.length() : "null") + ", url=" + url, e);
             throwException(call, code, headers, body, e);
             throw e;
         }
