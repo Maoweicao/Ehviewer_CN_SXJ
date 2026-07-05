@@ -871,8 +871,19 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
         mWaitList.clear();
 
-        // Stop current
-        stopCurrentDownloadInternal();
+        // Stop current (may throw, but we've already cleared wait list)
+        try {
+            stopCurrentDownloadInternal();
+        } catch (Exception e) {
+            Log.e(TAG, "Error stopping current download", e);
+            // Force cleanup
+            if (mCurrentTask != null) {
+                mCurrentTask.state = DownloadInfo.STATE_NONE;
+                EhDB.putDownloadInfo(mCurrentTask);
+            }
+            mCurrentTask = null;
+            mCurrentSpider = null;
+        }
 
         // Notify mDownloadInfoListener
         for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -1016,15 +1027,23 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private DownloadInfo stopCurrentDownloadInternal() {
         DownloadInfo info = mCurrentTask;
         SpiderQueen spider = mCurrentSpider;
-        // Release spider
-        if (spider != null) {
-            spider.removeOnSpiderListener(DownloadManager.this);
-            SpiderQueen.releaseSpiderQueen(spider, SpiderQueen.MODE_DOWNLOAD);
-        }
         mCurrentTask = null;
         mCurrentSpider = null;
         // Stop speed reminder
         mSpeedReminder.stop();
+        // Release spider (wrap in try-catch to ensure cleanup even if spider throws)
+        if (spider != null) {
+            try {
+                spider.removeOnSpiderListener(DownloadManager.this);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to remove spider listener", e);
+            }
+            try {
+                SpiderQueen.releaseSpiderQueen(spider, SpiderQueen.MODE_DOWNLOAD);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to release spider", e);
+            }
+        }
         if (info == null) {
             return null;
         }
