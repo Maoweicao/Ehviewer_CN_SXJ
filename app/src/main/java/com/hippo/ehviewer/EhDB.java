@@ -658,11 +658,13 @@ public class EhDB {
                 Analytics.recordException(e);
             }
         }
-        // Fix state
+        // Fix state: downgrade DOWNLOAD to WAIT so interrupted downloads can resume
+        // STATE_WAIT items are preserved so they stay in the download queue
         for (DownloadInfo info : list) {
-            if (info.state == DownloadInfo.STATE_WAIT || info.state == DownloadInfo.STATE_DOWNLOAD) {
-                info.state = DownloadInfo.STATE_NONE;
+            if (info.state == DownloadInfo.STATE_DOWNLOAD) {
+                info.state = DownloadInfo.STATE_WAIT;
             }
+            // STATE_WAIT stays as WAIT — no reset to NONE
         }
         return list;
     }

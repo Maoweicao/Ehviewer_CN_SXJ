@@ -684,6 +684,11 @@
     <string name="download_queue_order_fewest_first">少图画廊优先</string>
     <string name="download_queue_order_most_first">多图画廊优先</string>
     <string name="download_queue_order_category_priority">按画廊类型优先级</string>
+    <string name="download_queue_secondary_order">二级排序</string>
+    <string name="download_queue_secondary_order_summary">当一级排序选择「按画廊类型优先级」时生效。设定同一类型内画廊的排序方式</string>
+    <string name="download_queue_secondary_none">无（保持原顺序）</string>
+    <string name="download_queue_secondary_fewest_first">少图画廊优先</string>
+    <string name="download_queue_secondary_most_first">多图画廊优先</string>
     <string name="settings_download_metered_network_policy">按量网络行为</string>
     <string name="settings_download_metered_network_policy_summary">在按量网络（移动数据）上进行下载时的策略</string>
     <string name="settings_download_metered_policy_continue">继续下载</string>

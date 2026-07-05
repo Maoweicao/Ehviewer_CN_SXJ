@@ -84,6 +84,7 @@ import java.text.DateFormat;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -111,6 +112,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
     private final int mListThumbHeight;
     private final DownloadsScene mScene;
     private final DownloadAdapterCallback mCallback;
+
+    private LinkedList<DownloadInfo> mWaitList;
 
     private View movedItem = null;
 
@@ -393,6 +396,21 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         }
 
         holder.state.setText(state);
+
+        if (info.state == DownloadInfo.STATE_WAIT && mWaitList != null) {
+            int pos = mWaitList.indexOf(info);
+            if (pos >= 0) {
+                holder.queuePosition.setText(String.valueOf(pos + 1));
+                holder.queuePosition.setVisibility(View.VISIBLE);
+            } else {
+                holder.queuePosition.setVisibility(View.GONE);
+            }
+        } else if (info.state == DownloadInfo.STATE_DOWNLOAD) {
+            holder.queuePosition.setText("↓");
+            holder.queuePosition.setVisibility(View.VISIBLE);
+        } else {
+            holder.queuePosition.setVisibility(View.GONE);
+        }
     }
 
     @SuppressLint("SetTextI18n")
@@ -413,6 +431,21 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         } else {
             holder.start.setVisibility(View.VISIBLE);
             holder.stop.setVisibility(View.GONE);
+        }
+
+        if (info.state == DownloadInfo.STATE_DOWNLOAD) {
+            holder.queuePosition.setText("↓");
+            holder.queuePosition.setVisibility(View.VISIBLE);
+        } else if (info.state == DownloadInfo.STATE_WAIT && mWaitList != null) {
+            int pos = mWaitList.indexOf(info);
+            if (pos >= 0) {
+                holder.queuePosition.setText(String.valueOf(pos + 1));
+                holder.queuePosition.setVisibility(View.VISIBLE);
+            } else {
+                holder.queuePosition.setVisibility(View.GONE);
+            }
+        } else {
+            holder.queuePosition.setVisibility(View.GONE);
         }
 
         // Check if this is an incremental update
@@ -859,6 +892,10 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         return null;
     }
 
+    public void setWaitList(LinkedList<DownloadInfo> waitList) {
+        this.mWaitList = waitList;
+    }
+
     public class DownloadHolder extends AbstractDraggableItemViewHolder implements View.OnClickListener {
 
         public final LoadImageView thumb;
@@ -875,6 +912,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         public final TextView speed;
         public final TextView folderTime;
         public final TextView folderSize;
+        public final TextView queuePosition;
 
         public DownloadHolder(View itemView) {
             super(itemView);
@@ -893,6 +931,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             speed = itemView.findViewById(R.id.speed);
             folderTime = itemView.findViewById(R.id.folder_time);
             folderSize = itemView.findViewById(R.id.folder_size);
+            queuePosition = itemView.findViewById(R.id.queue_position);
 
             // 初始设置点击监听器
             setClickListeners(true);

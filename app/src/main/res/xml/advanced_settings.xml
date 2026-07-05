@@ -186,6 +186,16 @@
         android:title="@string/settings_advanced_download_category_priority_order"
         android:dependency="advanced_download_sort_enabled" />
 
+    <com.hippo.preference.ListPreference
+        android:defaultValue="0"
+        android:key="download_queue_secondary_order"
+        android:title="@string/download_queue_secondary_order"
+        android:summary="@string/download_queue_secondary_order_summary"
+        android:dependency="advanced_download_sort_enabled"
+        app:entries="@array/download_queue_secondary_order_entries"
+        app:entryValues="@array/download_queue_secondary_order_entry_values"
+        app:iconSpaceReserved="false" />
+
     <com.hippo.preference.SwitchPreference
         android:defaultValue="false"
         android:key="download_treat_removed_as_complete"

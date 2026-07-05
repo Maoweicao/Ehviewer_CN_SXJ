@@ -166,6 +166,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         mWaitList = new LinkedList<>();
         mSpeedReminder = new SpeedReminder();
         mDownloadInfoListeners = new ArrayList<>();
+
+        // Restore interrupted downloads: re-add STATE_WAIT items to the wait list
+        for (DownloadInfo info : mAllInfoList) {
+            if (info.state == DownloadInfo.STATE_WAIT) {
+                mWaitList.add(info);
+            }
+        }
     }
 
     public void replaceInfo(DownloadInfo newInfo, DownloadInfo oldInfo) {
@@ -269,6 +276,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         return new ArrayList<>(mAllInfoList);
     }
 
+    @NonNull
+    public LinkedList<DownloadInfo> getWaitList() {
+        return mWaitList;
+    }
+
     @Nullable
     public DownloadInfo getDownloadInfo(long gid) {
         return mAllInfoMap.get(gid);
@@ -315,7 +327,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         mDownloadListener = listener;
     }
 
-    private void ensureDownload() {
+    public void ensureDownload() {
         if (mCurrentTask != null) {
             // Only one download
             return;
@@ -375,6 +387,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 info.state = DownloadInfo.STATE_WAIT;
                 // Add to wait list
                 mWaitList.add(info);
+                // Apply advanced sort if enabled
+                if (Settings.getAdvancedDownloadSortEnabled()) {
+                    applyAdvancedSort(mWaitList);
+                }
                 // Update in DB
                 EhDB.putDownloadInfo(info);
                 // Notify state update
@@ -408,6 +424,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
             // Add to wait list
             mWaitList.add(info);
+            // Apply advanced sort if enabled
+            if (Settings.getAdvancedDownloadSortEnabled()) {
+                applyAdvancedSort(mWaitList);
+            }
 
             // Save to
             EhDB.putDownloadInfo(info);
@@ -448,7 +468,6 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 }
             }
             if (!pendingList.isEmpty()) {
-                applyAdvancedSort(pendingList);
                 boolean downloadOrder = Settings.getDownloadOrder();
                 if (downloadOrder) {
                     for (DownloadInfo info : pendingList) {
@@ -459,6 +478,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         mWaitList.add(pendingList.get(i));
                     }
                 }
+                applyAdvancedSort(mWaitList);
             }
         } else {
             boolean downloadOrder = Settings.getDownloadOrder();
@@ -537,7 +557,6 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 }
             }
             if (!pendingList.isEmpty()) {
-                applyAdvancedSort(pendingList);
                 boolean downloadOrder = Settings.getDownloadOrder();
                 if (downloadOrder) {
                     for (DownloadInfo info : pendingList) {
@@ -548,6 +567,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         waitList.add(pendingList.get(i));
                     }
                 }
+                applyAdvancedSort(waitList);
             }
         } else {
             boolean downloadOrder = Settings.getDownloadOrder();
@@ -752,6 +772,15 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
         // Save to
         EhDB.putDownloadInfo(info);
+
+        // Add to wait list if state is WAIT
+        if (state == DownloadInfo.STATE_WAIT) {
+            mWaitList.add(info);
+            if (Settings.getAdvancedDownloadSortEnabled()) {
+                applyAdvancedSort(mWaitList);
+            }
+            ensureDownload();
+        }
 
         // Notify
         for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -1573,6 +1602,19 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         if (list.isEmpty()) return;
 
         int queueOrder = Settings.getDownloadQueueOrder();
+
+        int secondary = Settings.getDownloadQueueOrderSecondary();
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY
+                && secondary != Settings.DOWNLOAD_QUEUE_SECONDARY_NONE) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST) {
+                Collections.sort(list, PAGES_ASC_COMPARATOR);
+            } else if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST) {
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+            }
+            sortByCategoryPriority(list);
+            return;
+        }
+
         switch (queueOrder) {
             case Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST:
                 Collections.sort(list, PAGES_ASC_COMPARATOR);

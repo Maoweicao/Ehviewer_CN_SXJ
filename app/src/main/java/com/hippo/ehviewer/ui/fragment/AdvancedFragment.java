@@ -30,6 +30,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
+import com.hippo.preference.ListPreference;
 import androidx.preference.Preference;
 
 import com.hippo.ehviewer.AppConfig;
@@ -141,6 +142,17 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         }
         if (backgroundConcurrentTasks != null) {
             backgroundConcurrentTasks.setOnPreferenceChangeListener(this);
+        }
+
+        ListPreference queueOrder = findPreference("download_queue_order");
+        Preference secondaryOrder = findPreference("download_queue_secondary_order");
+        if (queueOrder != null && secondaryOrder != null) {
+            String currentValue = queueOrder.getValue();
+            secondaryOrder.setEnabled("3".equals(currentValue));
+            queueOrder.setOnPreferenceChangeListener((pref, newValue) -> {
+                secondaryOrder.setEnabled("3".equals(String.valueOf(newValue)));
+                return true;
+            });
         }
     }
 

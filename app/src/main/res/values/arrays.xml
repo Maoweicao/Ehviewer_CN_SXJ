@@ -213,6 +213,18 @@
         <item>3</item>
     </string-array>
 
+    <string-array name="download_queue_secondary_order_entries" translatable="false">
+        <item>@string/download_queue_secondary_none</item>
+        <item>@string/download_queue_secondary_fewest_first</item>
+        <item>@string/download_queue_secondary_most_first</item>
+    </string-array>
+
+    <string-array name="download_queue_secondary_order_entry_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
     <string-array name="preload_image_entries" translatable="false">
         <item>3</item>
         <item>5</item>

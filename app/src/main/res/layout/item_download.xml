@@ -122,6 +122,19 @@
                 android:paddingBottom="2dp"
                 android:textAllCaps="true" />
 
+            <TextView
+                android:id="@+id/queue_position"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignBottom="@id/thumb"
+                android:layout_toLeftOf="@id/actions"
+                android:layout_marginRight="4dp"
+                android:layout_marginBottom="8dp"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:textColor="?attr/textColorThemeAccent"
+                android:visibility="gone"/>
+
             <FrameLayout
                 android:id="@+id/actions"
                 android:layout_width="wrap_content"

@@ -677,6 +677,11 @@
     <string name="download_queue_order_fewest_first">Fewest images first</string>
     <string name="download_queue_order_most_first">Most images first</string>
     <string name="download_queue_order_category_priority">By gallery type priority</string>
+    <string name="download_queue_secondary_order">Secondary sort</string>
+    <string name="download_queue_secondary_order_summary">Effective when primary sort is "By gallery type priority". Sets the sort order within the same category</string>
+    <string name="download_queue_secondary_none">None (keep original order)</string>
+    <string name="download_queue_secondary_fewest_first">Fewest images first</string>
+    <string name="download_queue_secondary_most_first">Most images first</string>
     <string name="settings_download_download_list_pagination">Pagination List</string>
     <string name="settings_download_download_list_pagination_summary">The paging function will only take effect when the list length is greater than 500</string>
     <string name="settings_download_download_origin_image_summary">It is dangerous! You may get 509 error</string>

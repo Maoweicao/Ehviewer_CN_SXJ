@@ -1617,6 +1617,9 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onAdd(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {
+        if (mOriginalAdapter != null && mDownloadManager != null) {
+            mOriginalAdapter.setWaitList(mDownloadManager.getWaitList());
+        }
         if (mList != list) {
             updateForLabel();
             filterByCategory();
@@ -1662,6 +1665,9 @@ public class DownloadsScene extends ToolbarScene
         if (mList != list && !mList.contains(info)) {
             return;
         }
+        if (mOriginalAdapter != null) {
+            mOriginalAdapter.setWaitList(mWaitList);
+        }
         int index = mList.indexOf(info);
         if (index >= 0 && mAdapter != null) {
             mAdapter.notifyItemChanged(listIndexInPage(index));
@@ -1671,6 +1677,9 @@ public class DownloadsScene extends ToolbarScene
     @SuppressLint("NotifyDataSetChanged")
     @Override
     public void onUpdateAll() {
+        if (mOriginalAdapter != null && mDownloadManager != null) {
+            mOriginalAdapter.setWaitList(mDownloadManager.getWaitList());
+        }
         if (mAdapter != null) {
             mAdapter.notifyDataSetChanged();
         }

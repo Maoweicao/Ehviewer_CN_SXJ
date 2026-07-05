@@ -408,13 +408,21 @@ public class BackgroundTaskStatusManager {
 
     private void savePersistedTasks() {
         synchronized (mPersistLock) {
-            try (FileWriter writer = new FileWriter(mStatusFile, false)) {
+            File tmpFile = new File(mStatusFile.getParentFile(), mStatusFile.getName() + ".tmp");
+            try (FileWriter writer = new FileWriter(tmpFile, false)) {
                 JSONObject root = new JSONObject();
                 root.put("activeTasks", buildTaskArray(mActiveTasks.values()));
                 root.put("completedTasks", buildTaskArray(mCompletedTasks.values()));
                 writer.write(root.toString());
+                writer.flush();
+                if (!tmpFile.renameTo(mStatusFile)) {
+                    mStatusFile.delete();
+                    tmpFile.renameTo(mStatusFile);
+                }
             } catch (Exception ignored) {
-                // Ignore persistence errors
+                if (tmpFile.exists()) {
+                    tmpFile.delete();
+                }
             }
         }
     }
@@ -459,11 +467,20 @@ public class BackgroundTaskStatusManager {
                 while ((line = reader.readLine()) != null) {
                     sb.append(line);
                 }
-                JSONObject root = new JSONObject(sb.toString());
+                String content = sb.toString();
+                if (content.trim().isEmpty()) {
+                    android.util.Log.w(TAG, "background_tasks.json is empty, starting fresh");
+                    return;
+                }
+                JSONObject root = new JSONObject(content);
                 parseTaskArray(root.optJSONArray("activeTasks"), mActiveTasks);
                 parseTaskArray(root.optJSONArray("completedTasks"), mCompletedTasks);
-            } catch (Exception ignored) {
-                // Ignore load errors, start fresh
+            } catch (Exception e) {
+                android.util.Log.w(TAG, "Failed to restore persisted tasks, corrupt file will be removed", e);
+                try {
+                    mStatusFile.delete();
+                } catch (Exception ignored) {
+                }
             }
         }
     }

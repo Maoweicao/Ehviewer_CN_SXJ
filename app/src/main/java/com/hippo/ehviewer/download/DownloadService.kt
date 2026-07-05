@@ -147,6 +147,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         if (mDownloadManager != null && mDownloadManager!!.hasActiveDownload()) {
             ensureDownloadingBuilder()
             mDownloadingDelay!!.startForeground()
+            mDownloadManager!!.ensureDownload()
         }
     }
 

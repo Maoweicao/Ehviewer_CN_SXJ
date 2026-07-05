@@ -1943,6 +1943,19 @@ public class Settings {
         putString(KEY_DOWNLOAD_CATEGORY_PRIORITY_ORDER, value);
     }
 
+    public static final String KEY_DOWNLOAD_QUEUE_SECONDARY_ORDER = "download_queue_secondary_order";
+    public static final int DOWNLOAD_QUEUE_SECONDARY_NONE = 0;
+    public static final int DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST = 1;
+    public static final int DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST = 2;
+
+    public static int getDownloadQueueOrderSecondary() {
+        return getInt(KEY_DOWNLOAD_QUEUE_SECONDARY_ORDER, DOWNLOAD_QUEUE_SECONDARY_NONE);
+    }
+
+    public static void setDownloadQueueOrderSecondary(int value) {
+        putInt(KEY_DOWNLOAD_QUEUE_SECONDARY_ORDER, value);
+    }
+
     public static final String KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE = "download_treat_removed_as_complete";
 
     public static boolean getDownloadTreatRemovedAsComplete() {
