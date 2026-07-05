@@ -654,6 +654,7 @@
     <string name="settings_read_reading_fullscreen">全屏</string>
     <string name="settings_read_custom_screen_lightness">自定义屏幕亮度</string>
     <string name="settings_read_screen_lightness">屏幕亮度</string>
+    <string name="settings_read_auto_transfer_time">自动翻页（秒）</string>
     <string name="settings_download">下载</string>
     <string name="settings_download_download_location">下载位置</string>
     <string name="settings_download_invalid_download_location">下载位置无效</string>
@@ -677,6 +678,16 @@
     <string name="settings_download_download_origin_image_summary">这很危险！勾选此项会导致下载配额与GP迅速流失</string>
     <string name="settings_download_download_order_by_asc">正序下载</string>
     <string name="settings_download_download_order_by_asc_summary">下载全部画廊时正序下载</string>
+    <string name="settings_download_download_queue_order">下载队列顺序</string>
+    <string name="settings_download_download_queue_order_summary">设定下载任务的队列排序策略</string>
+    <string name="download_queue_order_default">默认（按添加顺序）</string>
+    <string name="download_queue_order_fewest_first">少图画廊优先</string>
+    <string name="download_queue_order_most_first">多图画廊优先</string>
+    <string name="download_queue_order_category_priority">按画廊类型优先级</string>
+    <string name="settings_download_metered_network_policy">按量网络行为</string>
+    <string name="settings_download_metered_network_policy_summary">在按量网络（移动数据）上进行下载时的策略</string>
+    <string name="settings_download_metered_policy_continue">继续下载</string>
+    <string name="settings_download_metered_policy_pause">暂停下载</string>
     <string name="settings_download_sync_while_reading">观看时同步下载</string>
     <string name="settings_download_sync_while_reading_summary">在浏览未下载画廊时，自动将浏览到的图片保存到下载目录</string>
     <string name="settings_download_media_scan">允许媒体扫描</string>
@@ -818,9 +829,17 @@
     <string name="settings_advanced_export_data_summary">将下载列表、快速搜索列表等数据保存至外部存储</string>
     <string name="settings_advanced_export_data_to">已将数据导出至 %1$s</string>
     <string name="settings_advanced_export_data_failed">数据导出失败</string>
+    <string name="settings_advanced_export_data_dialog_title">导出数据</string>
+    <string name="settings_advanced_export_db_option">导出数据库 (.db)</string>
+    <string name="settings_advanced_export_csv_option">导出下载列表 (.csv)</string>
+    <string name="settings_advanced_export_legacy_option">导出旧版数据 (.db)</string>
+    <string name="settings_advanced_export_legacy_started">正在后台导出旧版数据列表…</string>
     <string name="settings_advanced_import_data">导入数据</string>
     <string name="settings_advanced_import_data_summary">加载先前保存的数据</string>
     <string name="settings_advanced_import_data_successfully">数据导入成功</string>
+    <string name="settings_advanced_import_legacy_data">导入旧版数据</string>
+    <string name="settings_advanced_import_legacy_data_summary">从旧版数据列表格式导入数据</string>
+    <string name="settings_advanced_import_legacy_data_started">正在后台导入旧版数据…</string>
     <string name="settings_advanced_wifi_sender">WiFi数据迁移</string>
     <string name="settings_advanced_wifi_sander_summary">通过Wi-Fi热点进行数据迁移</string>
     <string name="settings_advanced_wifi_client">WiFi迁移数据接收</string>
@@ -1216,6 +1235,9 @@ SSID: %1$s
     <string name="dialog_time_range_from_hint">开始日期，例如 2026-01-01</string>
     <string name="dialog_time_range_to_hint">结束日期，例如 2026-12-31</string>
     <string name="select_datetime_button">选择</string>
+    <string name="dialog_rating_filter_label">评分范围</string>
+    <string name="dialog_rating_filter_from">从</string>
+    <string name="dialog_rating_filter_to">到</string>
     <string name="dialog_size_range_filter_label">文件夹大小范围（可选）</string>
     <string name="dialog_size_range_from_hint">最小值，例如 128MB</string>
     <string name="dialog_size_range_to_hint">最大值，例如 2GB</string>
@@ -1296,6 +1318,7 @@ SSID: %1$s
     <string name="background_tasks_channel_description">扫描下载文件、合并重复画廊等后台任务通知。</string>
     <string name="background_task_running">后台任务正在运行</string>
     <string name="background_task_running_description">任务完成后，通知将自动消失。</string>
+    <string name="background_task_service_label">EhViewer 后台任务服务</string>
     <plurals name="background_tasks_running">
         <item quantity="one">%d 个任务正在运行</item>
         <item quantity="other">%d 个任务正在运行</item>
@@ -1454,6 +1477,11 @@ SSID: %1$s
     <string name="compress_selected_galleries">压缩所选画廊</string>
     <string name="compress_success">压缩成功：%1$s</string>
     <string name="compress_failed">压缩失败</string>
+    <string name="fab_random_all">全随机</string>
+    <string name="fab_compress">压缩</string>
+    <string name="fab_start">开始</string>
+    <string name="compress_no_downloaded_galleries">未找到可供压缩的画廊</string>
+    <string name="favorite_remove_from_favorites">取消收藏</string>
     <string name="rating_none">(´_ゝ`)</string>
     <string name="scene_download_title_new">%1$s(%2$s)</string>
     <string name="empty_select_download_info">未选择下载项目</string>
@@ -1625,24 +1653,7 @@ SSID: %1$s
     <string name="lab_ai_ocr_ai_api_key_summary">AI视觉服务的API密钥</string>
     <string name="lab_ai_ocr_ai_model">视觉模型</string>
     <string name="lab_ai_ocr_ai_model_summary">选择AI视觉模型</string>
-    <string name="lab_ai_ocr_download_ppocrv5">下载PP-OCRv5模型</string>
-    <string name="lab_ai_ocr_download_ppocrv5_summary">下载PP-OCRv5模型（约100MB）</string>
-    <string name="lab_ai_ocr_download_paddle_vl">下载PaddleOCR-VL模型</string>
-    <string name="lab_ai_ocr_download_paddle_vl_summary">下载PaddleOCR-VL-1.6模型（约500MB）</string>
-    <string name="lab_ai_ocr_download_ppocrv6">下载PP-OCRv6模型</string>
-    <string name="lab_ai_ocr_download_ppocrv6_summary">下载PP-OCRv6_medium_rec_onnx模型（约76MB）</string>
-    <string name="lab_ai_ocr_selected_model">OCR模型</string>
-    <string name="lab_ai_ocr_selected_model_summary">选择要使用的OCR模型</string>
-    <string name="lab_ai_ocr_model_download_path">OCR模型目录</string>
-    <string name="lab_ai_ocr_model_download_path_summary">设置OCR模型的下载目录</string>
-    <string name="lab_ai_model_download_path">AI模型目录</string>
-    <string name="lab_ai_model_download_path_summary">设置AI模型的下载目录</string>
-    <string name="lab_ai_ocr_use_custom_path">使用自定义模型路径</string>
-    <string name="lab_ai_ocr_use_custom_path_summary">指定ONNX模型文件的精确路径</string>
-    <string name="lab_ai_ocr_full_model_path">ONNX模型文件路径</string>
-    <string name="lab_ai_ocr_full_model_path_summary">.onnx模型文件的完整路径</string>
-    <string name="lab_ai_ocr_export_model_info">导出模型信息</string>
-    <string name="lab_ai_ocr_export_model_info_summary">查看和复制模型下载指南</string>
+
 
     <string name="milestone_title">里程碑</string>
     <string name="milestone_summary">查看您的使用统计和里程碑</string>
@@ -1681,6 +1692,7 @@ SSID: %1$s
     <string name="progressive_merge_all_confirm">将对全部 %1$d 条链执行合并，每条链保留最完整版本。继续？</string>
     <string name="progressive_merge_all_started">正在合并全部 %1$d 条链…</string>
     <string name="progressive_merge_all_done">全部链合并完成</string>
+    <string name="progressive_merge_all_partial">%1$d 条链合并成功，%2$d 条失败</string>
     <string name="progressive_merge_started">合并任务已启动</string>
     <string name="progressive_merge_complete">合并完成</string>
     <string name="progressive_merge_failed">合并失败</string>

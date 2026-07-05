@@ -19,15 +19,14 @@ package com.hippo.ehviewer.preference;
 import android.content.Context;
 import android.util.AttributeSet;
 import android.widget.Toast;
+
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.AlertDialog;
 import androidx.preference.Preference;
+
 import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.R;
 
-/**
- * 导出数据偏好设置
- * 已改造为使用统一的后台任务管理器
- */
 public class ExportDataPreference extends Preference {
 
   public ExportDataPreference(Context context) {
@@ -45,8 +44,45 @@ public class ExportDataPreference extends Preference {
   @Override
   protected void onClick() {
     Context context = getContext();
+    new AlertDialog.Builder(context)
+        .setTitle(R.string.settings_advanced_export_data_dialog_title)
+        .setItems(new String[] {
+            context.getString(R.string.settings_advanced_export_db_option),
+            context.getString(R.string.settings_advanced_export_csv_option),
+            context.getString(R.string.settings_advanced_export_legacy_option)
+        }, (dialog, which) -> {
+          dialog.dismiss();
+          switch (which) {
+            case 0:
+              exportDatabase(context);
+              break;
+            case 1:
+              exportDownloadList(context);
+              break;
+            case 2:
+              exportLegacyDataList(context);
+              break;
+          }
+        })
+        .setNegativeButton(android.R.string.cancel, null)
+        .show();
+  }
+
+  private void exportDatabase(Context context) {
     com.hippo.ehviewer.task.ExportDataTask task = new com.hippo.ehviewer.task.ExportDataTask(context);
     BackgroundTaskManager.getInstance().submitBackgroundTask(task);
     Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+  }
+
+  private void exportDownloadList(Context context) {
+    com.hippo.ehviewer.task.ExportDownloadItemsTask task = new com.hippo.ehviewer.task.ExportDownloadItemsTask(context);
+    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+    Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+  }
+
+  private void exportLegacyDataList(Context context) {
+    com.hippo.ehviewer.task.ExportLegacyDataTask task = new com.hippo.ehviewer.task.ExportLegacyDataTask(context);
+    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+    Toast.makeText(context, R.string.settings_advanced_export_legacy_started, Toast.LENGTH_SHORT).show();
   }
 }

@@ -268,9 +268,11 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         n: Int
     ): List<ProgressiveChain> {
         val adj = Array(n) { mutableListOf<Int>() }
+        val revAdj = Array(n) { mutableListOf<Int>() }
         val inDegree = IntArray(n)
         for ((from, to) in edges) {
             adj[from].add(to)
+            revAdj[to].add(from)
             inDegree[to]++
         }
 
@@ -296,9 +298,9 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
                         queue.add(v)
                     }
                 }
-                // Follow reverse edges (predecessors)
-                for (w in 0 until n) {
-                    if (!visited[w] && adj[w].contains(u)) {
+                // Follow reverse edges (predecessors) using pre-built reverse adjacency
+                for (w in revAdj[u]) {
+                    if (!visited[w]) {
                         visited[w] = true
                         queue.add(w)
                     }

@@ -335,8 +335,15 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
             Toast.makeText(context, R.string.cant_get_data_dir, Toast.LENGTH_SHORT).show();
             return false;
         }
-        final String[] files = dir.list();
-        if (null == files || files.length <= 0) {
+        final String[] allFiles = dir.list();
+        if (null == allFiles || allFiles.length <= 0) {
+            Toast.makeText(context, R.string.cant_find_any_data, Toast.LENGTH_SHORT).show();
+            return false;
+        }
+        final String[] files = Arrays.stream(allFiles)
+                .filter(f -> f.endsWith(".db") || f.endsWith(".csv"))
+                .toArray(String[]::new);
+        if (files.length <= 0) {
             Toast.makeText(context, R.string.cant_find_any_data, Toast.LENGTH_SHORT).show();
             return false;
         }
@@ -344,9 +351,15 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         new AlertDialog.Builder(context).setItems(files, (dialog, which) -> {
             dialog.dismiss();
             File file = new File(dir, files[which]);
-            com.hippo.ehviewer.task.impl.ImportDataTask task =
-                    new com.hippo.ehviewer.task.impl.ImportDataTask(context, file);
-            com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+            if (file.getName().endsWith(".db")) {
+                com.hippo.ehviewer.task.impl.ImportDataTask task =
+                        new com.hippo.ehviewer.task.impl.ImportDataTask(context, file);
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+            } else if (file.getName().endsWith(".csv")) {
+                com.hippo.ehviewer.task.impl.ImportLegacyDataTask task =
+                        new com.hippo.ehviewer.task.impl.ImportLegacyDataTask(context, file);
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+            }
             Toast.makeText(context, R.string.settings_advanced_import_data_started, Toast.LENGTH_SHORT).show();
         }).show();
         return false;

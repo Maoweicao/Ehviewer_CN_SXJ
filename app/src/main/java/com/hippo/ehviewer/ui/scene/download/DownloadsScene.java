@@ -24,6 +24,7 @@ import static com.hippo.util.FileUtils.getFileName;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.DatePickerDialog;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -47,7 +48,12 @@ import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.CheckBox;
+import android.widget.DatePicker;
+import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RatingBar;
 import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -91,6 +97,8 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
+import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask;
+import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.event.SomethingNeedRefresh;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.sync.DownloadListInfosExecutor;
@@ -99,8 +107,11 @@ import com.hippo.ehviewer.ui.GalleryActivity;
 import com.hippo.ehviewer.ui.MainActivity;
 import com.hippo.ehviewer.ui.annotation.ViewLifeCircle;
 import com.hippo.ehviewer.ui.scene.ToolbarScene;
+import com.hippo.ehviewer.ui.scene.download.part.CheckboxAdapter;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadAdapter;
+import com.hippo.ehviewer.ui.scene.download.part.DownloadCategoryTable;
 import com.hippo.ehviewer.ui.scene.download.part.MyPageChangeListener;
+import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.widget.MyEasyRecyclerView;
 import com.hippo.ehviewer.widget.SearchBar;
 import com.hippo.lib.yorozuya.AssertUtils;
@@ -124,13 +135,18 @@ import org.greenrobot.eventbus.ThreadMode;
 
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class DownloadsScene extends ToolbarScene
         implements DownloadManager.DownloadInfoListener, DownloadSearchCallback,
@@ -144,6 +160,9 @@ public class DownloadsScene extends ToolbarScene
 
     public static final String KEY_ACTION = "action";
     private static final String KEY_LABEL = "label";
+    private static final String KEY_SELECTED_CATEGORY = "selected_category";
+    private static final String KEY_INDEX_PAGE = "index_page";
+    private static final String KEY_PAGE_SIZE = "page_size";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
@@ -396,6 +415,9 @@ public class DownloadsScene extends ToolbarScene
 
     private void onRestore(@NonNull Bundle savedInstanceState) {
         mLabel = savedInstanceState.getString(KEY_LABEL);
+        mSelectedCategory = savedInstanceState.getInt(KEY_SELECTED_CATEGORY, EhUtils.ALL_CATEGORY);
+        indexPage = savedInstanceState.getInt(KEY_INDEX_PAGE, 1);
+        pageSize = savedInstanceState.getInt(KEY_PAGE_SIZE, 1);
         updateForLabel();
     }
 
@@ -403,6 +425,9 @@ public class DownloadsScene extends ToolbarScene
     public void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString(KEY_LABEL, mLabel);
+        outState.putInt(KEY_SELECTED_CATEGORY, mSelectedCategory);
+        outState.putInt(KEY_INDEX_PAGE, indexPage);
+        outState.putInt(KEY_PAGE_SIZE, pageSize);
     }
 
     @Nullable
@@ -484,8 +509,13 @@ public class DownloadsScene extends ToolbarScene
                 // Do nothing
             }
         });
-        // Set default selection
-        mCategorySpinner.setSelection(0);
+        // Set default selection, restored from saved state if available
+        mCategorySpinner.setSelection(categoryToSpinnerPos(mSelectedCategory));
+
+        // Reapply category filter if restoring a non-default category
+        if (savedInstanceState != null && mSelectedCategory != EhUtils.ALL_CATEGORY) {
+            filterByCategory();
+        }
 
         mProgressView = (ProgressView) ViewUtils.$$(view, R.id.download_progress_view);
         View content = ViewUtils.$$(view, R.id.content);
@@ -547,7 +577,7 @@ public class DownloadsScene extends ToolbarScene
         final GeneralItemAnimator animator = new DraggableItemAnimator();
         mRecyclerView.setItemAnimator(animator);
 
-        mRecyclerView.setItemViewCacheSize(100);
+        mRecyclerView.setItemViewCacheSize(10);
         try {
             mRecyclerView.setDrawingCacheEnabled(true);
             mRecyclerView.setDrawingCacheQuality(View.DRAWING_CACHE_QUALITY_HIGH);
@@ -611,6 +641,8 @@ public class DownloadsScene extends ToolbarScene
         } else {
             fab.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.v_mobile_hand_left_off_x24, context.getTheme()));
         }
+        setupFabContentDescriptions();
+        mFabLayout.setShowFabFunctionName(Settings.getShowFabFunctionName());
         addAboveSnackView(mFabLayout);
 
         updateView();
@@ -737,6 +769,14 @@ public class DownloadsScene extends ToolbarScene
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        if (mFabLayout != null) {
+            mFabLayout.setShowFabFunctionName(Settings.getShowFabFunctionName());
+        }
+    }
+
+    @Override
     public void onNavigationClick(View view) {
         onBackPressed();
     }
@@ -794,6 +834,14 @@ public class DownloadsScene extends ToolbarScene
                     return false;
                 }
                 gotoSearch(context);
+                return true;
+            }
+            case R.id.advanced_filter: {
+                Context context = getEHContext();
+                if (context == null) {
+                    return false;
+                }
+                gotoAdvancedFilter(context);
                 return true;
             }
             case R.id.all:
@@ -856,7 +904,7 @@ public class DownloadsScene extends ToolbarScene
 
         Drawable drawable = DrawableManager.getVectorDrawable(context, R.drawable.big_download);
 
-        LinearLayout linearLayout = (LinearLayout) layoutInflater.inflate(R.layout.download_search_dialog, null);
+        LinearLayout linearLayout = (LinearLayout) layoutInflater.inflate(R.layout.download_search_dialog_v2, null);
         mSearchBar = linearLayout.findViewById(R.id.download_search_bar);
         mSearchBar.setHelper(this);
         mSearchBar.setIsComeFromDownload(true);
@@ -869,25 +917,334 @@ public class DownloadsScene extends ToolbarScene
         } else {
             mSearchBar.setTitle(R.string.download_search_hint);
         }
-
         mSearchBar.setRightDrawable(DrawableManager.getVectorDrawable(context, R.drawable.v_magnify_x24));
         mSearchBarMover = new SearchBarMover(this, mSearchBar);
+
+        // Setup category filter toggle
+        LinearLayout categoryToggleRow = linearLayout.findViewById(R.id.category_filter_toggle_row);
+        LinearLayout categoryContent = linearLayout.findViewById(R.id.category_filter_content_container);
+        TextView categoryToggleIcon = linearLayout.findViewById(R.id.category_filter_toggle_icon);
+        DownloadCategoryTable categoryTable = linearLayout.findViewById(R.id.category_table);
+        categoryTable.setAllSelected();
+        categoryToggleRow.setOnClickListener(v -> {
+            if (categoryContent.getVisibility() == View.GONE) {
+                categoryContent.setVisibility(View.VISIBLE);
+                categoryToggleIcon.setText("−");
+            } else {
+                categoryContent.setVisibility(View.GONE);
+                categoryToggleIcon.setText("+");
+            }
+        });
+
+        // Setup sort RecyclerView
+        RecyclerView sortRecyclerView = linearLayout.findViewById(R.id.search_sort_recycler_view);
+        sortRecyclerView.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(context));
+        List<String> sortNames = new ArrayList<>();
+        List<Integer> sortIds = new ArrayList<>();
+        sortNames.add(context.getString(R.string.default_sort));
+        sortIds.add(R.id.sort_by_default);
+        sortNames.add(context.getString(R.string.sort_by_gallery_id_asc));
+        sortIds.add(R.id.sort_by_gallery_id_asc);
+        sortNames.add(context.getString(R.string.sort_by_gallery_id_desc));
+        sortIds.add(R.id.sort_by_gallery_id_desc);
+        sortNames.add(context.getString(R.string.sort_by_create_time_asc));
+        sortIds.add(R.id.sort_by_create_time_asc);
+        sortNames.add(context.getString(R.string.sort_by_create_time_desc));
+        sortIds.add(R.id.sort_by_create_time_desc);
+        sortNames.add(context.getString(R.string.sort_by_rating_asc));
+        sortIds.add(R.id.sort_by_rating_asc);
+        sortNames.add(context.getString(R.string.sort_by_rating_desc));
+        sortIds.add(R.id.sort_by_rating_desc);
+        sortNames.add(context.getString(R.string.sort_by_name_asc));
+        sortIds.add(R.id.sort_by_name_asc);
+        sortNames.add(context.getString(R.string.sort_by_name_desc));
+        sortIds.add(R.id.sort_by_name_desc);
+        sortNames.add(context.getString(R.string.sort_by_file_size_asc));
+        sortIds.add(R.id.sort_by_file_size_asc);
+        sortNames.add(context.getString(R.string.sort_by_file_size_desc));
+        sortIds.add(R.id.sort_by_file_size_desc);
+        final CheckboxAdapter sortAdapter = new CheckboxAdapter(sortNames, sortIds);
+        sortAdapter.setMutuallyExclusive(true);
+        sortRecyclerView.setAdapter(sortAdapter);
+
+        // Buttons
+        Button resetButton = linearLayout.findViewById(R.id.reset_button);
+        Button searchButton = linearLayout.findViewById(R.id.search_button);
+        AdvanceSearchTable advanceSearchTable = linearLayout.findViewById(R.id.advance_search_table);
+
+        final int[] selectedSortId = {R.id.sort_by_default};
+
+        sortAdapter.setOnSelectionChangedListener(selected -> {
+            if (!selected.isEmpty()) {
+                selectedSortId[0] = selected.iterator().next();
+            }
+        });
+
         mSearchDialog = new AlertDialog.Builder(context)
-                .setMessage(R.string.download_search_gallery)
                 .setView(linearLayout)
                 .setCancelable(true)
                 .setOnDismissListener(this::onSearchDialogDismiss)
-                .setNegativeButton(android.R.string.cancel, (dialog, which) -> {
-                    searchKey = null;
-                    mSearchBar.setText(null);
-                    mSearchBar.setTitle(null);
-                    mSearchBar.applySearch(true);
-                    dialog.dismiss();
-                })
-                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                    mSearchBar.applySearch(true);
-                    dialog.dismiss();
-                }).show();
+                .show();
+
+        resetButton.setOnClickListener(v -> {
+            mSearchBar.setText("");
+            mSearchBar.setTitle(null);
+            categoryTable.setAllSelected();
+            advanceSearchTable.setAdvanceSearch(0);
+            sortAdapter.setSelectedItems(new HashSet<>());
+            Set<Integer> defaultSort = new HashSet<>();
+            defaultSort.add(R.id.sort_by_default);
+            sortAdapter.setSelectedItems(defaultSort);
+            selectedSortId[0] = R.id.sort_by_default;
+        });
+
+        searchButton.setOnClickListener(v -> {
+            searchKey = mSearchBar.getText().toString();
+            if (searchKey == null) searchKey = "";
+            searchKey = searchKey.trim();
+
+            int searchOption = advanceSearchTable.getAdvanceSearch();
+            Set<Integer> categories = categoryTable.getSelectedCategories();
+            int sortId = selectedSortId[0];
+
+        if (mSearchDialog != null) {
+            mSearchDialog.dismiss();
+        }
+            mSearchMode = false;
+
+            mProgressView.setVisibility(View.VISIBLE);
+            if (mRecyclerView != null) {
+                mRecyclerView.setVisibility(View.GONE);
+            }
+            updateForLabel();
+
+            DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, "");
+            executor.setDownloadSearchingListener(this);
+            executor.executeAdvancedSearch(searchKey, searchOption, categories, sortId);
+            searching = true;
+        });
+    }
+
+    private void gotoAdvancedFilter(Context context) {
+        LayoutInflater layoutInflater = LayoutInflater.from(context);
+
+        LinearLayout linearLayout = (LinearLayout) layoutInflater.inflate(R.layout.dialog_sort_filter_v2, null);
+
+        // Category table - set all selected by default
+        DownloadCategoryTable categoryTable = linearLayout.findViewById(R.id.category_table);
+        categoryTable.setAllSelected();
+
+        // Status filter setup
+        RecyclerView statusRecyclerView = linearLayout.findViewById(R.id.status_recycler_view);
+        statusRecyclerView.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(context));
+        List<String> statusNames = new ArrayList<>();
+        List<Integer> statusIds = new ArrayList<>();
+        statusNames.add(context.getString(R.string.download_state_none));
+        statusIds.add(DownloadInfo.STATE_NONE);
+        statusNames.add(context.getString(R.string.download_state_wait));
+        statusIds.add(DownloadInfo.STATE_WAIT);
+        statusNames.add(context.getString(R.string.download_state_downloading));
+        statusIds.add(DownloadInfo.STATE_DOWNLOAD);
+        statusNames.add(context.getString(R.string.download_state_downloaded));
+        statusIds.add(DownloadInfo.STATE_FINISH);
+        statusNames.add(context.getString(R.string.download_state_failed));
+        statusIds.add(DownloadInfo.STATE_FAILED);
+        final CheckboxAdapter statusAdapter = new CheckboxAdapter(statusNames, statusIds);
+        statusRecyclerView.setAdapter(statusAdapter);
+        // Select all by default
+        Set<Integer> allStatuses = new HashSet<>(statusIds);
+        statusAdapter.setSelectedItems(allStatuses);
+
+        Button selectAllStatusBtn = linearLayout.findViewById(R.id.select_all_status_button);
+        Button selectNoneStatusBtn = linearLayout.findViewById(R.id.select_none_status_button);
+        selectAllStatusBtn.setOnClickListener(v -> statusAdapter.setSelectedItems(allStatuses));
+        selectNoneStatusBtn.setOnClickListener(v -> statusAdapter.setSelectedItems(new HashSet<>()));
+
+        // Sort method setup
+        RecyclerView sortRecyclerView = linearLayout.findViewById(R.id.sort_recycler_view);
+        sortRecyclerView.setLayoutManager(new androidx.recyclerview.widget.LinearLayoutManager(context));
+        List<String> sortNames = new ArrayList<>();
+        List<Integer> sortIds = new ArrayList<>();
+        sortNames.add(context.getString(R.string.default_sort));
+        sortIds.add(R.id.sort_by_default);
+        sortNames.add(context.getString(R.string.sort_by_gallery_id_asc));
+        sortIds.add(R.id.sort_by_gallery_id_asc);
+        sortNames.add(context.getString(R.string.sort_by_gallery_id_desc));
+        sortIds.add(R.id.sort_by_gallery_id_desc);
+        sortNames.add(context.getString(R.string.sort_by_create_time_asc));
+        sortIds.add(R.id.sort_by_create_time_asc);
+        sortNames.add(context.getString(R.string.sort_by_create_time_desc));
+        sortIds.add(R.id.sort_by_create_time_desc);
+        sortNames.add(context.getString(R.string.sort_by_rating_asc));
+        sortIds.add(R.id.sort_by_rating_asc);
+        sortNames.add(context.getString(R.string.sort_by_rating_desc));
+        sortIds.add(R.id.sort_by_rating_desc);
+        sortNames.add(context.getString(R.string.sort_by_name_asc));
+        sortIds.add(R.id.sort_by_name_asc);
+        sortNames.add(context.getString(R.string.sort_by_name_desc));
+        sortIds.add(R.id.sort_by_name_desc);
+        sortNames.add(context.getString(R.string.sort_by_file_size_asc));
+        sortIds.add(R.id.sort_by_file_size_asc);
+        sortNames.add(context.getString(R.string.sort_by_file_size_desc));
+        sortIds.add(R.id.sort_by_file_size_desc);
+        final CheckboxAdapter sortAdapter = new CheckboxAdapter(sortNames, sortIds);
+        sortAdapter.setMutuallyExclusive(true);
+        sortRecyclerView.setAdapter(sortAdapter);
+
+        // Time inputs
+        EditText timeFromInput = linearLayout.findViewById(R.id.filter_time_from_input);
+        EditText timeToInput = linearLayout.findViewById(R.id.filter_time_to_input);
+        Button pickTimeFromBtn = linearLayout.findViewById(R.id.pick_time_from_button);
+        Button pickTimeToBtn = linearLayout.findViewById(R.id.pick_time_to_button);
+
+        final java.text.SimpleDateFormat dateFormat = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+
+        pickTimeFromBtn.setOnClickListener(v -> {
+            Calendar cal = Calendar.getInstance();
+            new DatePickerDialog(context, (view, year, month, dayOfMonth) -> {
+                cal.set(year, month, dayOfMonth);
+                timeFromInput.setText(dateFormat.format(cal.getTime()));
+            }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show();
+        });
+
+        pickTimeToBtn.setOnClickListener(v -> {
+            Calendar cal = Calendar.getInstance();
+            new DatePickerDialog(context, (view, year, month, dayOfMonth) -> {
+                cal.set(year, month, dayOfMonth);
+                timeToInput.setText(dateFormat.format(cal.getTime()));
+            }, cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show();
+        });
+
+        // Size inputs
+        EditText sizeFromInput = linearLayout.findViewById(R.id.filter_size_from_input);
+        EditText sizeToInput = linearLayout.findViewById(R.id.filter_size_to_input);
+
+        // Duplicate checkbox
+        CheckBox duplicateCheckbox = linearLayout.findViewById(R.id.filter_duplicate_only_checkbox);
+
+        // Rating filter
+        RatingBar ratingFromBar = linearLayout.findViewById(R.id.filter_rating_from_bar);
+        RatingBar ratingToBar = linearLayout.findViewById(R.id.filter_rating_to_bar);
+        final float[] ratingFrom = {0f};
+        final float[] ratingTo = {5f};
+        RatingBar.OnRatingBarChangeListener ratingListener = (bar, rating, fromUser) -> {
+            if (bar == ratingFromBar) {
+                ratingFrom[0] = rating;
+            } else {
+                ratingTo[0] = rating;
+            }
+        };
+        ratingFromBar.setOnRatingBarChangeListener(ratingListener);
+        ratingToBar.setOnRatingBarChangeListener(ratingListener);
+
+        // Toggle row
+        LinearLayout toggleRow = linearLayout.findViewById(R.id.advanced_filter_toggle_row);
+        LinearLayout contentContainer = linearLayout.findViewById(R.id.advanced_filter_content_container);
+        TextView toggleIcon = linearLayout.findViewById(R.id.advanced_filter_toggle_icon);
+        toggleRow.setOnClickListener(v -> {
+            if (contentContainer.getVisibility() == View.GONE) {
+                contentContainer.setVisibility(View.VISIBLE);
+                toggleIcon.setText("−");
+            } else {
+                contentContainer.setVisibility(View.GONE);
+                toggleIcon.setText("+");
+            }
+        });
+
+        final int[] selectedSortId = {R.id.sort_by_default};
+        sortAdapter.setOnSelectionChangedListener(selected -> {
+            if (!selected.isEmpty()) {
+                selectedSortId[0] = selected.iterator().next();
+            }
+        });
+
+        AlertDialog dialog = new AlertDialog.Builder(context)
+                .setView(linearLayout)
+                .setCancelable(true)
+                .show();
+
+        Button resetButton = linearLayout.findViewById(R.id.reset_button);
+        Button applyButton = linearLayout.findViewById(R.id.apply_button);
+
+        resetButton.setOnClickListener(v -> {
+            categoryTable.setAllSelected();
+            statusAdapter.setSelectedItems(allStatuses);
+            Set<Integer> defaultSort = new HashSet<>();
+            defaultSort.add(R.id.sort_by_default);
+            sortAdapter.setSelectedItems(defaultSort);
+            selectedSortId[0] = R.id.sort_by_default;
+            timeFromInput.setText("");
+            timeToInput.setText("");
+            sizeFromInput.setText("");
+            sizeToInput.setText("");
+            duplicateCheckbox.setChecked(false);
+            ratingFromBar.setRating(0f);
+            ratingToBar.setRating(5f);
+            ratingFrom[0] = 0f;
+            ratingTo[0] = 5f;
+        });
+
+        applyButton.setOnClickListener(v -> {
+            Set<Integer> categoryIds = categoryTable.getSelectedCategories();
+            Set<Integer> selectedStatusIds = statusAdapter.getSelectedItems();
+            int sortId = selectedSortId[0];
+
+            Long timeFrom = parseTimeInput(timeFromInput.getText().toString());
+            Long timeTo = parseTimeInput(timeToInput.getText().toString());
+            Long sizeFrom = parseSizeInput(sizeFromInput.getText().toString());
+            Long sizeTo = parseSizeInput(sizeToInput.getText().toString());
+            boolean duplicateOnly = duplicateCheckbox.isChecked();
+            float ratFrom = ratingFrom[0];
+            float ratTo = ratingTo[0];
+
+            dialog.dismiss();
+
+            mProgressView.setVisibility(View.VISIBLE);
+            if (mRecyclerView != null) {
+                mRecyclerView.setVisibility(View.GONE);
+            }
+
+            updateForLabel();
+
+            DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
+            executor.setDownloadSearchingListener(this);
+            executor.executeFilterAndSort(categoryIds, selectedStatusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, duplicateOnly, ratFrom, ratTo);
+            searching = true;
+        });
+    }
+
+    private Long parseTimeInput(String text) {
+        if (text == null || text.trim().isEmpty()) return null;
+        try {
+            java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            Date date = sdf.parse(text.trim());
+            return date != null ? date.getTime() : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Long parseSizeInput(String text) {
+        if (text == null || text.trim().isEmpty()) return null;
+        String s = text.trim().toUpperCase(Locale.US);
+        try {
+            long multiplier = 1;
+            if (s.endsWith("GB")) {
+                multiplier = 1024L * 1024 * 1024;
+                s = s.substring(0, s.length() - 2).trim();
+            } else if (s.endsWith("MB")) {
+                multiplier = 1024L * 1024;
+                s = s.substring(0, s.length() - 2).trim();
+            } else if (s.endsWith("KB")) {
+                multiplier = 1024L;
+                s = s.substring(0, s.length() - 2).trim();
+            } else if (s.endsWith("B")) {
+                s = s.substring(0, s.length() - 1).trim();
+            }
+            return Long.parseLong(s) * multiplier;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void onSearchDialogDismiss(DialogInterface dialog) {
@@ -1059,6 +1416,38 @@ public class DownloadsScene extends ToolbarScene
         view.toggle();
     }
 
+    private void setupFabContentDescriptions() {
+        if (mFabLayout == null) {
+            return;
+        }
+        Context context = getEHContext();
+        if (context == null) {
+            return;
+        }
+        int totalFabs = mFabLayout.getSecondaryFabCount();
+        for (int i = 0; i < totalFabs; i++) {
+            FloatingActionButton fab = mFabLayout.getSecondaryFabAt(i);
+            if (fab == null) {
+                continue;
+            }
+            String desc = null;
+            switch (i) {
+                case 0 -> desc = context.getString(R.string.select_all);
+                case 1 -> desc = context.getString(R.string.fab_start);
+                case 2 -> desc = context.getString(R.string.pause);
+                case 3 -> desc = context.getString(R.string.delete);
+                case 4 -> desc = context.getString(R.string.move_download);
+                case 5 -> desc = context.getString(R.string.random_download);
+                case 6 -> desc = context.getString(R.string.drag_mode);
+                case 7 -> desc = context.getString(R.string.fab_compress);
+                case 8 -> desc = context.getString(R.string.refresh);
+            }
+            if (desc != null) {
+                fab.setContentDescription(desc);
+            }
+        }
+    }
+
     @Override
     public void onClickSecondaryFab(FabLayout view, FloatingActionButton fab, int position) {
         Context context = getEHContext();
@@ -1079,7 +1468,7 @@ public class DownloadsScene extends ToolbarScene
             LongList gidList = null;
             List<DownloadInfo> downloadInfoList = null;
             boolean collectGid = position == 1 || position == 2 || position == 3; // Start, Stop, Delete
-            boolean collectDownloadInfo = position == 3 || position == 4; // Delete or Move
+            boolean collectDownloadInfo = position == 3 || position == 4 || position == 7; // Delete, Move, or Compress
             if (collectGid) {
                 gidList = new LongList();
             }
@@ -1169,6 +1558,26 @@ public class DownloadsScene extends ToolbarScene
                 case 6:
                     setDragEnable(fab);
                     break;
+                case 7: { // Compress
+                    if (downloadInfoList == null || downloadInfoList.isEmpty()) {
+                        Toast.makeText(context, R.string.compress_no_downloaded_galleries, Toast.LENGTH_SHORT).show();
+                        break;
+                    }
+                    List<DownloadInfo> completedList = new ArrayList<>();
+                    for (DownloadInfo info : downloadInfoList) {
+                        if (info.state == DownloadInfo.STATE_FINISH) {
+                            completedList.add(info);
+                        }
+                    }
+                    if (completedList.isEmpty()) {
+                        Toast.makeText(context, R.string.compress_no_downloaded_galleries, Toast.LENGTH_SHORT).show();
+                        break;
+                    }
+                    CompressSelectedGalleriesTask task = new CompressSelectedGalleriesTask(context, completedList);
+                    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+                    recyclerView.outOfCustomChoiceMode();
+                    break;
+                }
             }
         }
     }
@@ -1209,6 +1618,15 @@ public class DownloadsScene extends ToolbarScene
     @Override
     public void onAdd(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {
         if (mList != list) {
+            updateForLabel();
+            filterByCategory();
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
+            if (downloadLabelDraw != null) {
+                downloadLabelDraw.updateDownloadLabels();
+            }
+            updateView();
             return;
         }
         if (mAdapter != null) {
@@ -1288,6 +1706,12 @@ public class DownloadsScene extends ToolbarScene
     @Override
     public void onRemove(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {
         if (mList != list) {
+            updateForLabel();
+            filterByCategory();
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
+            updateView();
             return;
         }
         if (mAdapter != null) {
@@ -1441,7 +1865,7 @@ public class DownloadsScene extends ToolbarScene
 
         updateForLabel();
 
-        DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mList, searchKey);
+        DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, searchKey);
 
         executor.setDownloadSearchingListener(this);
 
@@ -1453,6 +1877,8 @@ public class DownloadsScene extends ToolbarScene
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.GONE);
         }
+
+        updateForLabel();
 
         DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
 
@@ -1472,6 +1898,11 @@ public class DownloadsScene extends ToolbarScene
         mAdapter = mOriginalAdapter;
         if (mRecyclerView != null) {
             mRecyclerView.setAdapter(mAdapter);
+        }
+        // 更新分页监听器中的适配器引用，避免分页变化时操作旧的适配器
+        if (myPageChangeListener != null) {
+            myPageChangeListener.setAdapter(mAdapter);
+            myPageChangeListener.setIndexPage(1);
         }
     }
 
@@ -1511,7 +1942,11 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
         mList = list;
+        indexPage = 1;
         updateAdapter();
+        updateTitle();
+        updatePaginationIndicator();
+        updateView();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
@@ -1527,7 +1962,11 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
         mList = list;
+        indexPage = 1;
         updateAdapter();
+        updateTitle();
+        updatePaginationIndicator();
+        updateView();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
@@ -1539,7 +1978,11 @@ public class DownloadsScene extends ToolbarScene
     public void onDownloadSearchFailed(List<DownloadInfo> list) {
         Toast.makeText(getEHContext(), R.string.download_searching_failed, Toast.LENGTH_LONG).show();
         mList = list;
+        indexPage = 1;
         updateAdapter();
+        updateTitle();
+        updatePaginationIndicator();
+        updateView();
         mProgressView.setVisibility(View.GONE);
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
@@ -1646,6 +2089,22 @@ public class DownloadsScene extends ToolbarScene
             }
         }
         return index;
+    }
+
+    private int categoryToSpinnerPos(int category) {
+        switch (category) {
+            case EhConfig.DOUJINSHI:    return 1;
+            case EhConfig.MANGA:        return 2;
+            case EhConfig.ARTIST_CG:    return 3;
+            case EhConfig.GAME_CG:      return 4;
+            case EhConfig.WESTERN:      return 5;
+            case EhConfig.NON_H:        return 6;
+            case EhConfig.IMAGE_SET:    return 7;
+            case EhConfig.COSPLAY:      return 8;
+            case EhConfig.ASIAN_PORN:   return 9;
+            case EhConfig.MISC:         return 10;
+            default:                    return 0;
+        }
     }
 
     private void importLocalArchive() {
@@ -2013,8 +2472,12 @@ public class DownloadsScene extends ToolbarScene
                 }
             }
         }
+        indexPage = 1;
         if (mAdapter != null) {
             mAdapter.notifyDataSetChanged();
+        }
+        if (myPageChangeListener != null) {
+            myPageChangeListener.setIndexPage(1);
         }
         updateTitle();
         updatePaginationIndicator();

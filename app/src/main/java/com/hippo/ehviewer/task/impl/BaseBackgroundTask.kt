@@ -21,7 +21,7 @@ abstract class BaseBackgroundTask(
     protected var _progressListener: BackgroundTask.ProgressListener? = null
     protected var job: Job? = null
     
-    protected val backgroundTaskManager = BackgroundTaskManager.getInstance()
+    protected val backgroundTaskManager by lazy { BackgroundTaskManager.getInstance() }
     
     override fun getProgress(): Int = currentProgress
     

@@ -671,14 +671,12 @@
         <item>PP-OCRv5 (推荐，需下载模型)</item>
         <item>Tesseract OCR</item>
         <item>系统OCR (ML Kit)</item>
-        <item>自定义ONNX模型</item>
     </string-array>
 
     <string-array name="ocr_traditional_engine_values">
         <item>ppocrv5</item>
         <item>tesseract</item>
         <item>mlkit</item>
-        <item>onnx</item>
     </string-array>
 
     <!-- AI识图模型 -->
@@ -694,19 +692,6 @@
         <item>gpt4o</item>
         <item>claude</item>
         <item>custom</item>
-    </string-array>
-
-    <!-- OCR模型选择 -->
-    <string-array name="ocr_model_entries">
-        <item>PP-OCRv6_medium_rec (推荐，支持50种语言)</item>
-        <item>PP-OCRv5 (完整OCR流水线)</item>
-        <item>PaddleOCR-VL (视觉语言模型)</item>
-    </string-array>
-
-    <string-array name="ocr_model_values">
-        <item>PP_OCRV6_MEDIUM_REC</item>
-        <item>PP_OCRV5</item>
-        <item>PADDLE_OCR_VL</item>
     </string-array>
 
 </resources>

@@ -175,6 +175,7 @@
         android:key="download_queue_order"
         android:summary="@string/settings_download_download_queue_order_summary"
         android:title="@string/settings_download_download_queue_order"
+        android:dependency="advanced_download_sort_enabled"
         app:entries="@array/download_queue_order_entries"
         app:entryValues="@array/download_queue_order_entry_values"
         app:iconSpaceReserved="false" />
@@ -182,7 +183,8 @@
     <com.hippo.ehviewer.preference.CategoryPriorityDialogPreference
         android:key="download_category_priority_order"
         android:summary="@string/settings_advanced_download_category_priority_order_summary"
-        android:title="@string/settings_advanced_download_category_priority_order" />
+        android:title="@string/settings_advanced_download_category_priority_order"
+        android:dependency="advanced_download_sort_enabled" />
 
     <com.hippo.preference.SwitchPreference
         android:defaultValue="false"

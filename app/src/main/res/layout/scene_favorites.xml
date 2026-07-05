@@ -110,6 +110,12 @@
             app:backgroundTint="?attr/widgetColorThemeAccent"
             app:srcCompat="@drawable/v_check_dark_x24" />
 
+        <com.google.android.material.floatingactionbutton.FloatingActionButton
+            style="@style/Widget.Design.FloatingActionButton.Mini"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            app:backgroundTint="?attr/widgetColorThemeAccent"
+            app:srcCompat="@drawable/ic_compress_gallery" />
 
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             style="@style/Widget.Design.FloatingActionButton"

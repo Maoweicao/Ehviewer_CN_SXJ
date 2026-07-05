@@ -10,7 +10,14 @@ import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import com.hippo.unifile.UniFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedReader
@@ -30,6 +37,8 @@ import java.util.HashMap
 import java.util.HashSet
 import java.util.LinkedHashMap
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.coroutineContext
 
 class MergeDuplicateGalleryTask @JvmOverloads constructor(
@@ -43,12 +52,15 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
     private val errorLog = StringBuilder()
     private val mergeLog = StringBuilder()
 
-    private var mergedCount = 0
-    private var skippedCount = 0
-    private var copiedCount = 0
-    private var deletedCount = 0
-    private var errorCount = 0
+    private val mergedCount = AtomicInteger(0)
+    private val skippedCount = AtomicInteger(0)
+    private val copiedCount = AtomicInteger(0)
+    private val deletedCount = AtomicInteger(0)
+    private val errorCount = AtomicInteger(0)
+    @Volatile
     private var lastError = ""
+
+    private val targetDirLocks = ConcurrentHashMap<String, Mutex>()
 
     /** 是否为单画廊合并模式 */
     private val isSingleMode: Boolean get() = targetGid >= 0L
@@ -166,6 +178,81 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         }
     }
 
+    private data class ShellScanEntry(
+        val dirname: String,
+        val fileCount: Int,
+        val mtime: Long,
+        val gid: String,
+        val token: String,
+        val hashes: Set<String>
+    )
+
+    private fun getRealDownloadPath(): String? {
+        val downloadDir = Settings.getDownloadLocation() ?: return null
+        return if (downloadDir.uri.scheme == "file") downloadDir.uri.path else null
+    }
+
+    private fun execShellScan(downloadPath: String): Map<String, ShellScanEntry>? {
+        val escapedPath = downloadPath.replace("'", "'\\''")
+        val script = (
+            "cd '$escapedPath' 2>/dev/null || exit 1;" +
+            "for dir in */; do" +
+            " d=\${dir%/};" +
+            " c=\$(find \"\$d\" -type f 2>/dev/null | wc -l);" +
+            " m=\$(stat -c '%Y' \"\$d\" 2>/dev/null || echo 0);" +
+            " e=\"\$d/${SpiderQueen.SPIDER_INFO_FILENAME}\";" +
+            " if [ -f \"\$e\" ]; then" +
+            "  g=\$(sed -n '2p' \"\$e\" 2>/dev/null | tr -d '\\r\\n ');" +
+            "  t=\$(sed -n '3p' \"\$e\" 2>/dev/null | tr -d '\\r\\n ');" +
+            "  h=\$(awk 'NR>=4{printf \"%s,\",\$2}' \"\$e\" 2>/dev/null | sed 's/,\$//');" +
+            "  printf 'EHV|%s|%s|%s|%s|%s|%s\\n' \"\$d\" \"\$c\" \"\$m\" \"\$g\" \"\$t\" \"\$h\";" +
+            " else" +
+            "  printf 'RAW|%s|%s|%s\\n' \"\$d\" \"\$c\" \"\$m\";" +
+            " fi;" +
+            "done"
+            )
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c", script))
+            val output = process.inputStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            if (exitCode != 0) {
+                Log.w(TAG, "Shell scan failed with exit code $exitCode")
+                null
+            } else {
+                val result = LinkedHashMap<String, ShellScanEntry>()
+                for (line in output.lines()) {
+                    if (line.isBlank()) continue
+                    val parts = line.split("|", limit = 7)
+                    val dirname = parts.getOrElse(1) { "" }
+                    if (dirname.isEmpty()) continue
+                    if (parts[0] == "EHV") {
+                        result[dirname] = ShellScanEntry(
+                            dirname = dirname,
+                            fileCount = parts.getOrElse(2) { "0" }.trim().toIntOrNull() ?: 0,
+                            mtime = parts.getOrElse(3) { "0" }.trim().toLongOrNull() ?: 0L,
+                            gid = parts.getOrElse(4) { "" },
+                            token = parts.getOrElse(5) { "" },
+                            hashes = parts.getOrElse(6) { "" }.split(",").filter { it.isNotEmpty() }.toSet()
+                        )
+                    } else {
+                        result[dirname] = ShellScanEntry(
+                            dirname = dirname,
+                            fileCount = parts.getOrElse(2) { "0" }.trim().toIntOrNull() ?: 0,
+                            mtime = parts.getOrElse(3) { "0" }.trim().toLongOrNull() ?: 0L,
+                            gid = "",
+                            token = "",
+                            hashes = emptySet()
+                        )
+                    }
+                }
+                result
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Shell scan failed: ${e.message}")
+            null
+        }
+    }
+
     override suspend fun execute(): Result<Unit> {
         initErrorLog()
         initMergeLog()
@@ -203,7 +290,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             }
 
             notifyCompleted()
-            logInfo("任务完成: 合并 $mergedCount 组，跳过 $skippedCount 组，复制 $copiedCount 个文件，删除 $deletedCount 个源目录")
+            logInfo("任务完成: 合并 ${mergedCount.get()} 组，跳过 ${skippedCount.get()} 组，复制 ${copiedCount.get()} 个文件，删除 ${deletedCount.get()} 个源目录")
             Result.success(Unit)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) {
@@ -264,6 +351,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             .append("\n\n")
     }
 
+    @Synchronized
     private fun logError(message: String) {
         errorLog.append("[")
             .append(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()))
@@ -274,6 +362,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         Log.e(TAG, message)
     }
 
+    @Synchronized
     private fun logInfo(message: String) {
         mergeLog.append("[")
             .append(SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()))
@@ -302,7 +391,6 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
 
     private suspend fun scanDownloadedGalleries(): Boolean {
         return try {
-            // 0. 尝试使用已有缓存（1小时内有效）
             val cachedBuckets = MergeScanCache.get()
             if (cachedBuckets != null) {
                 logInfo("使用缓存扫描结果（${cachedBuckets.size} 组）")
@@ -313,8 +401,8 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             if (infos == null) {
                 infos = Collections.emptyList()
             }
+            val total = infos.size
 
-            // 单画廊模式：先找到目标画廊及其清理后的名字，只扫描匹配的文件夹
             val targetCleanName: String? = if (isSingleMode) {
                 val targetInfo = infos.find { it.gid == targetGid }
                 if (targetInfo == null) {
@@ -336,77 +424,154 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 null
             }
 
-            val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
-            val total = infos.size
-            logInfo("扫描到 $total 个下载记录${if (isSingleMode) "（单画廊模式）" else ""}")
-
-            for (i in infos.indices) {
-                ensureNotCancelled()
-                val info = infos[i]
-                val dir = SpiderDen.getGalleryDownloadDir(info)
-                if (dir == null || !dir.exists() || !dir.isDirectory) {
-                    dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
-                    continue
-                }
-
-                val name = dir.name ?: info.gid.toString()
-                val cleanName = removeIdPrefix(name)
-
-                // 单画廊模式：提前过滤非匹配目录，避免昂贵的元数据解析
-                if (isSingleMode && cleanName != targetCleanName) {
-                    dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
-                    continue
-                }
-
-                // 只对匹配的目录进行完整的元数据解析
-                val folder = GalleryFolder(
-                    info = info,
-                    dir = dir,
-                    name = name,
-                    id = extractIdFromFolderName(name),
-                    modifiedAt = maxOf(dir.lastModified(), 0L),
-                    fileCount = countFiles(dir),
-                    ehMeta = parseEhviewerMeta(dir)
-                )
-
-                logInfo(
-                    "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-                )
-
-                buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
-                dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
-            }
-
-            // 存入缓存供 1 小时内其他任务复用
-            if (!isSingleMode) {
-                MergeScanCache.put(HashMap(buckets))
-                logInfo("全量扫描结果已缓存至 MergeScanCache")
-            }
-
-            galleryGroups.clear()
-            for ((key, value) in buckets) {
-                if (value.size < 2) {
-                    continue
-                }
-                galleryGroups.add(
-                    GalleryGroup(
-                        cleanedName = key,
-                        folders = value.toMutableList()
-                    )
-                )
-            }
-
-            if (isSingleMode && galleryGroups.isEmpty()) {
-                logInfo("单画廊模式: 未发现目标画廊的重复，无需合并")
+            if (isSingleMode && targetCleanName != null) {
+                scanDownloadedGalleriesJava(infos, total, targetCleanName)
             } else {
-                logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+                val realPath = getRealDownloadPath()
+                if (realPath != null) {
+                    logInfo("尝试 Shell 批量扫描: $realPath")
+                    val shellResults = execShellScan(realPath)
+                    if (shellResults != null && shellResults.isNotEmpty()) {
+                        logInfo("Shell 扫描完成，发现 ${shellResults.size} 个目录")
+                        return buildFromShellScan(shellResults, infos)
+                    }
+                    logInfo("Shell 扫描失败或无结果，回退到 Java 扫描")
+                }
+                scanDownloadedGalleriesJava(infos, total, null)
             }
-            true
         } catch (t: Throwable) {
             lastError = t.message ?: "扫描失败"
             logError("扫描失败: ${t.message}")
             false
         }
+    }
+
+    private fun buildFromShellScan(
+        shellResults: Map<String, ShellScanEntry>,
+        infos: List<DownloadInfo>
+    ): Boolean {
+        val dirnameToInfo = LinkedHashMap<String, DownloadInfo>()
+        for (info in infos) {
+            val dir = SpiderDen.getGalleryDownloadDir(info) ?: continue
+            if (!dir.exists() || !dir.isDirectory) continue
+            val name = dir.name ?: info.gid.toString()
+            dirnameToInfo[name] = info
+        }
+
+        val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
+        for ((dirname, entry) in shellResults) {
+            val info = dirnameToInfo[dirname] ?: continue
+            val dir = SpiderDen.getGalleryDownloadDir(info) ?: continue
+            val cleanName = removeIdPrefix(dirname)
+            val ehMeta = if (entry.gid.isNotEmpty()) {
+                val meta = EhviewerMeta()
+                meta.gid = entry.gid
+                meta.token = entry.token
+                meta.hashes.addAll(entry.hashes)
+                for ((idx, hash) in entry.hashes.withIndex()) {
+                    meta.files[idx] = hash
+                }
+                meta
+            } else null
+
+            val folder = GalleryFolder(
+                info = info,
+                dir = dir,
+                name = dirname,
+                id = extractIdFromFolderName(dirname),
+                modifiedAt = entry.mtime,
+                fileCount = entry.fileCount,
+                ehMeta = ehMeta
+            )
+            logInfo(
+                "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+            )
+            buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
+        }
+
+        MergeScanCache.put(HashMap(buckets))
+        logInfo("全量扫描结果已缓存至 MergeScanCache")
+
+        galleryGroups.clear()
+        for ((key, value) in buckets) {
+            if (value.size < 2) continue
+            galleryGroups.add(
+                GalleryGroup(
+                    cleanedName = key,
+                    folders = value.toMutableList()
+                )
+            )
+        }
+        logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+        return true
+    }
+
+    private suspend fun scanDownloadedGalleriesJava(
+        infos: List<DownloadInfo>,
+        total: Int,
+        targetCleanName: String?
+    ): Boolean {
+        logInfo("扫描到 $total 个下载记录${if (isSingleMode) "（单画廊模式）" else ""}")
+
+        val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
+
+        for (i in infos.indices) {
+            ensureNotCancelled()
+            val info = infos[i]
+            val dir = SpiderDen.getGalleryDownloadDir(info)
+            if (dir == null || !dir.exists() || !dir.isDirectory) {
+                dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+                continue
+            }
+
+            val name = dir.name ?: info.gid.toString()
+            val cleanName = removeIdPrefix(name)
+
+            if (isSingleMode && cleanName != targetCleanName) {
+                dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+                continue
+            }
+
+            val folder = GalleryFolder(
+                info = info,
+                dir = dir,
+                name = name,
+                id = extractIdFromFolderName(name),
+                modifiedAt = maxOf(dir.lastModified(), 0L),
+                fileCount = countFiles(dir),
+                ehMeta = parseEhviewerMeta(dir)
+            )
+
+            logInfo(
+                "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+            )
+
+            buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
+            dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))
+        }
+
+        if (!isSingleMode) {
+            MergeScanCache.put(HashMap(buckets))
+            logInfo("全量扫描结果已缓存至 MergeScanCache")
+        }
+
+        galleryGroups.clear()
+        for ((key, value) in buckets) {
+            if (value.size < 2) continue
+            galleryGroups.add(
+                GalleryGroup(
+                    cleanedName = key,
+                    folders = value.toMutableList()
+                )
+            )
+        }
+
+        if (isSingleMode && galleryGroups.isEmpty()) {
+            logInfo("单画廊模式: 未发现目标画廊的重复，无需合并")
+        } else {
+            logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+        }
+        return true
     }
 
     /**
@@ -467,19 +632,27 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         return try {
             val total = maxOf(galleryGroups.size, 1)
             logInfo("开始分析 ${galleryGroups.size} 组候选重复画廊")
-            for (i in galleryGroups.indices) {
-                ensureNotCancelled()
-                val group = galleryGroups[i]
-                group.type = analyzeGroupRelationship(group.folders)
-                group.target = chooseTargetFolder(group)
-                group.reason = buildTargetReason(group)
-                dispatchProgress(
-                    STEP_ANALYZE,
-                    "分析中: ${group.cleanedName} (${i + 1}/$total)",
-                    i + 1,
-                    total
-                )
-                logInfo("分析分组 ${group.cleanedName} 类型=${group.type.name}，${group.reason}")
+            if (galleryGroups.isEmpty()) return true
+
+            val snapshots = galleryGroups.toList()
+            withContext(Dispatchers.Default) {
+                coroutineScope {
+                    snapshots.mapIndexed { i, group ->
+                        async {
+                            ensureNotCancelled()
+                            group.type = analyzeGroupRelationship(group.folders)
+                            group.target = chooseTargetFolder(group)
+                            group.reason = buildTargetReason(group)
+                            dispatchProgress(
+                                STEP_ANALYZE,
+                                "分析中: ${group.cleanedName} (${i + 1}/$total)",
+                                i + 1,
+                                total
+                            )
+                            logInfo("分析分组 ${group.cleanedName} 类型=${group.type.name}，${group.reason}")
+                        }
+                    }.awaitAll()
+                }
             }
             true
         } catch (t: Throwable) {
@@ -516,30 +689,37 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 return true
             }
 
-            var hasError = false
             val total = galleryGroups.size
-            for (i in galleryGroups.indices) {
-                ensureNotCancelled()
-                val group = galleryGroups[i]
-                val stats = processGroup(group)
-                copiedCount += stats.copied
-                deletedCount += stats.deleted
-                errorCount += stats.errors
-                if (stats.errors > 0) {
-                    hasError = true
-                    skippedCount++
-                } else {
-                    mergedCount++
+            val snapshots = galleryGroups.toList()
+            val anyError = AtomicInteger(0)
+
+            withContext(Dispatchers.Default) {
+                coroutineScope {
+                    snapshots.mapIndexed { i, group ->
+                        async {
+                            ensureNotCancelled()
+                            val stats = processGroup(group)
+                            copiedCount.addAndGet(stats.copied)
+                            deletedCount.addAndGet(stats.deleted)
+                            errorCount.addAndGet(stats.errors)
+                            if (stats.errors > 0) {
+                                anyError.incrementAndGet()
+                                skippedCount.incrementAndGet()
+                            } else {
+                                mergedCount.incrementAndGet()
+                            }
+                            dispatchProgress(
+                                STEP_MERGE,
+                                "合并中: ${group.cleanedName} [${group.type.name}]",
+                                i + 1,
+                                total
+                            )
+                        }
+                    }.awaitAll()
                 }
-                dispatchProgress(
-                    STEP_MERGE,
-                    "合并中: ${group.cleanedName} [${group.type.name}]",
-                    i + 1,
-                    total
-                )
             }
 
-            if (hasError) {
+            if (anyError.get() > 0) {
                 lastError = "部分分组合并失败"
                 false
             } else {
@@ -676,7 +856,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         return "保留 ${target.name}（.ehviewer=${if (target.ehMeta != null) "有" else "无"}，修改时间=${target.modifiedAt}，文件数=${target.fileCount}）"
     }
 
-    private fun processGroup(group: GalleryGroup): MergeStats {
+    private suspend fun processGroup(group: GalleryGroup): MergeStats {
         val stats = MergeStats()
         val target = group.target
         if (target == null) {
@@ -699,23 +879,26 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         logInfo("处理分组 ${group.cleanedName} 类型=${group.type.name}，${group.reason}")
 
         if (group.type == RelationshipType.DUPLICATE || group.type == RelationshipType.PROGRESSIVE) {
-            for (source in sources) {
-                if (deleteRecursively(source.dir)) {
-                    EhDB.removeDownloadDirname(source.info.gid)
-                    EhDB.removeDownloadInfo(source.info.gid)
-                    stats.deleted++
-                } else {
-                    logError("删除源目录失败: ${source.name}")
-                    stats.errors++
+            val lock = getTargetDirLock(target.dir)
+            lock.withLock {
+                for (source in sources) {
+                    if (deleteRecursively(source.dir)) {
+                        EhDB.removeDownloadDirname(source.info.gid)
+                        EhDB.removeDownloadInfo(source.info.gid)
+                        stats.deleted++
+                    } else {
+                        logError("删除源目录失败: ${source.name}")
+                        stats.errors++
+                    }
                 }
             }
             return stats
         }
 
         val mergeStats = if (group.type == RelationshipType.NO_EHVIEWER) {
-            mergeByMd5(target, sources)
+            guardedMergeByMd5(target, sources)
         } else {
-            mergeByEhviewer(target, sources)
+            guardedMergeByEhviewer(target, sources)
         }
 
         stats.copied += mergeStats.copied
@@ -723,18 +906,33 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         stats.errors += mergeStats.errors
 
         if (stats.errors == 0) {
-            for (source in sources) {
-                if (deleteRecursively(source.dir)) {
-                    EhDB.removeDownloadDirname(source.info.gid)
-                    EhDB.removeDownloadInfo(source.info.gid)
-                    stats.deleted++
-                } else {
-                    logError("合并后删除源目录失败: ${source.name}")
-                    stats.errors++
+            val lock = getTargetDirLock(target.dir)
+            lock.withLock {
+                for (source in sources) {
+                    if (deleteRecursively(source.dir)) {
+                        EhDB.removeDownloadDirname(source.info.gid)
+                        EhDB.removeDownloadInfo(source.info.gid)
+                        stats.deleted++
+                    } else {
+                        logError("合并后删除源目录失败: ${source.name}")
+                        stats.errors++
+                    }
                 }
             }
         }
         return stats
+    }
+
+    private fun getTargetDirLock(dir: UniFile): Mutex {
+        val path = dir.uri?.path ?: dir.uri?.toString() ?: dir.toString()
+        return targetDirLocks.getOrPut(path) { Mutex() }
+    }
+
+    private suspend fun guardedMergeByEhviewer(target: GalleryFolder, sources: List<GalleryFolder>): MergeStats {
+        val lock = getTargetDirLock(target.dir)
+        lock.withLock {
+            return mergeByEhviewer(target, sources)
+        }
     }
 
     private fun mergeByEhviewer(target: GalleryFolder, sources: List<GalleryFolder>): MergeStats {
@@ -790,6 +988,13 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         }
 
         return stats
+    }
+
+    private suspend fun guardedMergeByMd5(target: GalleryFolder, sources: List<GalleryFolder>): MergeStats {
+        val lock = getTargetDirLock(target.dir)
+        lock.withLock {
+            return mergeByMd5(target, sources)
+        }
     }
 
     private fun mergeByMd5(target: GalleryFolder, sources: List<GalleryFolder>): MergeStats {

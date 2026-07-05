@@ -55,6 +55,7 @@ import com.hippo.lib.yorozuya.collect.SparseJLArray;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -425,8 +426,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     void startRangeDownload(LongList gidList) {
         boolean update = false;
-        boolean downloadOrder = Settings.getDownloadOrder();
-        if (downloadOrder) {
+        boolean advancedSortEnabled = Settings.getAdvancedDownloadSortEnabled();
+
+        if (advancedSortEnabled) {
+            // Collect all selected pending items, sort them, then add to wait list
+            List<DownloadInfo> pendingList = new ArrayList<>();
             for (int i = 0, n = gidList.size(); i < n; i++) {
                 long gid = gidList.get(i);
                 DownloadInfo info = mAllInfoMap.get(gid);
@@ -434,38 +438,71 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     Log.d(TAG, "Can't get download info with gid: " + gid);
                     continue;
                 }
-
                 if (info.state == DownloadInfo.STATE_NONE ||
                         info.state == DownloadInfo.STATE_FAILED ||
                         info.state == DownloadInfo.STATE_FINISH) {
                     update = true;
-                    // Set state DownloadInfo.STATE_WAIT
                     info.state = DownloadInfo.STATE_WAIT;
-                    // Add to wait list
-                    mWaitList.add(info);
-                    // Update in DB
+                    pendingList.add(info);
                     EhDB.putDownloadInfo(info);
                 }
             }
-        } else {
-            for (int i = gidList.size(), n = 0; i > n; i--) {
-                long gid = gidList.get(i - 1);
-                DownloadInfo info = mAllInfoMap.get(gid);
-                if (null == info) {
-                    Log.d(TAG, "Can't get download info with gid: " + gid);
-                    continue;
+            if (!pendingList.isEmpty()) {
+                applyAdvancedSort(pendingList);
+                boolean downloadOrder = Settings.getDownloadOrder();
+                if (downloadOrder) {
+                    for (DownloadInfo info : pendingList) {
+                        mWaitList.add(info);
+                    }
+                } else {
+                    for (int i = pendingList.size() - 1; i >= 0; i--) {
+                        mWaitList.add(pendingList.get(i));
+                    }
                 }
+            }
+        } else {
+            boolean downloadOrder = Settings.getDownloadOrder();
+            if (downloadOrder) {
+                for (int i = 0, n = gidList.size(); i < n; i++) {
+                    long gid = gidList.get(i);
+                    DownloadInfo info = mAllInfoMap.get(gid);
+                    if (null == info) {
+                        Log.d(TAG, "Can't get download info with gid: " + gid);
+                        continue;
+                    }
 
-                if (info.state == DownloadInfo.STATE_NONE ||
-                        info.state == DownloadInfo.STATE_FAILED ||
-                        info.state == DownloadInfo.STATE_FINISH) {
-                    update = true;
-                    // Set state DownloadInfo.STATE_WAIT
-                    info.state = DownloadInfo.STATE_WAIT;
-                    // Add to wait list
-                    mWaitList.add(info);
-                    // Update in DB
-                    EhDB.putDownloadInfo(info);
+                    if (info.state == DownloadInfo.STATE_NONE ||
+                            info.state == DownloadInfo.STATE_FAILED ||
+                            info.state == DownloadInfo.STATE_FINISH) {
+                        update = true;
+                        // Set state DownloadInfo.STATE_WAIT
+                        info.state = DownloadInfo.STATE_WAIT;
+                        // Add to wait list
+                        mWaitList.add(info);
+                        // Update in DB
+                        EhDB.putDownloadInfo(info);
+                    }
+                }
+            } else {
+                for (int i = gidList.size(), n = 0; i > n; i--) {
+                    long gid = gidList.get(i - 1);
+                    DownloadInfo info = mAllInfoMap.get(gid);
+                    if (null == info) {
+                        Log.d(TAG, "Can't get download info with gid: " + gid);
+                        continue;
+                    }
+
+                    if (info.state == DownloadInfo.STATE_NONE ||
+                            info.state == DownloadInfo.STATE_FAILED ||
+                            info.state == DownloadInfo.STATE_FINISH) {
+                        update = true;
+                        // Set state DownloadInfo.STATE_WAIT
+                        info.state = DownloadInfo.STATE_WAIT;
+                        // Add to wait list
+                        mWaitList.add(info);
+                        // Update in DB
+                        EhDB.putDownloadInfo(info);
+                    }
                 }
             }
         }
@@ -486,29 +523,57 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Start all STATE_NONE and STATE_FAILED item
         LinkedList<DownloadInfo> allInfoList = mAllInfoList;
         LinkedList<DownloadInfo> waitList = mWaitList;
-        boolean downloadOrder = Settings.getDownloadOrder();
-        if (downloadOrder) {
+        boolean advancedSortEnabled = Settings.getAdvancedDownloadSortEnabled();
+
+        if (advancedSortEnabled) {
+            // Collect all pending items, sort them, then add to wait list
+            List<DownloadInfo> pendingList = new ArrayList<>();
             for (DownloadInfo info : allInfoList) {
                 if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
                     update = true;
-                    // Set state DownloadInfo.STATE_WAIT
                     info.state = DownloadInfo.STATE_WAIT;
-                    // Add to wait list
-                    waitList.add(info);
-                    // Update in DB
+                    pendingList.add(info);
                     EhDB.putDownloadInfo(info);
                 }
             }
+            if (!pendingList.isEmpty()) {
+                applyAdvancedSort(pendingList);
+                boolean downloadOrder = Settings.getDownloadOrder();
+                if (downloadOrder) {
+                    for (DownloadInfo info : pendingList) {
+                        waitList.add(info);
+                    }
+                } else {
+                    for (int i = pendingList.size() - 1; i >= 0; i--) {
+                        waitList.add(pendingList.get(i));
+                    }
+                }
+            }
         } else {
-            for (DownloadInfo info : allInfoList) {
-                if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
-                    update = true;
-                    // Set state DownloadInfo.STATE_WAIT
-                    info.state = DownloadInfo.STATE_WAIT;
-                    // Add to wait list
-                    waitList.addFirst(info);
-                    // Update in DB
-                    EhDB.putDownloadInfo(info);
+            boolean downloadOrder = Settings.getDownloadOrder();
+            if (downloadOrder) {
+                for (DownloadInfo info : allInfoList) {
+                    if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
+                        update = true;
+                        // Set state DownloadInfo.STATE_WAIT
+                        info.state = DownloadInfo.STATE_WAIT;
+                        // Add to wait list
+                        waitList.add(info);
+                        // Update in DB
+                        EhDB.putDownloadInfo(info);
+                    }
+                }
+            } else {
+                for (DownloadInfo info : allInfoList) {
+                    if (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED) {
+                        update = true;
+                        // Set state DownloadInfo.STATE_WAIT
+                        info.state = DownloadInfo.STATE_WAIT;
+                        // Add to wait list
+                        waitList.addFirst(info);
+                        // Update in DB
+                        EhDB.putDownloadInfo(info);
+                    }
                 }
             }
         }
@@ -1352,6 +1417,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     info.legacy = mTotal - mFinished;
                     if (info.legacy == 0) {
                         info.state = DownloadInfo.STATE_FINISH;
+                    } else if (Settings.getDownloadTreatRemovedAsComplete()) {
+                        info.state = DownloadInfo.STATE_FINISH;
                     } else {
                         info.state = DownloadInfo.STATE_FAILED;
                     }
@@ -1487,6 +1554,74 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 //            return  > 0 ? -1 : 1;
         }
     };
+
+    private static final Comparator<DownloadInfo> PAGES_ASC_COMPARATOR = new Comparator<>() {
+        @Override
+        public int compare(DownloadInfo lhs, DownloadInfo rhs) {
+            return Integer.compare(lhs.pages, rhs.pages);
+        }
+    };
+
+    private static final Comparator<DownloadInfo> PAGES_DESC_COMPARATOR = new Comparator<>() {
+        @Override
+        public int compare(DownloadInfo lhs, DownloadInfo rhs) {
+            return Integer.compare(rhs.pages, lhs.pages);
+        }
+    };
+
+    private void applyAdvancedSort(List<DownloadInfo> list) {
+        if (list.isEmpty()) return;
+
+        int queueOrder = Settings.getDownloadQueueOrder();
+        switch (queueOrder) {
+            case Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST:
+                Collections.sort(list, PAGES_ASC_COMPARATOR);
+                break;
+            case Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST:
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+                break;
+            case Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY:
+                sortByCategoryPriority(list);
+                break;
+            case Settings.DOWNLOAD_QUEUE_ORDER_DEFAULT:
+            default:
+                break;
+        }
+    }
+
+    private void sortByCategoryPriority(List<DownloadInfo> list) {
+        int[] priorityMap = getCategoryPriorityMap();
+        if (priorityMap == null || priorityMap.length == 0) return;
+
+        Collections.sort(list, (lhs, rhs) -> {
+            int lhsP = getCategoryPriority(lhs.category, priorityMap);
+            int rhsP = getCategoryPriority(rhs.category, priorityMap);
+            return Integer.compare(lhsP, rhsP);
+        });
+    }
+
+    private int[] getCategoryPriorityMap() {
+        String saved = Settings.getDownloadCategoryPriorityOrder();
+        if (saved == null || saved.isEmpty()) return null;
+
+        String[] parts = saved.split(",");
+        int[] map = new int[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try {
+                map[i] = Integer.parseInt(parts[i].trim());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return map;
+    }
+
+    private static int getCategoryPriority(int category, int[] priorityMap) {
+        for (int i = 0; i < priorityMap.length; i++) {
+            if (priorityMap[i] == category) return i;
+        }
+        return Integer.MAX_VALUE;
+    }
 
     public interface DownloadInfoListener {
 

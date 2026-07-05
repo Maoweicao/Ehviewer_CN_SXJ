@@ -58,6 +58,7 @@ import com.hippo.drawable.DrawerArrowDrawable
 import com.hippo.easyrecyclerview.EasyRecyclerView
 import com.hippo.easyrecyclerview.EasyRecyclerView.CustomChoiceListener
 import com.hippo.easyrecyclerview.FastScroller.OnDragHandlerListener
+import com.hippo.ehviewer.BackgroundTaskManager
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
@@ -69,6 +70,9 @@ import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.data.FavListUrlBuilder
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.parser.FavoritesParser
+import com.hippo.ehviewer.dao.DownloadInfo
+import com.hippo.ehviewer.download.DownloadManager
+import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask
 import com.hippo.ehviewer.ui.CommonOperations
 import com.hippo.ehviewer.ui.annotation.DrawerLifeCircle
 import com.hippo.ehviewer.ui.annotation.ViewLifeCircle
@@ -317,6 +321,14 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         mFabLayout!!.setHidePrimaryFab(false)
         mFabLayout!!.setOnClickFabListener(this)
         mFabLayout!!.setOnExpandListener(this)
+        mFabLayout!!.getPrimaryFab().setOnLongClickListener {
+            if (mRecyclerView != null && !mRecyclerView!!.isInCustomChoice() && !mSearchMode) {
+                mRecyclerView!!.intoCustomChoiceMode()
+            }
+            true
+        }
+        setupFabContentDescriptions()
+        mFabLayout!!.setShowFabFunctionName(Settings.getShowFabFunctionName())
         addAboveSnackView(mFabLayout)
 
         // Restore search mode
@@ -449,6 +461,11 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
         mOldFavCat = null
         mOldKeyword = null
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mFabLayout?.setShowFabFunctionName(Settings.getShowFabFunctionName())
     }
 
     override fun onCreateDrawerView(
@@ -613,12 +630,36 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         position: Int,
         id: Long
     ): Boolean {
-        // Can not into
-        if (mRecyclerView != null && !mSearchMode) {
-            if (!mRecyclerView!!.isInCustomChoice()) {
-                mRecyclerView!!.intoCustomChoiceMode()
+        if (mRecyclerView != null && !mSearchMode && mHelper != null) {
+            val gi = mHelper!!.getDataAtEx(position) ?: return true
+            val context = getEHContext() ?: return true
+            val downloadManager = EhApplication.getDownloadManager(context)
+            val isDownloaded = downloadManager.getDownloadState(gi.gid) == DownloadInfo.STATE_FINISH
+
+            val items = mutableListOf<String>()
+            val unfavoriteLabel = getString(R.string.favorite_remove_from_favorites)
+            val downloadLabel = getString(R.string.download)
+            items.add(unfavoriteLabel)
+            if (!isDownloaded) {
+                items.add(downloadLabel)
             }
-            mRecyclerView!!.toggleItemChecked(position)
+
+            AlertDialog.Builder(getDialogContext()!!)
+                .setTitle(gi.title ?: gi.titleJpn)
+                .setItems(items.toTypedArray()) { _, which ->
+                    when (items[which]) {
+                        unfavoriteLabel -> {
+                            removeFavorite(gi)
+                        }
+                        downloadLabel -> {
+                            val activity = getActivity2()
+                            if (activity != null) {
+                                CommonOperations.startDownload(activity, listOf(gi), false)
+                            }
+                        }
+                    }
+                }
+                .show()
         }
         return true
     }
@@ -928,6 +969,10 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             8 -> {
                 selectAll(view, fab)
             }
+
+            9 -> {
+                compressSelectedGalleries()
+            }
         }
     }
 
@@ -943,6 +988,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                 mFabLayout!!.setSecondaryFabVisibilityAt(6, true)
                 mFabLayout!!.setSecondaryFabVisibilityAt(7, true)
                 mFabLayout!!.setSecondaryFabVisibilityAt(8, false)
+                mFabLayout!!.setSecondaryFabVisibilityAt(9, false)
             }
         }
     }
@@ -966,6 +1012,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             mFabLayout!!.setSecondaryFabVisibilityAt(6, false)
             mFabLayout!!.setSecondaryFabVisibilityAt(7, false)
             mFabLayout!!.setSecondaryFabVisibilityAt(8, true)
+            mFabLayout!!.setSecondaryFabVisibilityAt(9, true)
         }
     }
 
@@ -1131,6 +1178,76 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             return
         }
         mHelper!!.refreshSort(sort)
+    }
+
+    private fun removeFavorite(gi: GalleryInfo) {
+        val context = getEHContext() ?: return
+        if (mUrlBuilder!!.getFavCat() == FavListUrlBuilder.FAV_CAT_LOCAL) {
+            EhDB.removeLocalFavorites(longArrayOf(gi.gid))
+            if (mHelper != null) {
+                mHelper!!.refresh()
+            }
+        } else {
+            mModifyGiList.clear()
+            mModifyGiList.add(gi)
+            mEnableModify = true
+            mModifyFavCat = -1
+            mModifyAdd = false
+            if (mHelper != null) {
+                mHelper!!.refresh()
+            }
+        }
+    }
+
+    private fun setupFabContentDescriptions() {
+        val fabLayout = mFabLayout ?: return
+        val context = getEHContext() ?: return
+        val totalFabs = fabLayout.getSecondaryFabCount()
+        for (i in 0 until totalFabs) {
+            val fab = fabLayout.getSecondaryFabAt(i) ?: continue
+            val desc = when (i) {
+                0 -> context.getString(R.string.go_to)
+                1 -> context.getString(R.string.refresh)
+                2 -> context.getString(R.string.download)
+                3 -> context.getString(R.string.delete)
+                4 -> context.getString(R.string.move_download)
+                5 -> context.getString(R.string.random_download)
+                6 -> context.getString(R.string.fab_random_all)
+                7 -> context.getString(R.string.download_sort_list)
+                8 -> context.getString(R.string.select_all)
+                9 -> context.getString(R.string.fab_compress)
+                else -> null
+            }
+            desc?.let { fab.contentDescription = it }
+        }
+    }
+
+    private fun compressSelectedGalleries() {
+        val context = getEHContext() ?: return
+        val downloadManager = EhApplication.getDownloadManager(context)
+        val downloadInfoList = mutableListOf<DownloadInfo>()
+
+        for (gi in mModifyGiList) {
+            if (downloadManager.getDownloadState(gi.gid) == DownloadInfo.STATE_FINISH) {
+                val di = downloadManager.getDownloadInfo(gi.gid)
+                if (di != null) {
+                    downloadInfoList.add(di)
+                }
+            }
+        }
+
+        if (downloadInfoList.isEmpty()) {
+            Toast.makeText(context, R.string.compress_no_downloaded_galleries, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val task = CompressSelectedGalleriesTask(context, downloadInfoList)
+        BackgroundTaskManager.getInstance().submitBackgroundTask(task)
+        Toast.makeText(
+            context,
+            context.getString(R.string.compress_selected_galleries) + " (" + downloadInfoList.size + ")",
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private inner class DeleteDialogHelper : DialogInterface.OnClickListener,

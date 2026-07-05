@@ -114,14 +114,24 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
     private View movedItem = null;
 
-    private final android.util.LruCache<String, Bitmap> thumbnailCache = new android.util.LruCache<>(20 * 1024 * 1024) {
+    private final android.util.LruCache<String, Bitmap> thumbnailCache = new android.util.LruCache<>(5 * 1024 * 1024) {
         @Override
         protected int sizeOf(String key, Bitmap value) {
             return value.getAllocationByteCount();
         }
     };
-    private final Map<Long, Long> folderTimeCache = new HashMap<>();
-    private final Map<Long, Long> folderSizeCache = new HashMap<>();
+    private final Map<Long, Long> folderTimeCache = new java.util.LinkedHashMap<Long, Long>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Long> eldest) {
+            return size() > 100;
+        }
+    };
+    private final Map<Long, Long> folderSizeCache = new java.util.LinkedHashMap<Long, Long>() {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<Long, Long> eldest) {
+            return size() > 100;
+        }
+    };
 
     public interface DownloadAdapterCallback {
         int getIndexPage();

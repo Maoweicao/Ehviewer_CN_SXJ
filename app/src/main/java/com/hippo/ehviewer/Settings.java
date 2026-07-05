@@ -2435,68 +2435,6 @@ public class Settings {
         putString(KEY_AI_OCR_AI_MODEL, value);
     }
 
-    // ========== 模型目录设置 ==========
-
-    // OCR模型下载路径
-    public static final String KEY_AI_OCR_MODEL_DOWNLOAD_PATH = "ai_ocr_model_download_path";
-    private static final String DEFAULT_AI_OCR_MODEL_DOWNLOAD_PATH = "";
-
-    public static String getAiOcrModelDownloadPath() {
-        return getString(KEY_AI_OCR_MODEL_DOWNLOAD_PATH, DEFAULT_AI_OCR_MODEL_DOWNLOAD_PATH);
-    }
-
-    public static void putAiOcrModelDownloadPath(String value) {
-        putString(KEY_AI_OCR_MODEL_DOWNLOAD_PATH, value);
-    }
-
-    // AI模型下载路径
-    public static final String KEY_AI_MODEL_DOWNLOAD_PATH = "ai_model_download_path";
-    private static final String DEFAULT_AI_MODEL_DOWNLOAD_PATH = "";
-
-    public static String getAiModelDownloadPath() {
-        return getString(KEY_AI_MODEL_DOWNLOAD_PATH, DEFAULT_AI_MODEL_DOWNLOAD_PATH);
-    }
-
-    public static void putAiModelDownloadPath(String value) {
-        putString(KEY_AI_MODEL_DOWNLOAD_PATH, value);
-    }
-
-    // 当前选择的OCR模型类型
-    public static final String KEY_AI_OCR_SELECTED_MODEL = "ai_ocr_selected_model";
-    private static final String DEFAULT_AI_OCR_SELECTED_MODEL = "PP_OCRV6_MEDIUM_REC";
-
-    public static String getAiOcrSelectedModel() {
-        return getString(KEY_AI_OCR_SELECTED_MODEL, DEFAULT_AI_OCR_SELECTED_MODEL);
-    }
-
-    public static void putAiOcrSelectedModel(String value) {
-        putString(KEY_AI_OCR_SELECTED_MODEL, value);
-    }
-
-    // 是否使用自定义模型路径
-    public static final String KEY_AI_OCR_USE_CUSTOM_PATH = "ai_ocr_use_custom_path";
-    private static final boolean DEFAULT_AI_OCR_USE_CUSTOM_PATH = false;
-
-    public static boolean getAiOcrUseCustomPath() {
-        return getBoolean(KEY_AI_OCR_USE_CUSTOM_PATH, DEFAULT_AI_OCR_USE_CUSTOM_PATH);
-    }
-
-    public static void putAiOcrUseCustomPath(boolean value) {
-        putBoolean(KEY_AI_OCR_USE_CUSTOM_PATH, value);
-    }
-
-    // 自定义OCR模型完整路径（包含模型文件）
-    public static final String KEY_AI_OCR_FULL_MODEL_PATH = "ai_ocr_full_model_path";
-    private static final String DEFAULT_AI_OCR_FULL_MODEL_PATH = "";
-
-    public static String getAiOcrFullModelPath() {
-        return getString(KEY_AI_OCR_FULL_MODEL_PATH, DEFAULT_AI_OCR_FULL_MODEL_PATH);
-    }
-
-    public static void putAiOcrFullModelPath(String value) {
-        putString(KEY_AI_OCR_FULL_MODEL_PATH, value);
-    }
-
     // ========== 高级设置 ==========
 
     public static final String KEY_AI_TRANSLATE_SKIP_ANIMATED = "ai_translate_skip_animated";

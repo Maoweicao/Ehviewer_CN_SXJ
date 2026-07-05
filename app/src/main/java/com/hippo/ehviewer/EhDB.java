@@ -1312,6 +1312,73 @@ public class EhDB {
         }
     }
 
+    public static synchronized boolean exportLegacyDB(Context context, File file) {
+        final String ehExportName = "eh.legacy.export.db";
+
+        // Ensure source database has ARCHIVE_URI column
+        try {
+            sDaoSession.getDatabase().execSQL("ALTER TABLE \"DOWNLOADS\" ADD COLUMN \"ARCHIVE_URI\" TEXT");
+        } catch (Exception e) {
+            Log.d(TAG, "ARCHIVE_URI column already exists or failed to add", e);
+        }
+
+        // Delete old export db
+        context.deleteDatabase(ehExportName);
+
+        DBOpenHelper helper = new DBOpenHelper(context.getApplicationContext(), ehExportName, null);
+
+        try {
+            // Copy data to a export db
+            try (SQLiteDatabase db = helper.getWritableDatabase()) {
+                DaoMaster daoMaster = new DaoMaster(db);
+                DaoSession exportSession = daoMaster.newSession();
+                if (! copyDao(sDaoSession.getDownloadsDao(), exportSession.getDownloadsDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getDownloadLabelDao(), exportSession.getDownloadLabelDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getDownloadDirnameDao(), exportSession.getDownloadDirnameDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getHistoryDao(), exportSession.getHistoryDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getQuickSearchDao(), exportSession.getQuickSearchDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getLocalFavoritesDao(), exportSession.getLocalFavoritesDao()))
+                    return false;
+                if (!copyDao(sDaoSession.getBookmarksBao(), exportSession.getBookmarksBao()))
+                    return false;
+                if (!copyDao(sDaoSession.getFilterDao(), exportSession.getFilterDao()))
+                    return false;
+
+                // Set schema version to 7 for compatibility with old BiLi PC Gamer version
+                db.setVersion(7);
+            }
+
+            // Copy export db to data dir
+            File dbFile = context.getDatabasePath(ehExportName);
+            if (dbFile == null || !dbFile.isFile()) {
+                return false;
+            }
+            InputStream is = null;
+            OutputStream os = null;
+            try {
+                is = new FileInputStream(dbFile);
+                os = new FileOutputStream(file);
+                IOUtils.copy(is, os);
+                return true;
+            } catch (IOException e) {
+                e.printStackTrace();
+            } finally {
+                IOUtils.closeQuietly(is);
+                IOUtils.closeQuietly(os);
+            }
+            // Delete failed file
+            file.delete();
+            return false;
+        } finally {
+            context.deleteDatabase(ehExportName);
+        }
+    }
+
     /**
      * @param file The db file
      * @return error string, null for no error

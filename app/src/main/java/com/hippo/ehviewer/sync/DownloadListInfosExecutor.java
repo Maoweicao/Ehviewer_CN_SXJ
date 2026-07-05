@@ -91,22 +91,23 @@ public class DownloadListInfosExecutor {
     @SuppressLint("NonConstantResourceId")
     public void executeFilterAndSort(int id) {
         service.execute(() -> {
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             switch (id) {
 
                 case R.id.download_done:
-                    resultList = filterDownloadState(DownloadInfo.STATE_FINISH);
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_FINISH);
                     break;
                 case R.id.not_started:
-                    resultList = filterDownloadState(DownloadInfo.STATE_NONE);
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_NONE);
                     break;
                 case R.id.waiting:
-                    resultList = filterDownloadState(DownloadInfo.STATE_WAIT);
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_WAIT);
                     break;
                 case R.id.downloading:
-                    resultList = filterDownloadState(DownloadInfo.STATE_DOWNLOAD);
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_DOWNLOAD);
                     break;
                 case R.id.failed:
-                    resultList = filterDownloadState(DownloadInfo.STATE_FAILED);
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_FAILED);
                     break;
                 case R.id.sort_by_gallery_id_asc:
                 case R.id.sort_by_gallery_id_desc:
@@ -118,7 +119,7 @@ public class DownloadListInfosExecutor {
                 case R.id.sort_by_name_desc:
                 case R.id.sort_by_file_size_asc:
                 case R.id.sort_by_file_size_desc:
-                    resultList = sortByType(id);
+                    resultList = sortByType(safeList, id);
                     break;
                 case R.id.all_kind:
                 case R.id.misc:
@@ -132,12 +133,12 @@ public class DownloadListInfosExecutor {
                 case R.id.non_h:
                 case R.id.western:
                 case R.id.unknown:
-                    resultList = filterDownloadKind(id);
+                    resultList = filterDownloadKind(safeList, id);
                     break;
                 case R.id.all:
                 case R.id.sort_by_default:
                 default:
-                    resultList = mList;
+                    resultList = safeList;
                     break;
             }
 
@@ -156,42 +157,38 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用状态过滤
-            List<DownloadInfo> filteredList = mList;
+            List<DownloadInfo> filteredList = safeList;
             if (statusId != R.id.all) {
                 Log.d("DownloadListInfos", "executeFilterAndSort: 应用状态过滤, statusId=" + statusId);
                 switch (statusId) {
                     case R.id.download_done:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FINISH);
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_FINISH);
                         break;
                     case R.id.not_started:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_NONE);
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_NONE);
                         break;
                     case R.id.waiting:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_WAIT);
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_WAIT);
                         break;
                     case R.id.downloading:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_DOWNLOAD);
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_DOWNLOAD);
                         break;
                     case R.id.failed:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FAILED);
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_FAILED);
                         break;
                     default:
-                        filteredList = mList;
+                        filteredList = safeList;
                         break;
                 }
                 Log.d("DownloadListInfos", "executeFilterAndSort: 状态过滤完成，列表大小=" + filteredList.size());
             }
 
-            // 再应用排序
+                // 再应用排序
             if (sortId != R.id.sort_by_default) {
                 Log.d("DownloadListInfos", "executeFilterAndSort: 应用排序, sortId=" + sortId);
-                // 临时保存mList并设置为过滤后的列表
-                List<DownloadInfo> originalList = this.mList;
-                this.mList = filteredList;
-                resultList = sortByType(sortId);
-                // 恢复原始列表
-                this.mList = originalList;
+                resultList = sortByType(filteredList, sortId);
                 Log.d("DownloadListInfos", "executeFilterAndSort: 排序完成，结果列表大小=" + resultList.size());
             } else {
                 resultList = filteredList;
@@ -215,11 +212,12 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
-            List<DownloadInfo> filteredList = mList;
+            List<DownloadInfo> filteredList = safeList;
             if (categoryIds != null && !categoryIds.contains(EhUtils.ALL_CATEGORY)) {
                 Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 应用分类过滤, categoryIds=" + categoryIds);
-                filteredList = filterByCategories(categoryIds);
+                filteredList = filterByCategories(categoryIds, filteredList);
                 Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 分类过滤完成，列表大小=" + filteredList.size());
             }
 
@@ -228,19 +226,19 @@ public class DownloadListInfosExecutor {
                 Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 应用状态过滤, statusId=" + statusId);
                 switch (statusId) {
                     case R.id.download_done:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FINISH, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FINISH);
                         break;
                     case R.id.not_started:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_NONE, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_NONE);
                         break;
                     case R.id.waiting:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_WAIT, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_WAIT);
                         break;
                     case R.id.downloading:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_DOWNLOAD, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_DOWNLOAD);
                         break;
                     case R.id.failed:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FAILED, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FAILED);
                         break;
                     default:
                         break;
@@ -251,12 +249,7 @@ public class DownloadListInfosExecutor {
             // 最后应用排序
             if (sortId != R.id.sort_by_default) {
                 Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 应用排序, sortId=" + sortId);
-                // 临时保存mList并设置为过滤后的列表
-                List<DownloadInfo> originalList = this.mList;
-                this.mList = filteredList;
-                resultList = sortByType(sortId);
-                // 恢复原始列表
-                this.mList = originalList;
+                resultList = sortByType(filteredList, sortId);
                 Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 排序完成，结果列表大小=" + resultList.size());
             } else {
                 resultList = filteredList;
@@ -280,11 +273,12 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
-            List<DownloadInfo> filteredList = mList;
+            List<DownloadInfo> filteredList = safeList;
             if (categoryId != EhUtils.ALL_CATEGORY) {
                 Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 应用分类过滤, categoryId=" + categoryId);
-                filteredList = filterByCategory(categoryId);
+                filteredList = filterByCategory(filteredList, categoryId);
                 Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 分类过滤完成，列表大小=" + filteredList.size());
             }
 
@@ -293,19 +287,19 @@ public class DownloadListInfosExecutor {
                 Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 应用状态过滤, statusId=" + statusId);
                 switch (statusId) {
                     case R.id.download_done:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FINISH, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FINISH);
                         break;
                     case R.id.not_started:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_NONE, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_NONE);
                         break;
                     case R.id.waiting:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_WAIT, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_WAIT);
                         break;
                     case R.id.downloading:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_DOWNLOAD, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_DOWNLOAD);
                         break;
                     case R.id.failed:
-                        filteredList = filterDownloadState(DownloadInfo.STATE_FAILED, filteredList);
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FAILED);
                         break;
                     default:
                         break;
@@ -316,12 +310,7 @@ public class DownloadListInfosExecutor {
             // 最后应用排序
             if (sortId != R.id.sort_by_default) {
                 Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 应用排序, sortId=" + sortId);
-                // 临时保存mList并设置为过滤后的列表
-                List<DownloadInfo> originalList = this.mList;
-                this.mList = filteredList;
-                resultList = sortByType(sortId);
-                // 恢复原始列表
-                this.mList = originalList;
+                resultList = sortByType(filteredList, sortId);
                 Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 排序完成，结果列表大小=" + resultList.size());
             } else {
                 resultList = filteredList;
@@ -347,61 +336,79 @@ public class DownloadListInfosExecutor {
     public void executeFilterAndSort(Set<Integer> categoryIds, Set<Integer> statusIds, int sortId,
                                      @Nullable Long timeFrom, @Nullable Long timeTo,
                                      @Nullable Long sizeFrom, @Nullable Long sizeTo) {
-        executeFilterAndSort(categoryIds, statusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, false);
+        executeFilterAndSort(categoryIds, statusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, false, 0f, 5f);
     }
 
     public void executeFilterAndSort(Set<Integer> categoryIds, Set<Integer> statusIds, int sortId,
-                                     @Nullable Long timeFrom, @Nullable Long timeTo,
-                                     @Nullable Long sizeFrom, @Nullable Long sizeTo,
-                                     boolean duplicateOnly) {
-        Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 开始, categoryIds=" + categoryIds + ", statusIds=" + statusIds + ", sortId=" + sortId);
-        Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 输入列表大小=" + (mList != null ? mList.size() : 0));
+                                      @Nullable Long timeFrom, @Nullable Long timeTo,
+                                      @Nullable Long sizeFrom, @Nullable Long sizeTo,
+                                      boolean duplicateOnly) {
+        executeFilterAndSort(categoryIds, statusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, duplicateOnly, 0f, 5f);
+    }
+
+    public void executeFilterAndSort(Set<Integer> categoryIds, Set<Integer> statusIds, int sortId,
+                                      @Nullable Long timeFrom, @Nullable Long timeTo,
+                                      @Nullable Long sizeFrom, @Nullable Long sizeTo,
+                                      boolean duplicateOnly, float ratingFrom, float ratingTo) {
+        Log.d("DownloadListInfos", "executeFilterAndSort: 开始, categoryIds=" + categoryIds + ", statusIds=" + statusIds + ", sortId=" + sortId + ", ratingFrom=" + ratingFrom + ", ratingTo=" + ratingTo);
+        Log.d("DownloadListInfos", "executeFilterAndSort: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
-            // 先应用分类过滤
-            List<DownloadInfo> filteredList = mList;
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
+            List<DownloadInfo> filteredList = safeList;
             if (categoryIds != null && !categoryIds.contains(EhUtils.ALL_CATEGORY)) {
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 应用分类过滤, categoryIds=" + categoryIds);
-                filteredList = filterByCategories(categoryIds);
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 分类过滤完成，列表大小=" + filteredList.size());
+                Log.d("DownloadListInfos", "executeFilterAndSort: 应用分类过滤, categoryIds=" + categoryIds);
+                filteredList = filterByCategories(categoryIds, filteredList);
+                Log.d("DownloadListInfos", "executeFilterAndSort: 分类过滤完成，列表大小=" + filteredList.size());
             }
 
-            // 再应用状态过滤
-            if (statusIds != null && !statusIds.isEmpty() && statusIds.size() < 5) { // 5是所有状态的数量
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 应用状态过滤, statusIds=" + statusIds);
+            if (statusIds != null && !statusIds.isEmpty() && statusIds.size() < 5) {
+                Log.d("DownloadListInfos", "executeFilterAndSort: 应用状态过滤, statusIds=" + statusIds);
                 filteredList = filterByStates(statusIds, filteredList);
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 状态过滤完成，列表大小=" + filteredList.size());
+                Log.d("DownloadListInfos", "executeFilterAndSort: 状态过滤完成，列表大小=" + filteredList.size());
             }
 
             filteredList = filterByTimeRange(filteredList, timeFrom, timeTo);
             filteredList = filterBySizeRange(filteredList, sizeFrom, sizeTo);
+            filteredList = filterByRating(filteredList, ratingFrom, ratingTo);
             filteredList = filterDuplicateNamedGalleries(filteredList, duplicateOnly);
 
-            // 最后应用排序
             List<DownloadInfo> resultList;
             if (sortId != R.id.sort_by_default) {
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 应用排序, sortId=" + sortId);
-                // 临时保存mList并设置为过滤后的列表
-                List<DownloadInfo> originalList = this.mList;
-                this.mList = filteredList;
-                resultList = sortByType(sortId);
-                // 恢复原始列表
-                this.mList = originalList;
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 排序完成，结果列表大小=" + resultList.size());
+                Log.d("DownloadListInfos", "executeFilterAndSort: 应用排序, sortId=" + sortId);
+                resultList = sortByType(filteredList, sortId);
+                Log.d("DownloadListInfos", "executeFilterAndSort: 排序完成，结果列表大小=" + resultList.size());
             } else {
                 resultList = filteredList;
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 使用默认排序，结果列表大小=" + resultList.size());
+                Log.d("DownloadListInfos", "executeFilterAndSort: 使用默认排序，结果列表大小=" + resultList.size());
             }
 
             handler.post(() -> {
                 if (mDownloadSearchCallback == null) {
-                    Log.e("DownloadListInfos", "executeFilterAndSort(多状态): 回调为null");
+                    Log.e("DownloadListInfos", "executeFilterAndSort: 回调为null");
                     return;
                 }
-                Log.d("DownloadListInfos", "executeFilterAndSort(多状态): 调用成功回调，结果列表大小=" + resultList.size());
+                Log.d("DownloadListInfos", "executeFilterAndSort: 调用成功回调，结果列表大小=" + resultList.size());
                 mDownloadSearchCallback.onDownloadSearchSuccess(resultList);
             });
         });
+    }
+
+    private List<DownloadInfo> filterByRating(List<DownloadInfo> sourceList, float ratingFrom, float ratingTo) {
+        if (sourceList == null) {
+            return new ArrayList<>();
+        }
+        if (ratingFrom <= 0f && ratingTo >= 5f) {
+            return sourceList;
+        }
+        List<DownloadInfo> list = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            if (info.rating >= ratingFrom && info.rating <= ratingTo) {
+                list.add(info);
+            }
+        }
+        Log.d("DownloadListInfos", "filterByRating: range=" + ratingFrom + "~" + ratingTo + ", 过滤后列表大小=" + list.size());
+        return list;
     }
 
     private List<DownloadInfo> filterDuplicateNamedGalleries(@Nullable List<DownloadInfo> sourceList,
@@ -525,16 +532,16 @@ public class DownloadListInfosExecutor {
         }
     }
 
-    public List<DownloadInfo> sortByType(int type) {
+    public List<DownloadInfo> sortByType(List<DownloadInfo> sourceList, int type) {
         Log.d("DownloadListInfos", "sortByType: 开始排序, type=" + type);
-        if (mList == null) {
-            Log.w("DownloadListInfos", "sortByType: mList为null，返回空列表");
+        if (sourceList == null) {
+            Log.w("DownloadListInfos", "sortByType: sourceList为null，返回空列表");
             return new ArrayList<>();
         }
         
-        Log.d("DownloadListInfos", "sortByType: 排序前列表大小=" + mList.size());
-        DownloadInfo[] arr = new DownloadInfo[mList.size()];
-        mList.toArray(arr);
+        Log.d("DownloadListInfos", "sortByType: 排序前列表大小=" + sourceList.size());
+        DownloadInfo[] arr = new DownloadInfo[sourceList.size()];
+        sourceList.toArray(arr);
 
         // 如果是按文件大小排序，先计算所有文件大小
         if (type == R.id.sort_by_file_size_asc || type == R.id.sort_by_file_size_desc) {
@@ -708,28 +715,12 @@ public class DownloadListInfosExecutor {
         }
     }
 
-    private List<DownloadInfo> filterDownloadState(int state) {
-        List<DownloadInfo> list = new ArrayList<>();
-        if (mList == null) {
-            return list;
-        }
-        for (int i = 0; i < mList.size(); i++) {
-            DownloadInfo info = mList.get(i);
-            if (info.state == state) {
-                list.add(info);
-            }
-        }
-        return list;
-    }
-
-    // 重载方法：基于指定列表进行状态过滤
-    private List<DownloadInfo> filterDownloadState(int state, List<DownloadInfo> sourceList) {
+    private List<DownloadInfo> filterDownloadState(List<DownloadInfo> sourceList, int state) {
         List<DownloadInfo> list = new ArrayList<>();
         if (sourceList == null) {
             return list;
         }
-        for (int i = 0; i < sourceList.size(); i++) {
-            DownloadInfo info = sourceList.get(i);
+        for (DownloadInfo info : sourceList) {
             if (info.state == state) {
                 list.add(info);
             }
@@ -738,31 +729,15 @@ public class DownloadListInfosExecutor {
     }
 
     // 新增方法：按分类过滤
-    private List<DownloadInfo> filterByCategory(int categoryId) {
+    private List<DownloadInfo> filterByCategories(Set<Integer> categoryIds, List<DownloadInfo> sourceList) {
         List<DownloadInfo> list = new ArrayList<>();
-        if (mList == null) {
-            return list;
-        }
-        for (int i = 0; i < mList.size(); i++) {
-            DownloadInfo info = mList.get(i);
-            if (info.category == categoryId) {
-                list.add(info);
-            }
-        }
-        return list;
-    }
-
-    // 新增方法：按多个分类过滤
-    private List<DownloadInfo> filterByCategories(Set<Integer> categoryIds) {
-        List<DownloadInfo> list = new ArrayList<>();
-        if (mList == null || categoryIds == null) {
+        if (sourceList == null || categoryIds == null) {
             return list;
         }
         
-        Log.d("DownloadListInfos", "filterByCategories: 输入分类=" + categoryIds + ", 列表大小=" + mList.size());
+        Log.d("DownloadListInfos", "filterByCategories: 输入分类=" + categoryIds + ", 列表大小=" + sourceList.size());
         
-        for (int i = 0; i < mList.size(); i++) {
-            DownloadInfo info = mList.get(i);
+        for (DownloadInfo info : sourceList) {
             Log.d("DownloadListInfos", "filterByCategories: 检查项目，分类=" + info.category + ", 标题=" + info.title);
             if (categoryIds.contains(info.category)) {
                 list.add(info);
@@ -774,47 +749,30 @@ public class DownloadListInfosExecutor {
         return list;
     }
 
-    // 新增方法：按多个状态过滤
-    private List<DownloadInfo> filterByStates(Set<Integer> statusIds, List<DownloadInfo> sourceList) {
+    private List<DownloadInfo> filterByCategory(List<DownloadInfo> sourceList, int categoryId) {
         List<DownloadInfo> list = new ArrayList<>();
-        if (sourceList == null || statusIds == null) {
+        if (sourceList == null) {
             return list;
         }
-        
-        Log.d("DownloadListInfos", "filterByStates: 输入状态=" + statusIds + ", 列表大小=" + sourceList.size());
-        
-        for (int i = 0; i < sourceList.size(); i++) {
-            DownloadInfo info = sourceList.get(i);
-            // 检查每个状态ID对应的下载状态
-            for (Integer statusId : statusIds) {
-                int state = -1;
-                switch (statusId) {
-                    case R.id.download_done:
-                        state = DownloadInfo.STATE_FINISH;
-                        break;
-                    case R.id.not_started:
-                        state = DownloadInfo.STATE_NONE;
-                        break;
-                    case R.id.waiting:
-                        state = DownloadInfo.STATE_WAIT;
-                        break;
-                    case R.id.downloading:
-                        state = DownloadInfo.STATE_DOWNLOAD;
-                        break;
-                    case R.id.failed:
-                        state = DownloadInfo.STATE_FAILED;
-                        break;
-                    default:
-                        continue;
-                }
-                if (info.state == state) {
-                    list.add(info);
-                    Log.d("DownloadListInfos", "filterByStates: 匹配成功，状态=" + state + ", 标题=" + info.title);
-                    break; // 只要匹配一个状态就添加，避免重复
-                }
+        for (DownloadInfo info : sourceList) {
+            if (info.category == categoryId) {
+                list.add(info);
             }
         }
-        
+        return list;
+    }
+
+    private List<DownloadInfo> filterByStates(Set<Integer> stateIds, List<DownloadInfo> sourceList) {
+        List<DownloadInfo> list = new ArrayList<>();
+        if (sourceList == null || stateIds == null) {
+            return list;
+        }
+        Log.d("DownloadListInfos", "filterByStates: 输入状态=" + stateIds + ", 列表大小=" + sourceList.size());
+        for (DownloadInfo info : sourceList) {
+            if (stateIds.contains(info.state)) {
+                list.add(info);
+            }
+        }
         Log.d("DownloadListInfos", "filterByStates: 过滤后列表大小=" + list.size());
         return list;
     }
@@ -825,11 +783,12 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeAdvancedSearch: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
-            List<DownloadInfo> filteredList = mList;
+            List<DownloadInfo> filteredList = safeList;
             if (categories != null && !categories.contains(EhUtils.ALL_CATEGORY)) {
                 Log.d("DownloadListInfos", "executeAdvancedSearch: 应用分类过滤, categories=" + categories);
-                filteredList = filterByCategories(categories);
+                filteredList = filterByCategories(categories, filteredList);
                 Log.d("DownloadListInfos", "executeAdvancedSearch: 分类过滤完成，列表大小=" + filteredList.size());
             }
             
@@ -842,10 +801,7 @@ public class DownloadListInfosExecutor {
             
             // 最后应用排序
             if (sortId != R.id.sort_by_default) {
-                List<DownloadInfo> originalList = this.mList;
-                this.mList = filteredList;
-                resultList = sortByType(sortId);
-                this.mList = originalList;
+                resultList = sortByType(filteredList, sortId);
             } else {
                 resultList = filteredList;
             }
@@ -860,17 +816,17 @@ public class DownloadListInfosExecutor {
             });
         });
     }
-    private List<DownloadInfo> filterDownloadKind(int state) {
-        int kind = kindValue(state);
+    private List<DownloadInfo> filterDownloadKind(List<DownloadInfo> sourceList, int menuId) {
+        int kind = kindValue(menuId);
         List<DownloadInfo> list = new ArrayList<>();
 
-        if (mList == null) {
+        if (sourceList == null) {
             return null;
         }
         if (kind == EhUtils.ALL_CATEGORY) {
-            return mList;
+            return new ArrayList<>(sourceList);
         }
-        for(DownloadInfo info : mList){
+        for (DownloadInfo info : sourceList) {
             if (info.category == kind) {
                 list.add(info);
             }
@@ -889,10 +845,10 @@ public class DownloadListInfosExecutor {
         if (mList == null) {
             return new ArrayList<>();
         }
+        List<DownloadInfo> safeList = new ArrayList<>(mList);
         List<DownloadInfo> cache = new ArrayList<>();
 
-        for (int i = 0; i < mList.size(); i++) {
-            DownloadInfo info = mList.get(i);
+        for (DownloadInfo info : safeList) {
             if (EhUtils.judgeSuitableTitle(info, mSearchKey)) {
                 cache.add(info);
             } else if (matchTag(mSearchKey, info)) {

@@ -53,6 +53,7 @@ import com.hippo.ehviewer.client.data.EhNewsDetail;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
 import com.hippo.ehviewer.download.ArchiverDownloadCompleter;
+import com.hippo.ehviewer.download.DownloadLogger;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
@@ -181,6 +182,8 @@ public class EhApplication extends RecordingApplication {
         ReadableTime.initialize(this);
         Html.initialize(this);
         AppConfig.initialize(this);
+        DownloadLogger.initialize(this);
+        BackgroundTaskManager.initialize(this);
         SpiderDen.initialize(this);
         EhDB.initialize(this);
         EhEngine.initialize();

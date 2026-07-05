@@ -296,6 +296,11 @@
     <string name="compress_selected_galleries">Compress Selected Galleries</string>
     <string name="compress_success">Compress Succeeded: %1$s</string>
     <string name="compress_failed">Compress Failed</string>
+    <string name="fab_random_all">Random All</string>
+    <string name="fab_compress">Compress</string>
+    <string name="fab_start">Start</string>
+    <string name="compress_no_downloaded_galleries">No downloaded galleries found to compress</string>
+    <string name="favorite_remove_from_favorites">Remove from Favorites</string>
     <string name="start_all_download">Start All</string>
     <string name="pause_all_download">Pause All</string>
     <string name="move_download">Move</string>
@@ -773,10 +778,18 @@
     <string name="settings_advanced_export_data_to">Exported data to %1$s</string>
     <string name="settings_advanced_export_data_failed">Failed to export data</string>
     <string name="settings_advanced_export_data_started">Exporting data in background…</string>
+    <string name="settings_advanced_export_data_dialog_title">Export Data</string>
+    <string name="settings_advanced_export_db_option">Export database (.db)</string>
+    <string name="settings_advanced_export_csv_option">Export download list (.csv)</string>
+    <string name="settings_advanced_export_legacy_option">Export legacy data (.db)</string>
+    <string name="settings_advanced_export_legacy_started">Exporting legacy data list in background…</string>
     <string name="settings_advanced_import_data">Import data</string>
     <string name="settings_advanced_import_data_summary">Load data which were previously saved</string>
     <string name="settings_advanced_import_data_successfully">Data imported successfully</string>
     <string name="settings_advanced_import_data_started">Importing data in background…</string>
+    <string name="settings_advanced_import_legacy_data">Import legacy data</string>
+    <string name="settings_advanced_import_legacy_data_summary">Import data from old version data list format</string>
+    <string name="settings_advanced_import_legacy_data_started">Importing legacy data in background…</string>
     <string name="settings_advanced_export_database_started">Exporting database in background…</string>
     <string name="settings_advanced_dump_logcat_started">Dumping logcat in background…</string>
     <string name="settings_advanced_wifi_sender">WiFi data migration</string>
@@ -1167,6 +1180,9 @@
     <string name="dialog_time_range_from_hint">From date, e.g. 2026-01-01</string>
     <string name="dialog_time_range_to_hint">To date, e.g. 2026-12-31</string>
     <string name="select_datetime_button">Pick</string>
+    <string name="dialog_rating_filter_label">Rating range</string>
+    <string name="dialog_rating_filter_from">From</string>
+    <string name="dialog_rating_filter_to">To</string>
     <string name="dialog_size_range_filter_label">Folder size range (optional)</string>
     <string name="dialog_size_range_from_hint">Min size, e.g. 128MB</string>
     <string name="dialog_size_range_to_hint">Max size, e.g. 2GB</string>
@@ -1596,24 +1612,7 @@
     <string name="lab_ai_ocr_ai_api_key_summary">API key for AI vision service</string>
     <string name="lab_ai_ocr_ai_model">Vision Model</string>
     <string name="lab_ai_ocr_ai_model_summary">Select AI vision model</string>
-    <string name="lab_ai_ocr_download_ppocrv5">Download PP-OCRv5 Model</string>
-    <string name="lab_ai_ocr_download_ppocrv5_summary">Download PP-OCRv5 model (~100MB)</string>
-    <string name="lab_ai_ocr_download_paddle_vl">Download PaddleOCR-VL Model</string>
-    <string name="lab_ai_ocr_download_paddle_vl_summary">Download PaddleOCR-VL-1.6 model (~500MB)</string>
-    <string name="lab_ai_ocr_download_ppocrv6">Download PP-OCRv6 Model</string>
-    <string name="lab_ai_ocr_download_ppocrv6_summary">Download PP-OCRv6_medium_rec_onnx model (~76MB)</string>
-    <string name="lab_ai_ocr_selected_model">OCR Model</string>
-    <string name="lab_ai_ocr_selected_model_summary">Select OCR model to use</string>
-    <string name="lab_ai_ocr_model_download_path">OCR Model Directory</string>
-    <string name="lab_ai_ocr_model_download_path_summary">Set download directory for OCR models</string>
-    <string name="lab_ai_model_download_path">AI Model Directory</string>
-    <string name="lab_ai_model_download_path_summary">Set download directory for AI models</string>
-    <string name="lab_ai_ocr_use_custom_path">Use Custom Model Path</string>
-    <string name="lab_ai_ocr_use_custom_path_summary">Specify exact path to ONNX model file</string>
-    <string name="lab_ai_ocr_full_model_path">ONNX Model File Path</string>
-    <string name="lab_ai_ocr_full_model_path_summary">Full path to .onnx model file</string>
-    <string name="lab_ai_ocr_export_model_info">Export Model Info</string>
-    <string name="lab_ai_ocr_export_model_info_summary">View and copy model download guide</string>
+
 
     <string name="milestone_title">Milestones</string>
     <string name="milestone_summary">View your usage statistics and milestones</string>
@@ -1652,6 +1651,7 @@
     <string name="progressive_merge_all_confirm">This will merge all %1$d chains. For each chain, the most complete version will be kept. Continue?</string>
     <string name="progressive_merge_all_started">Merging all %1$d chains…</string>
     <string name="progressive_merge_all_done">All chains merged</string>
+    <string name="progressive_merge_all_partial">%1$d chains merged, %2$d failed</string>
     <string name="progressive_merge_started">Merge task started</string>
     <string name="progressive_merge_complete">Merge completed</string>
     <string name="progressive_merge_failed">Merge failed</string>

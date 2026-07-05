@@ -67,6 +67,9 @@ import com.hippo.lib.yorozuya.collect.SparseJLArray;
 import com.hippo.lib.yorozuya.thread.PriorityThread;
 import com.hippo.lib.yorozuya.thread.PriorityThreadFactory;
 
+import okio.Okio;
+import okio.BufferedSource;
+
 import java.io.BufferedInputStream;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -186,7 +189,7 @@ public final class SpiderQueen implements Runnable {
                 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>(),
                 new PriorityThreadFactory(SpiderWorker.class.getSimpleName(), Process.THREAD_PRIORITY_BACKGROUND));
         mDownloadDelay = Settings.getDownloadDelay();
-        downloadTimeout = Settings.getDownloadTimeout();
+        downloadTimeout = Settings.getEnableDownloadTimeout() ? Settings.getDownloadTimeout() : 0;
     }
 
     @UiThread
@@ -613,8 +616,17 @@ public final class SpiderQueen implements Runnable {
                 return;
             }
 
+            int targetCount = mWorkerMaxCount;
+            Runtime rt = Runtime.getRuntime();
+            long used = rt.totalMemory() - rt.freeMemory();
+            long max = rt.maxMemory();
+            if (used > max * 0.85) {
+                targetCount = Math.max(1, mWorkerCount);
+                Log.w(TAG, "Low memory, limiting workers to " + targetCount);
+            }
+
             try {
-                for (; mWorkerCount < mWorkerMaxCount; mWorkerCount++) {
+                for (; mWorkerCount < targetCount; mWorkerCount++) {
                     mWorkerPoolExecutor.execute(new SpiderWorker());
                 }
             } catch (OutOfMemoryError outOfMemoryError) {
@@ -1135,6 +1147,20 @@ public final class SpiderQueen implements Runnable {
         default void onPhaseChanged(int phase) {}
     }
 
+    private static void ensureMemory() {
+        Runtime rt = Runtime.getRuntime();
+        long used = rt.totalMemory() - rt.freeMemory();
+        long max = rt.maxMemory();
+        if (used > max * 0.80) {
+            System.gc();
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException ignored) {
+            }
+            System.runFinalization();
+        }
+    }
+
     private static class AutoCloseInputStream extends InputStream {
 
         private final InputStreamPipe mPipe;
@@ -1372,6 +1398,7 @@ public final class SpiderQueen implements Runnable {
                     }
 
                     // disable Call Timeout for image-downloading requests
+                    ensureMemory();
                     Call call = mHttpClient.newBuilder()
                             .callTimeout(downloadTimeout, TimeUnit.SECONDS).build()
                             .newCall(new EhRequestBuilder(targetImageUrl, referer).build());
@@ -1432,48 +1459,51 @@ public final class SpiderQueen implements Runnable {
                         }
 
                         long contentLength = responseBody.contentLength();
-                        is = responseBody.byteStream();
                         osPipe.obtain();
                         OutputStream os = osPipe.open();
 
-                        final byte[] data = new byte[1024 * 4];
+                        final byte[] data = new byte[1024 * 8];
                         long receivedSize = 0;
 
-                        while (!Thread.currentThread().isInterrupted()) {
-                            int bytesRead = is.read(data);
-                            if (bytesRead == -1) {
-                                response.close();
-                                break;
-                            }
-                            os.write(data, 0, bytesRead);
-                            receivedSize += bytesRead;
-                            // Update page percent
-                            if (contentLength > 0) {
-                                mPagePercentMap.put(index, (float) receivedSize / contentLength);
-                            }
-                            if (receivedSize == receiveBytesBefore) {
-                                if (downloadSpeedZeroTimeCount == null) {
-                                    try {
-                                        downloadSpeedZeroTimeCount = new Timer();
-                                        cancelDownload = false;
-                                        downloadSpeedZeroTimeCount.schedule(new TimeCount(), 3000);
-                                    } catch (Throwable e) {
-                                        Analytics.recordException(e);
-                                    }
-                                }
-                                if (cancelDownload) {
-                                    cancelTimeCount();
-                                    response.close();
+                        okio.BufferedSource source = okio.Okio.buffer(responseBody.source());
+                        try {
+                            while (!Thread.currentThread().isInterrupted()) {
+                                int bytesRead = source.read(data);
+                                if (bytesRead == -1) {
                                     break;
                                 }
-                            } else {
-                                cancelTimeCount();
-                                receiveBytesBefore = receivedSize;
+                                os.write(data, 0, bytesRead);
+                                receivedSize += bytesRead;
+                                // Update page percent
+                                if (contentLength > 0) {
+                                    mPagePercentMap.put(index, (float) receivedSize / contentLength);
+                                }
+                                if (receivedSize == receiveBytesBefore) {
+                                    if (downloadSpeedZeroTimeCount == null) {
+                                        try {
+                                            downloadSpeedZeroTimeCount = new Timer();
+                                            cancelDownload = false;
+                                            downloadSpeedZeroTimeCount.schedule(new TimeCount(), 3000);
+                                        } catch (Throwable e) {
+                                            Analytics.recordException(e);
+                                        }
+                                    }
+                                    if (cancelDownload) {
+                                        cancelTimeCount();
+                                        break;
+                                    }
+                                } else {
+                                    cancelTimeCount();
+                                    receiveBytesBefore = receivedSize;
+                                }
+                                // Notify listener
+                                notifyPageDownload(index, contentLength, receivedSize, bytesRead);
                             }
-                            // Notify listener
-                            notifyPageDownload(index, contentLength, receivedSize, bytesRead);
+                        } finally {
+                            source.close();
                         }
                         os.flush();
+                        response.close();
 
                         // check download size
                         if (contentLength >= 0) {
@@ -1554,6 +1584,7 @@ public final class SpiderQueen implements Runnable {
                     forceHtml = true;
                 } finally {
                     IOUtils.closeQuietly(is);
+                    ensureMemory();
 
                     if (DEBUG_LOG) {
                         Log.d(TAG, "End download image " + index);

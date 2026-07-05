@@ -44,14 +44,8 @@
         <item>PP-OCRv5 (推荐，需下载模型)</item>
         <item>Tesseract OCR</item>
         <item>系统OCR (ML Kit)</item>
-        <item>自定义ONNX模型</item>
     </string-array>
 
-    <!-- OCR模型选择 -->
-    <string-array name="ocr_model_entries">
-        <item>PP-OCRv6_medium_rec (推荐，支持50种语言)</item>
-        <item>PP-OCRv5 (完整OCR流水线)</item>
-        <item>PaddleOCR-VL (视觉语言模型)</item>
-    </string-array>
+
 
 </resources>
