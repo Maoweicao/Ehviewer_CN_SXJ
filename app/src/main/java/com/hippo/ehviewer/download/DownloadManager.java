@@ -779,7 +779,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             if (Settings.getAdvancedDownloadSortEnabled()) {
                 applyAdvancedSort(mWaitList);
             }
-            ensureDownload();
+            SimpleHandler.getInstance().post(this::ensureDownload);
         }
 
         // Notify
