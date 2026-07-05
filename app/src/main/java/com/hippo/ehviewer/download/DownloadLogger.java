@@ -9,6 +9,8 @@ import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.unifile.UniFile;
 
 import java.io.File;
@@ -78,11 +80,35 @@ public class DownloadLogger {
     }
     
     /**
-     * 记录下载开始日志
+     * 记录下载开始日志（包含完整下载信息）
      */
+    public void logDownloadStart(@NonNull DownloadInfo info) {
+        if (!mIsLoggingEnabled) return;
+
+        String categoryStr = EhUtils.getCategory(info.category);
+        String ratingStr = String.format(Locale.getDefault(), "%.1f", info.rating);
+        String titleSuitable = EhUtils.getSuitableTitle(info);
+        String message = String.format(Locale.getDefault(),
+            "下载开始 | GID:%d | Token:%s | 标题:%s | 标题(JPN):%s | 分类:%s | 上传者:%s | 评分:%s | 页数:%d | 发布时间:%s | 标签:%s | 缩略图:%s",
+            info.gid, info.token, titleSuitable, 
+            info.titleJpn != null ? info.titleJpn : "N/A",
+            categoryStr != null ? categoryStr : "N/A",
+            info.uploader != null ? info.uploader : "N/A",
+            ratingStr,
+            info.pages,
+            info.posted != null ? info.posted : "N/A",
+            info.label != null ? info.label : "默认",
+            info.thumb != null ? info.thumb : "N/A");
+        log(LogLevel.INFO, "DownloadStart", message, String.valueOf(info.gid), titleSuitable);
+    }
+
+    /**
+     * @deprecated Use {@link #logDownloadStart(DownloadInfo)} instead
+     */
+    @Deprecated
     public void logDownloadStart(@NonNull String gid, @NonNull String title, int totalPages) {
         if (!mIsLoggingEnabled) return;
-        
+
         String message = String.format(Locale.getDefault(),
             "下载开始 - GID: %s, 标题: %s, 总页数: %d", gid, title, totalPages);
         log(LogLevel.INFO, "DownloadStart", message, gid, title);

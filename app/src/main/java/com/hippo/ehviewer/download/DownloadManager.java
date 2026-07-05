@@ -349,6 +349,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             info.legacy = -1;
             // Update in DB
             EhDB.putDownloadInfo(info);
+            // Log download start with full info
+            DownloadLogger.getInstance().logDownloadStart(info);
             // Start speed count
             mSpeedReminder.start();
             // Notify start downloading
