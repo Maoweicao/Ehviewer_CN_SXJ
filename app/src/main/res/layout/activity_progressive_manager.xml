@@ -1,91 +1,116 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical">
-
-    <com.google.android.material.appbar.MaterialToolbar
-        android:id="@+id/toolbar"
-        android:layout_width="match_parent"
-        android:layout_height="?attr/actionBarSize"
-        android:background="?attr/colorPrimary"
-        app:navigationIcon="@drawable/ic_back"
-        app:title="@string/lab_progressive_manager"
-        app:titleTextColor="@android:color/white" />
+    android:orientation="vertical"
+    android:padding="16dp">
 
     <LinearLayout
+        android:id="@+id/header_panel"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:gravity="center">
 
-        <LinearLayout
-            android:id="@+id/header_panel"
+        <TextView
+            android:id="@+id/status_text"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
+            android:text="@string/progressive_scan_ready"
+            android:textSize="16sp"
+            android:textColor="?android:attr/textColorPrimary"
+            android:gravity="center"
+            android:padding="16dp" />
+
+        <ProgressBar
+            android:id="@+id/progress_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            android:max="100" />
+
+        <LinearLayout
+            android:id="@+id/step_buttons"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
             android:gravity="center">
-
-            <TextView
-                android:id="@+id/status_text"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="@string/progressive_scan_ready"
-                android:textSize="16sp"
-                android:textColor="?android:attr/textColorPrimary"
-                android:gravity="center"
-                android:padding="16dp" />
-
-            <ProgressBar
-                android:id="@+id/progress_bar"
-                style="?android:attr/progressBarStyleHorizontal"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:visibility="gone"
-                android:max="100" />
 
             <Button
                 android:id="@+id/btn_scan"
-                android:layout_width="match_parent"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/progressive_scan_start"
-                android:textSize="16sp"
+                android:layout_weight="1"
+                android:text="@string/progressive_step_scan"
+                android:textSize="14sp"
                 android:textColor="@android:color/white"
                 android:backgroundTint="?attr/colorPrimary"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="8dp" />
+                android:layout_margin="2dp" />
 
             <Button
-                android:id="@+id/btn_merge_all"
-                android:layout_width="match_parent"
+                android:id="@+id/btn_generate_plan"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="@string/progressive_merge_all"
-                android:textSize="16sp"
+                android:layout_weight="1"
+                android:text="@string/progressive_step_plan"
+                android:textSize="14sp"
+                android:textColor="@android:color/white"
+                android:backgroundTint="?attr/colorPrimary"
                 android:visibility="gone"
-                android:layout_marginBottom="16dp" />
+                android:layout_margin="2dp" />
+
+            <Button
+                android:id="@+id/btn_confirm_merge"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/progressive_step_merge"
+                android:textSize="14sp"
+                android:textColor="@android:color/white"
+                android:backgroundTint="#FF5722"
+                android:visibility="gone"
+                android:layout_margin="2dp" />
 
         </LinearLayout>
 
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_view"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:clipToPadding="false"
-            android:visibility="gone" />
-
-        <TextView
-            android:id="@+id/empty_text"
+        <LinearLayout
+            android:id="@+id/backup_panel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="@string/progressive_scan_empty"
-            android:textSize="14sp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:gravity="center"
-            android:padding="32dp"
-            android:visibility="gone" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone"
+            android:layout_marginTop="8dp">
+
+            <CheckBox
+                android:id="@+id/cb_backup"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/progressive_backup_checkbox"
+                android:textSize="14sp" />
+
+        </LinearLayout>
 
     </LinearLayout>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/empty_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/progressive_scan_empty"
+        android:textSize="14sp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="gone" />
 
 </LinearLayout>

@@ -7,24 +7,34 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 import android.view.View;
+import android.widget.CheckBox;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AlertDialog;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.task.BackgroundTask;
 import com.hippo.ehviewer.dao.DownloadInfo;
+import com.hippo.ehviewer.task.ChainMergeEntry;
+import com.hippo.ehviewer.task.ChainMergeStatus;
+import com.hippo.ehviewer.task.PlanStatus;
+import com.hippo.ehviewer.task.ProgressiveBackupTask;
+import com.hippo.ehviewer.task.ProgressiveMergeAllTask;
+import com.hippo.ehviewer.task.ProgressiveMergePlan;
 import com.hippo.ehviewer.task.ProgressiveMergeTask;
+import com.hippo.ehviewer.task.ProgressivePlanManager;
 import com.hippo.ehviewer.task.ProgressiveScanTask;
 import com.hippo.ehviewer.ui.GalleryActivity;
-import com.hippo.ehviewer.ui.EhActivity;
+import com.hippo.ehviewer.ui.ToolbarActivity;
 import com.hippo.ehviewer.ui.fragment.lab.ProgressiveChainAdapter;
 
 import java.util.ArrayList;
@@ -32,7 +42,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-public class ProgressiveManagerActivity extends EhActivity
+public class ProgressiveManagerActivity extends ToolbarActivity
         implements ProgressiveChainAdapter.OnChainActionListener {
 
     private static final String TAG = "ProgressiveManager";
@@ -42,9 +52,13 @@ public class ProgressiveManagerActivity extends EhActivity
     private TextView statusText;
     private ProgressBar progressBar;
     private MaterialButton btnScan;
-    private MaterialButton btnMergeAll;
+    private MaterialButton btnGeneratePlan;
+    private MaterialButton btnConfirmMerge;
     private RecyclerView recyclerView;
     private TextView emptyText;
+    private LinearLayout stepButtons;
+    private LinearLayout backupPanel;
+    private CheckBox cbBackup;
 
     private ProgressiveChainAdapter adapter;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -53,19 +67,29 @@ public class ProgressiveManagerActivity extends EhActivity
     private boolean merging = false;
     private List<ProgressiveScanTask.ProgressiveChain> currentResults;
     private final Set<Integer> ignoredChainIds = new HashSet<>();
+    private ProgressiveMergePlan currentPlan;
+    private String activeTaskId;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_progressive_manager);
 
-        MaterialToolbar toolbar = findViewById(R.id.toolbar);
-        toolbar.setNavigationOnClickListener(v -> finish());
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            actionBar.setDisplayHomeAsUpEnabled(true);
+            actionBar.setTitle(R.string.lab_progressive_manager);
+        }
+        setNavigationIcon(R.drawable.ic_back);
 
         statusText = findViewById(R.id.status_text);
         progressBar = findViewById(R.id.progress_bar);
         btnScan = findViewById(R.id.btn_scan);
-        btnMergeAll = findViewById(R.id.btn_merge_all);
+        btnGeneratePlan = findViewById(R.id.btn_generate_plan);
+        btnConfirmMerge = findViewById(R.id.btn_confirm_merge);
+        stepButtons = findViewById(R.id.step_buttons);
+        backupPanel = findViewById(R.id.backup_panel);
+        cbBackup = findViewById(R.id.cb_backup);
         recyclerView = findViewById(R.id.recycler_view);
         emptyText = findViewById(R.id.empty_text);
 
@@ -75,10 +99,103 @@ public class ProgressiveManagerActivity extends EhActivity
         recyclerView.setAdapter(adapter);
 
         btnScan.setOnClickListener(v -> startScan());
-        btnMergeAll.setOnClickListener(v -> showMergeAllConfirm());
+        btnGeneratePlan.setOnClickListener(v -> generateMergePlan());
+        btnConfirmMerge.setOnClickListener(v -> showConfirmMergeDialog());
 
         loadIgnoredChains();
         loadExistingResults();
+        restoreActiveTask();
+    }
+
+    private void restoreActiveTask() {
+        var activeTask = BackgroundTaskManager.getInstance()
+                .getTaskStatusManager().getActiveUniqueNonDownloadTask();
+        if (activeTask == null) return;
+
+        activeTaskId = activeTask.getTaskId();
+        var taskType = activeTask.getTaskType();
+
+        if (taskType == BackgroundTask.TaskType.SCAN) {
+            scanning = true;
+            disableAllButtons();
+            btnScan.setText(R.string.progressive_scan_scanning);
+            statusText.setText(R.string.progressive_scan_scanning);
+            progressBar.setVisibility(View.VISIBLE);
+            progressBar.setProgress(activeTask.getProgressPercentage());
+            recyclerView.setVisibility(View.GONE);
+            emptyText.setVisibility(View.GONE);
+            btnGeneratePlan.setVisibility(View.GONE);
+            btnConfirmMerge.setVisibility(View.GONE);
+            backupPanel.setVisibility(View.GONE);
+            startScanPoller();
+        } else if (taskType == BackgroundTask.TaskType.MERGE) {
+            merging = true;
+            disableAllButtons();
+            progressBar.setVisibility(View.VISIBLE);
+            progressBar.setProgress(activeTask.getProgressPercentage());
+            if (activeTask.getProgressDetail() != null) {
+                statusText.setText(activeTask.getProgressDetail());
+            }
+            startMergePoller();
+        }
+    }
+
+    private void startScanPoller() {
+        progressPoller = new Runnable() {
+            @Override
+            public void run() {
+                if (isDestroyed() || isFinishing()) return;
+                if (activeTaskId == null) return;
+                var info = BackgroundTaskManager.getInstance()
+                        .getTaskStatusManager().getTaskInfo(activeTaskId);
+                if (info != null) {
+                    int progress = info.getProgressPercentage();
+                    if (progress >= 0) progressBar.setProgress(progress);
+                    String detail = info.getProgressDetail();
+                    if (detail != null && !detail.isEmpty()) statusText.setText(detail);
+                    if (info.isCompleted()) { activeTaskId = null; onScanComplete(); return; }
+                    if (info.isCancelled()) { activeTaskId = null; onScanFailed("Scan cancelled"); return; }
+                    if (info.getErrorMessage() != null) { activeTaskId = null; onScanFailed(info.getErrorMessage()); return; }
+                }
+                mainHandler.postDelayed(this, 500);
+            }
+        };
+        mainHandler.postDelayed(progressPoller, 500);
+    }
+
+    private void startMergePoller() {
+        progressPoller = new Runnable() {
+            @Override
+            public void run() {
+                if (isDestroyed() || isFinishing()) return;
+                if (activeTaskId == null) return;
+                var info = BackgroundTaskManager.getInstance()
+                        .getTaskStatusManager().getTaskInfo(activeTaskId);
+                if (info != null) {
+                    int progress = info.getProgressPercentage();
+                    if (progress >= 0) progressBar.setProgress(progress);
+                    String detail = info.getProgressDetail();
+                    if (detail != null && !detail.isEmpty()) statusText.setText(detail);
+                    if (info.isCompleted()) { activeTaskId = null; onPlanMergeComplete(); return; }
+                    if (info.isCancelled()) {
+                        activeTaskId = null; merging = false;
+                        progressBar.setVisibility(View.GONE);
+                        enableAllButtons(currentResults != null && !currentResults.isEmpty());
+                        statusText.setText("Merge cancelled");
+                        return;
+                    }
+                    if (info.getErrorMessage() != null) {
+                        activeTaskId = null; merging = false;
+                        progressBar.setVisibility(View.GONE);
+                        enableAllButtons(currentResults != null && !currentResults.isEmpty());
+                        statusText.setText("Merge failed: " + info.getErrorMessage());
+                        return;
+                    }
+                }
+                mainHandler.postDelayed(this, 800);
+            }
+        };
+        mainHandler.postDelayed(progressPoller, 800);
     }
 
     private void loadIgnoredChains() {
@@ -124,26 +241,117 @@ public class ProgressiveManagerActivity extends EhActivity
                 showResults(results);
                 statusText.setText(getString(R.string.progressive_chain_count, results.size()));
                 btnScan.setText(R.string.progressive_scan_refresh);
-                btnMergeAll.setVisibility(View.VISIBLE);
+                showStepTwo();
             }
+        }
+
+        ProgressiveMergePlan plan = ProgressivePlanManager.loadLatestMergePlan();
+        if (plan != null && !plan.isExpired()) {
+            currentPlan = plan;
+            showStepThree();
+            statusText.setText(getString(R.string.progressive_plan_generated, "ProgressiveScan", plan.getChains().size()));
+            cbBackup.setChecked(plan.getBackupEnabled());
         }
     }
 
-    private void showMergeAllConfirm() {
-        if (currentResults == null || currentResults.isEmpty()) return;
-        int count = currentResults.size();
+    private void showStepTwo() {
+        btnScan.setText(R.string.progressive_scan_refresh);
+        btnGeneratePlan.setVisibility(View.VISIBLE);
+        btnGeneratePlan.setEnabled(true);
+        btnConfirmMerge.setVisibility(View.GONE);
+        backupPanel.setVisibility(View.GONE);
+    }
+
+    private void showStepThree() {
+        btnScan.setText(R.string.progressive_scan_refresh);
+        btnGeneratePlan.setVisibility(View.VISIBLE);
+        btnGeneratePlan.setEnabled(true);
+        btnConfirmMerge.setVisibility(View.VISIBLE);
+        btnConfirmMerge.setEnabled(true);
+        backupPanel.setVisibility(View.VISIBLE);
+    }
+
+    private void generateMergePlan() {
+        if (currentResults == null || currentResults.isEmpty()) {
+            Toast.makeText(this, R.string.progressive_scan_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String planId = "plan_" + System.currentTimeMillis();
+        ProgressiveMergePlan plan = new ProgressiveMergePlan(planId);
+        plan.setStatus(PlanStatus.PENDING);
+        plan.setBackupEnabled(cbBackup.isChecked());
+        plan.setBackupFilePath(null);
+        plan.setCompletedChains(0);
+
+        for (ProgressiveScanTask.ProgressiveChain chain : currentResults) {
+            List<ProgressiveScanTask.FolderInfo> folders = chain.getFolders();
+            if (folders.isEmpty()) continue;
+
+            long targetGid = adapter.getSelectedTargetGid(chain.getId(), chain);
+            if (targetGid <= 0) {
+                var mc = chain.getMostComplete();
+                targetGid = mc != null ? mc.getGid() : folders.get(0).getGid();
+            }
+
+            List<Long> sourceGids = new ArrayList<>();
+            for (var f : folders) {
+                if (f.getGid() != targetGid) {
+                    sourceGids.add(f.getGid());
+                }
+            }
+
+            ChainMergeEntry entry = new ChainMergeEntry(
+                    chain.getId(),
+                    chain.getDisplayName(),
+                    targetGid,
+                    sourceGids,
+                    folders.size()
+            );
+            plan.getChains().add(entry);
+        }
+
+        if (ProgressivePlanManager.saveMergePlan(plan)) {
+            currentPlan = plan;
+            showStepThree();
+            String msg = getString(R.string.progressive_plan_generated, "ProgressiveScan", plan.getChains().size());
+            statusText.setText(msg);
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        } else {
+            Toast.makeText(this, "Failed to save merge plan", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showConfirmMergeDialog() {
+        if (currentPlan == null || currentPlan.getChains().isEmpty()) {
+            Toast.makeText(this, "No merge plan available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean willBackup = cbBackup.isChecked();
+        String msg = getString(R.string.progressive_merge_all_confirm, currentPlan.getChains().size());
+        if (willBackup) {
+            msg += "\n\n" + getString(R.string.progressive_backup_checkbox);
+        }
+
         new AlertDialog.Builder(this)
                 .setTitle(R.string.progressive_merge_all)
-                .setMessage(getString(R.string.progressive_merge_all_confirm, count))
-                .setPositiveButton(android.R.string.ok, (d, w) -> startMergeAll())
+                .setMessage(msg)
+                .setPositiveButton(android.R.string.ok, (d, w) -> {
+                    currentPlan.setBackupEnabled(willBackup);
+                    ProgressivePlanManager.saveMergePlan(currentPlan);
+                    if (willBackup) {
+                        startBackupThenMerge();
+                    } else {
+                        startPlanMerge();
+                    }
+                })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
     }
 
-    private void startMergeAll() {
+    private void startBackupThenMerge() {
         if (merging || currentResults == null || currentResults.isEmpty()) return;
-
-        Log.i(TAG, "startMergeAll: totalChains=" + currentResults.size());
 
         BackgroundTaskManager taskManager = BackgroundTaskManager.getInstance();
         if (taskManager.getTaskStatusManager().getActiveUniqueNonDownloadTask() != null) {
@@ -152,68 +360,28 @@ public class ProgressiveManagerActivity extends EhActivity
         }
 
         merging = true;
-        disableButtons();
+        disableAllButtons();
+        statusText.setText(R.string.progressive_backup_task_name);
 
-        int totalChains = currentResults.size();
-        final int[] completed = {0};
-        final int[] failed = {0};
+        ProgressiveBackupTask backupTask = new ProgressiveBackupTask(this, currentResults);
+        taskManager.submitBackgroundTask(backupTask);
 
-        Runnable processNext = new Runnable() {
-            @Override
-            public void run() {
-                if (completed[0] + failed[0] >= totalChains) {
-                    Log.i(TAG, "startMergeAll: all " + totalChains + " chains processed, failed=" + failed[0]);
-                    onMergeAllComplete(totalChains, failed[0]);
-                    return;
-                }
-
-                ProgressiveScanTask.ProgressiveChain chain = currentResults.get(completed[0] + failed[0]);
-                var mostComplete = chain.getMostComplete();
-                long targetGid = mostComplete != null ? mostComplete.getGid() : chain.getFolders().get(0).getGid();
-
-                Log.i(TAG, "startMergeAll: chain " + (completed[0] + failed[0] + 1) + "/" + totalChains
-                        + " targetGid=" + targetGid + " name=" + chain.getDisplayName());
-
-                List<Long> sourceGids = new ArrayList<>();
-                for (var f : chain.getFolders()) {
-                    if (f.getGid() != targetGid) {
-                        sourceGids.add(f.getGid());
-                    }
-                }
-
-                if (sourceGids.isEmpty()) {
-                    completed[0]++;
-                    mainHandler.post(this);
-                    return;
-                }
-
-                statusText.setText(getString(R.string.progressive_merge_all_started, totalChains));
-
-                ProgressiveMergeTask mergeTask = new ProgressiveMergeTask(ProgressiveManagerActivity.this, targetGid, sourceGids);
-                BackgroundTaskManager.getInstance().submitBackgroundTask(mergeTask);
-
-                pollMergeTask(mergeTask.getTaskId(),
-                        () -> { completed[0]++; mainHandler.post(this); },
-                        () -> { failed[0]++; mainHandler.post(this); });
-            }
-        };
-
-        mainHandler.post(processNext);
-    }
-
-    private void pollMergeTask(String taskId, Runnable onSuccess, Runnable onFailure) {
+        final String taskId = backupTask.getTaskId();
         mainHandler.postDelayed(new Runnable() {
             @Override
             public void run() {
                 if (isDestroyed() || isFinishing()) return;
-                var info = BackgroundTaskManager.getInstance().getTaskStatusManager().getTaskInfo(taskId);
+                var info = taskManager.getTaskStatusManager().getTaskInfo(taskId);
                 if (info != null && info.isCompleted()) {
-                    onSuccess.run();
+                    currentPlan.setBackupFilePath(backupTask.getBackupFileNames().isEmpty()
+                            ? null : backupTask.getBackupFileNames().get(0));
+                    ProgressivePlanManager.saveMergePlan(currentPlan);
+                    statusText.setText(R.string.progressive_merge_task_name);
+                    startPlanMerge();
                 } else if (info != null && (info.isCancelled() || info.getErrorMessage() != null)) {
-                    Log.w(TAG, "Merge task failed: " + taskId
-                            + " error=" + info.getErrorMessage()
-                            + " cancelled=" + info.isCancelled());
-                    onFailure.run();
+                    merging = false;
+                    enableAllButtons(currentResults != null && !currentResults.isEmpty());
+                    statusText.setText("Backup failed: " + (info.getErrorMessage() != null ? info.getErrorMessage() : "cancelled"));
                 } else {
                     mainHandler.postDelayed(this, 800);
                 }
@@ -221,18 +389,57 @@ public class ProgressiveManagerActivity extends EhActivity
         }, 800);
     }
 
-    private void onMergeAllComplete(int totalCount, int failedCount) {
-        Log.i(TAG, "onMergeAllComplete: " + totalCount + " chains, " + failedCount + " failed");
-        merging = false;
-        enableButtons();
-        if (failedCount > 0) {
-            String msg = getString(R.string.progressive_merge_all_partial, (totalCount - failedCount), failedCount);
-            statusText.setText(msg);
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-        } else {
-            statusText.setText(R.string.progressive_merge_all_done);
-            Toast.makeText(this, R.string.progressive_merge_all_done, Toast.LENGTH_SHORT).show();
+    private void startPlanMerge() {
+        if (currentPlan == null || currentPlan.getChains().isEmpty()) {
+            merging = false;
+            enableAllButtons(currentResults != null && !currentResults.isEmpty());
+            return;
         }
+
+        BackgroundTaskManager taskManager = BackgroundTaskManager.getInstance();
+        if (taskManager.getTaskStatusManager().getActiveUniqueNonDownloadTask() != null) {
+            Toast.makeText(this, R.string.background_task_unique_running, Toast.LENGTH_SHORT).show();
+            merging = false;
+            enableAllButtons(currentResults != null && !currentResults.isEmpty());
+            return;
+        }
+
+        currentPlan.setStatus(PlanStatus.IN_PROGRESS);
+        ProgressivePlanManager.saveMergePlan(currentPlan);
+
+        int totalChains = currentPlan.getChains().size();
+        statusText.setText(getString(R.string.progressive_merge_all_started, totalChains));
+
+        ProgressiveMergeAllTask mergeAllTask = new ProgressiveMergeAllTask(this, currentPlan);
+        taskManager.submitBackgroundTask(mergeAllTask);
+
+        activeTaskId = mergeAllTask.getTaskId();
+        progressBar.setVisibility(View.VISIBLE);
+        progressBar.setProgress(0);
+        startMergePoller();
+    }
+
+    private void onPlanMergeComplete() {
+        merging = false;
+        progressBar.setVisibility(View.GONE);
+
+        if (currentPlan != null) {
+            boolean hasFailures = false;
+            for (ChainMergeEntry entry : currentPlan.getChains()) {
+                if (entry.getStatus() == ChainMergeStatus.FAILED) {
+                    hasFailures = true;
+                    break;
+                }
+            }
+            currentPlan.setStatus(hasFailures ? PlanStatus.FAILED : PlanStatus.COMPLETED);
+            ProgressivePlanManager.saveMergePlan(currentPlan);
+        }
+
+        statusText.setText(R.string.progressive_merge_all_done);
+        Toast.makeText(this, R.string.progressive_merge_all_done, Toast.LENGTH_SHORT).show();
+        enableAllButtons(false);
+        btnScan.setText(R.string.progressive_scan_refresh);
+        currentPlan = null;
         startScan();
     }
 
@@ -246,43 +453,27 @@ public class ProgressiveManagerActivity extends EhActivity
         }
 
         scanning = true;
-        disableButtons();
+        disableAllButtons();
         btnScan.setText(R.string.progressive_scan_scanning);
         statusText.setText(R.string.progressive_scan_scanning);
         progressBar.setVisibility(View.VISIBLE);
         progressBar.setProgress(0);
         recyclerView.setVisibility(View.GONE);
         emptyText.setVisibility(View.GONE);
-        btnMergeAll.setVisibility(View.GONE);
+        btnGeneratePlan.setVisibility(View.GONE);
+        btnConfirmMerge.setVisibility(View.GONE);
+        backupPanel.setVisibility(View.GONE);
+        currentPlan = null;
 
         ProgressiveScanTask task = new ProgressiveScanTask(this);
         taskManager.submitBackgroundTask(task);
 
-        final String taskId = task.getTaskId();
-        progressPoller = new Runnable() {
-            @Override
-            public void run() {
-                if (!scanning) return;
-                var info = taskManager.getTaskStatusManager().getTaskInfo(taskId);
-                if (info != null) {
-                    int progress = info.getProgressPercentage();
-                    if (progress >= 0) progressBar.setProgress(progress);
-                    String detail = info.getProgressDetail();
-                    if (detail != null && !detail.isEmpty()) statusText.setText(detail);
-                    if (info.isCompleted()) { onScanComplete(); return; }
-                    if (info.isCancelled()) { onScanFailed("Scan cancelled"); return; }
-                    if (info.getErrorMessage() != null) { onScanFailed(info.getErrorMessage()); return; }
-                }
-                mainHandler.postDelayed(this, 500);
-            }
-        };
-        mainHandler.postDelayed(progressPoller, 500);
+        activeTaskId = task.getTaskId();
+        startScanPoller();
     }
 
     private void onScanComplete() {
         scanning = false;
-        enableButtons();
-        btnScan.setText(R.string.progressive_scan_refresh);
         progressBar.setVisibility(View.GONE);
 
         List<ProgressiveScanTask.ProgressiveChain> results = ProgressiveScanTask.loadResults();
@@ -291,22 +482,25 @@ public class ProgressiveManagerActivity extends EhActivity
         if (results != null && !results.isEmpty()) {
             showResults(results);
             statusText.setText(getString(R.string.progressive_chain_count, results.size()));
-            btnMergeAll.setVisibility(View.VISIBLE);
+            showStepTwo();
         } else {
             recyclerView.setVisibility(View.GONE);
             emptyText.setVisibility(View.VISIBLE);
             statusText.setText(R.string.progressive_scan_empty);
-            btnMergeAll.setVisibility(View.GONE);
         }
+
+        enableAllButtons(results != null && !results.isEmpty());
+        btnScan.setText(R.string.progressive_scan_refresh);
+        currentPlan = null;
     }
 
     private void onScanFailed(String error) {
         scanning = false;
-        enableButtons();
-        btnScan.setText(R.string.progressive_scan_start);
         progressBar.setVisibility(View.GONE);
         statusText.setText(getString(R.string.progressive_scan_error, error));
         Toast.makeText(this, getString(R.string.progressive_scan_error, error), Toast.LENGTH_LONG).show();
+        enableAllButtons(currentResults != null && !currentResults.isEmpty());
+        btnScan.setText(R.string.progressive_scan_start);
     }
 
     private void showResults(List<ProgressiveScanTask.ProgressiveChain> results) {
@@ -315,25 +509,45 @@ public class ProgressiveManagerActivity extends EhActivity
         emptyText.setVisibility(View.GONE);
     }
 
+    private void disableAllButtons() {
+        btnScan.setEnabled(false);
+        btnGeneratePlan.setEnabled(false);
+        btnConfirmMerge.setEnabled(false);
+        cbBackup.setEnabled(false);
+    }
+
+    private void enableAllButtons(boolean hasResults) {
+        btnScan.setEnabled(true);
+        if (hasResults) {
+            btnGeneratePlan.setEnabled(true);
+            btnGeneratePlan.setVisibility(View.VISIBLE);
+            if (currentPlan != null) {
+                btnConfirmMerge.setEnabled(true);
+                btnConfirmMerge.setVisibility(View.VISIBLE);
+                backupPanel.setVisibility(View.VISIBLE);
+            }
+        }
+        cbBackup.setEnabled(true);
+    }
+
     private void disableButtons() {
         btnScan.setEnabled(false);
-        btnMergeAll.setEnabled(false);
+        btnGeneratePlan.setEnabled(false);
+        btnConfirmMerge.setEnabled(false);
     }
 
     private void enableButtons() {
         btnScan.setEnabled(true);
-        btnMergeAll.setEnabled(true);
+        btnGeneratePlan.setEnabled(true);
+        btnConfirmMerge.setEnabled(true);
     }
 
     @Override
     public void onMerge(long targetGid, List<Long> sourceGids) {
         if (sourceGids.isEmpty()) {
-            Log.w(TAG, "onMerge: no source folders to merge");
             Toast.makeText(this, "No source folders to merge", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        Log.i(TAG, "onMerge: targetGid=" + targetGid + ", sourceGids=" + sourceGids + ", count=" + sourceGids.size());
 
         BackgroundTaskManager taskManager = BackgroundTaskManager.getInstance();
         if (taskManager.getTaskStatusManager().getActiveUniqueNonDownloadTask() != null) {
@@ -355,10 +569,8 @@ public class ProgressiveManagerActivity extends EhActivity
                 if (isDestroyed() || isFinishing()) return;
                 var info = taskManager.getTaskStatusManager().getTaskInfo(taskId);
                 if (info != null && info.isCompleted()) {
-                    Log.i(TAG, "onMerge: task completed, targetGid=" + targetGid);
                     statusText.setText(R.string.progressive_merge_complete);
                     enableButtons();
-                    // Re-scan to reflect merged/deleted folders
                     startScan();
                 } else if (info != null && (info.isCancelled() || info.getErrorMessage() != null)) {
                     statusText.setText(R.string.progressive_merge_failed);
@@ -381,7 +593,9 @@ public class ProgressiveManagerActivity extends EhActivity
                 recyclerView.setVisibility(View.GONE);
                 emptyText.setVisibility(View.VISIBLE);
                 statusText.setText(R.string.progressive_scan_empty);
-                btnMergeAll.setVisibility(View.GONE);
+                btnGeneratePlan.setVisibility(View.GONE);
+                btnConfirmMerge.setVisibility(View.GONE);
+                backupPanel.setVisibility(View.GONE);
             }
         }
     }

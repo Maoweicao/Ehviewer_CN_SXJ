@@ -42,11 +42,11 @@ public class DatabaseViewerActivity extends EhActivity {
         switch (theme) {
             case Settings.THEME_LIGHT:
             default:
-                return R.style.AppTheme;
+                return R.style.AppTheme_Toolbar;
             case Settings.THEME_DARK:
-                return R.style.AppTheme_Dark;
+                return R.style.AppTheme_Toolbar_Dark;
             case Settings.THEME_BLACK:
-                return R.style.AppTheme_Black;
+                return R.style.AppTheme_Toolbar_Black;
         }
     }
 

@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
-import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.spider.SpiderQueen
@@ -17,10 +16,7 @@ import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
-import java.text.SimpleDateFormat
 import java.util.Collections
-import java.util.Date
-import java.util.Locale
 import kotlin.coroutines.coroutineContext
 
 class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
@@ -48,28 +44,10 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         private const val TAG = "ProgressiveScanTask"
 
         @JvmStatic
-        fun getResultFilePath(): String {
-            val dir = Settings.getDownloadLocation() ?: return ""
-            val path = dir.uri?.path ?: return ""
-            return "$path/progressive_scan_result.json"
-        }
+        fun loadResults(): List<ProgressiveChain> = ProgressivePlanManager.loadScanResults()
 
         @JvmStatic
-        fun loadResults(): List<ProgressiveChain> {
-            val path = getResultFilePath()
-            if (path.isEmpty()) return emptyList()
-            val file = java.io.File(path)
-            if (!file.exists()) return emptyList()
-            return try {
-                val json = JSONObject(file.readText(StandardCharsets.UTF_8))
-                parseResults(json)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load results", e)
-                emptyList()
-            }
-        }
-
-        private fun parseResults(json: JSONObject): List<ProgressiveChain> {
+        fun parseResults(json: JSONObject): List<ProgressiveChain> {
             val results = mutableListOf<ProgressiveChain>()
             val chains = json.optJSONArray("chains") ?: return results
             for (i in 0 until chains.length()) {
@@ -317,145 +295,44 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
 
         for (component in components) {
             val sortedComponent = component.sortedBy { folderInfos[it].hashCount }
-            val componentEdges = edges.filter { (f, t) -> f in component && t in component }
-
-            val compAdj = Array(n) { mutableListOf<Int>() }
-            for ((f, t) in componentEdges) {
-                compAdj[f].add(t)
-            }
-
-            val chainsInComponent = extractMaximalChains(sortedComponent, compAdj)
-            for (chainIndices in chainsInComponent) {
-                if (chainIndices.size < 2) continue
-                val folders = chainIndices.map { idx ->
-                    val f = folderInfos[idx]
-                    FolderInfo(
-                        gid = f.gid,
-                        name = f.name,
-                        path = f.path,
-                        hashCount = f.hashCount,
-                        fileCount = f.fileCount,
-                        hasEhviewer = true,
-                        title = f.title
-                    )
-                }
-                val allHashes = mutableSetOf<String>()
-                chainIndices.forEach { idx -> allHashes.addAll(folderInfos[idx].hashes) }
-                val commonHashes = chainIndices.map { folderInfos[it].hashes }
-                    .reduce { acc, set -> acc.intersect(set) }
-
-                chains.add(
-                    ProgressiveChain(
-                        id = ++chainId,
-                        folders = folders,
-                        totalUniqueHashes = allHashes.size,
-                        commonHashes = commonHashes.size
-                    )
+            val folders = sortedComponent.map { idx ->
+                val f = folderInfos[idx]
+                FolderInfo(
+                    gid = f.gid,
+                    name = f.name,
+                    path = f.path,
+                    hashCount = f.hashCount,
+                    fileCount = f.fileCount,
+                    hasEhviewer = true,
+                    title = f.title
                 )
             }
-        }
+            val allHashes = mutableSetOf<String>()
+            sortedComponent.forEach { idx -> allHashes.addAll(folderInfos[idx].hashes) }
+            val commonHashes = sortedComponent.map { folderInfos[it].hashes }
+                .reduce { acc, set -> acc.intersect(set) }
 
-        return chains
-    }
-
-    private fun extractMaximalChains(
-        sortedIndices: List<Int>,
-        adj: Array<MutableList<Int>>
-    ): List<List<Int>> {
-        val chains = mutableListOf<List<Int>>()
-
-        val outDegree = IntArray(adj.size)
-        val inDegree = IntArray(adj.size)
-        for (u in sortedIndices) {
-            for (v in adj[u]) {
-                outDegree[u]++
-                inDegree[v]++
-            }
-        }
-
-        val starts = sortedIndices.filter { inDegree[it] == 0 && outDegree[it] > 0 }
-
-        for (start in starts) {
-            val chain = mutableListOf<Int>()
-            val visited = mutableSetOf<Int>()
-            val queue = ArrayDeque<Int>()
-            queue.add(start)
-            while (queue.isNotEmpty()) {
-                val u = queue.removeFirst()
-                if (u in visited) continue
-                visited.add(u)
-                chain.add(u)
-
-                val nextList = adj[u].filter { it in sortedIndices && it !in visited }
-                if (nextList.isNotEmpty()) {
-                    val bestNext = nextList.maxByOrNull { outDegree[it] } ?: nextList.first()
-                    queue.add(bestNext)
-                }
-            }
-            if (chain.size >= 2) {
-                chains.add(chain)
-            }
-        }
-
-        if (chains.isEmpty()) {
-            val visited = mutableSetOf<Int>()
-            for (u in sortedIndices) {
-                if (u in visited) continue
-                val chain = mutableListOf<Int>()
-                var cur = u
-                while (cur != -1 && cur !in visited) {
-                    visited.add(cur)
-                    chain.add(cur)
-                    cur = adj[cur].firstOrNull { it in sortedIndices && it !in visited } ?: -1
-                }
-                if (chain.size >= 2) {
-                    chains.add(chain)
-                }
-            }
+            chains.add(
+                ProgressiveChain(
+                    id = ++chainId,
+                    folders = folders,
+                    totalUniqueHashes = allHashes.size,
+                    commonHashes = commonHashes.size
+                )
+            )
         }
 
         return chains
     }
 
     private fun saveResults() {
-        try {
-            val dir = Settings.getDownloadLocation() ?: return
-            val resultFile = java.io.File(dir.uri.path, "progressive_scan_result.json")
-            val json = JSONObject()
-            json.put("version", "1.0")
-            json.put("scanTime", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
-            json.put("totalChains", scanResults.size)
-
-            val chainsArr = JSONArray()
-            for (chain in scanResults) {
-                val chainObj = JSONObject()
-                chainObj.put("id", chain.id)
-                chainObj.put("totalUniqueHashes", chain.totalUniqueHashes)
-                chainObj.put("commonHashes", chain.commonHashes)
-
-                val foldersArr = JSONArray()
-                for (f in chain.folders) {
-                    val fObj = JSONObject()
-                    fObj.put("gid", f.gid)
-                    fObj.put("name", f.name)
-                    fObj.put("path", f.path)
-                    fObj.put("hashCount", f.hashCount)
-                    fObj.put("fileCount", f.fileCount)
-                    fObj.put("hasEhviewer", f.hasEhviewer)
-                    fObj.put("title", f.title)
-                    foldersArr.put(fObj)
-                }
-                chainObj.put("folders", foldersArr)
-                chainsArr.put(chainObj)
-            }
-            json.put("chains", chainsArr)
-
-            resultFile.writeText(json.toString(2), StandardCharsets.UTF_8)
-            Log.d(TAG, "Results saved to " + resultFile.absolutePath)
-            appendTaskLog("Results saved to %s", resultFile.absolutePath)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to save results", e)
-            appendTaskLog("ERROR: Failed to save results: %s", e.message)
+        val scanTime = System.currentTimeMillis()
+        if (ProgressivePlanManager.saveScanResults(scanResults, scanTime)) {
+            Log.d(TAG, "Results saved to external ProgressiveScan dir")
+            appendTaskLog("Results saved (%d chains)", scanResults.size)
+        } else {
+            Log.e(TAG, "Failed to save results")
+            appendTaskLog("ERROR: Failed to save results")
         }
     }
 

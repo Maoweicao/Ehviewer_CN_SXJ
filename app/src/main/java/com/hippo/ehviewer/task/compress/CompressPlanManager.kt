@@ -294,17 +294,24 @@ object CompressPlanManager {
     }
 
     /**
-     * Execute a shell command and return stdout as string.
+     * Execute a shell command with timeout. Returns stdout or null on failure.
+     * Uses ProcessBuilder with merged error stream to prevent buffer deadlocks.
      */
-    private fun execShell(cmd: String): String? {
+    private fun execShell(cmd: String, timeoutSeconds: Long = 120): String? {
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", cmd))
+            val process = ProcessBuilder("sh", "-c", cmd)
+                .redirectErrorStream(true)
+                .start()
             val reader = BufferedReader(InputStreamReader(process.inputStream))
-            val result = reader.readText()
-            reader.close()
-            process.waitFor()
-            if (result.isBlank()) null else result
+            val result = reader.use { it.readText() }
+            val completed = process.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                Log.w(TAG, "Shell command timed out after ${timeoutSeconds}s: ${cmd.take(60)}...")
+                null
+            } else if (result.isBlank()) null else result
         } catch (e: Exception) {
+            Log.d(TAG, "Shell command failed: ${e.message}")
             null
         }
     }

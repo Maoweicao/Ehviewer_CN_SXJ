@@ -1247,6 +1247,9 @@ SSID: %1$s
     <string name="dialog_size_range_from_hint">最小值，例如 128MB</string>
     <string name="dialog_size_range_to_hint">最大值，例如 2GB</string>
     <string name="dialog_size_range_tip">支持 B/KB/MB/GB，不带单位默认按 MB。</string>
+    <string name="dialog_page_range_filter_label">页数范围（可选）</string>
+    <string name="dialog_page_range_from_hint">最少页数</string>
+    <string name="dialog_page_range_to_hint">最多页数</string>
     <string name="dialog_search_download_title">搜索下载画廊</string>
     <string name="dialog_search_options_label">搜索选项</string>
     <string name="reset">重置</string>
@@ -1682,6 +1685,9 @@ SSID: %1$s
     <!-- 递进关系文件夹管理 -->
     <string name="lab_progressive_manager">递进关系管理</string>
     <string name="lab_progressive_manager_summary">跨名称扫描已下载画廊的 .ehviewer 内容，检测递进关系并手动管理合并</string>
+    <string name="progressive_step_scan">第一步：扫描</string>
+    <string name="progressive_step_plan">第二步：生成合并计划</string>
+    <string name="progressive_step_merge">第三步：确认全部合并</string>
     <string name="progressive_scan_start">开始扫描</string>
     <string name="progressive_scan_refresh">重新扫描</string>
     <string name="progressive_scan_scanning">正在扫描文件夹…</string>
@@ -1689,12 +1695,14 @@ SSID: %1$s
     <string name="progressive_scan_empty">未发现递进关系。所有画廊内容互不包含。</string>
     <string name="progressive_scan_no_folders">未找到包含 .ehviewer 文件的文件夹。</string>
     <string name="progressive_scan_error">错误：%1$s</string>
+    <string name="progressive_scan_expired">扫描结果已过期（超过7天），请重新扫描。</string>
+    <string name="progressive_scan_date">扫描时间：%1$s</string>
     <string name="progressive_chain_count">发现 %1$d 条递进链</string>
     <string name="progressive_chain_depth">%1$d 个层级</string>
     <string name="progressive_chain_summary">%1$d 页公共，共 %2$d 页去重</string>
-    <string name="progressive_merge">合并（保留勾选）</string>
+    <string name="progressive_merge">合并（保留选中）</string>
     <string name="progressive_merge_all">全部合并（保留最多）</string>
-    <string name="progressive_merge_all_confirm">将对全部 %1$d 条链执行合并，每条链保留最完整版本。继续？</string>
+    <string name="progressive_merge_all_confirm">将对全部 %1$d 条链执行合并，每条链保留选定目标版本。继续？</string>
     <string name="progressive_merge_all_started">正在合并全部 %1$d 条链…</string>
     <string name="progressive_merge_all_done">全部链合并完成</string>
     <string name="progressive_merge_all_partial">%1$d 条链合并成功，%2$d 条失败</string>
@@ -1706,4 +1714,15 @@ SSID: %1$s
     <string name="progressive_merge_preparing">准备合并…</string>
     <string name="progressive_ignore">忽略</string>
     <string name="progressive_view_in_downloads">在下载列表查看</string>
+    <string name="progressive_plan_generate">生成合并计划</string>
+    <string name="progressive_plan_generated">合并计划已生成并保存到外置存储 (%1$s)\n共 %2$d 条链，请审计后确认合并</string>
+    <string name="progressive_plan_expired">合并计划已过期（超过7天），请重新生成。</string>
+    <string name="progressive_plan_confirm">确认全部合并</string>
+    <string name="progressive_backup_checkbox">合并前备份压缩到外置存储</string>
+    <string name="progressive_backup_task_name">递进关系备份</string>
+    <string name="progressive_backup_task_desc">正在备份 %1$d 条链涉及的全部画廊…</string>
+    <string name="progressive_target_label">目标：</string>
+    <string name="settings_help">帮助</string>
+    <string name="search_help_title">搜索语法说明</string>
+    <string name="search_help_summary">查看 E-Hentai 搜索语法规则和高级搜索技巧</string>
 </resources>

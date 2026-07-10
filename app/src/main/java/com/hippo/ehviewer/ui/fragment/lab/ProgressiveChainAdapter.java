@@ -3,9 +3,11 @@ package com.hippo.ehviewer.ui.fragment.lab;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -24,7 +26,7 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
 
     private final List<ProgressiveScanTask.ProgressiveChain> chains = new ArrayList<>();
     private final Map<Integer, Boolean> expandedMap = new HashMap<>();
-    private final Map<Integer, Long> selectedTargetMap = new HashMap<>();
+    private final Map<Integer, Integer> selectedTargetIndex = new HashMap<>();
 
     private OnChainActionListener listener;
 
@@ -44,7 +46,7 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
             this.chains.addAll(chains);
         }
         expandedMap.clear();
-        selectedTargetMap.clear();
+        selectedTargetIndex.clear();
         notifyDataSetChanged();
     }
 
@@ -61,37 +63,59 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
         ProgressiveScanTask.ProgressiveChain chain = chains.get(position);
         int chainId = chain.getId();
         boolean expanded = Boolean.TRUE.equals(expandedMap.get(chainId));
+        List<ProgressiveScanTask.FolderInfo> folders = chain.getFolders();
 
-        holder.title.setText(chain.getDisplayName());
+        int selIndex = selectedTargetIndex.getOrDefault(chainId, 0);
+        ProgressiveScanTask.FolderInfo targetFolder = selIndex < folders.size()
+                ? folders.get(selIndex) : folders.get(0);
+
+        holder.title.setText(targetFolder.getTitle().isEmpty()
+                ? targetFolder.getName() : targetFolder.getTitle());
         holder.depth.setText(holder.itemView.getContext().getString(
                 R.string.progressive_chain_depth, chain.getDepth()));
-        holder.summary.setText(holder.itemView.getContext().getString(
-                R.string.progressive_chain_summary,
-                chain.getCommonHashes(), chain.getTotalUniqueHashes()));
         holder.expandIcon.setText(expanded ? "\u25B2" : "\u25BC");
         holder.detailsPanel.setVisibility(expanded ? View.VISIBLE : View.GONE);
 
-        holder.foldersContainer.removeAllViews();
         if (expanded) {
-            List<ProgressiveScanTask.FolderInfo> folders = chain.getFolders();
+            holder.summary.setText(holder.itemView.getContext().getString(
+                    R.string.progressive_chain_summary,
+                    chain.getCommonHashes(), chain.getTotalUniqueHashes()));
+
+            List<String> folderNames = new ArrayList<>();
+            for (ProgressiveScanTask.FolderInfo f : folders) {
+                String display = f.getTitle().isEmpty() ? f.getName() : f.getTitle();
+                if (display.length() > 40) {
+                    display = display.substring(0, 37) + "...";
+                }
+                folderNames.add(display + " (" + f.getHashCount() + "p)");
+            }
+
+            ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<>(
+                    holder.itemView.getContext(),
+                    android.R.layout.simple_spinner_dropdown_item,
+                    folderNames);
+            holder.spinner.setAdapter(spinnerAdapter);
+            holder.spinner.setSelection(selIndex);
+            holder.spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    selectedTargetIndex.put(chainId, position);
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {
+                }
+            });
+
+            holder.foldersContainer.removeAllViews();
             for (int i = 0; i < folders.size(); i++) {
                 ProgressiveScanTask.FolderInfo folder = folders.get(i);
                 View folderView = LayoutInflater.from(holder.itemView.getContext())
                         .inflate(R.layout.item_progressive_folder, holder.foldersContainer, false);
 
-                RadioButton radio = folderView.findViewById(R.id.folder_radio);
                 TextView nameText = folderView.findViewById(R.id.folder_name);
                 TextView infoText = folderView.findViewById(R.id.folder_info);
                 View arrowView = folderView.findViewById(R.id.folder_arrow);
-                View rootView = folderView.findViewById(R.id.folder_root);
-
-                long gid = folder.getGid();
-                Long selectedGid = selectedTargetMap.get(chainId);
-                if (selectedGid == null && i == 0) {
-                    selectedGid = gid;
-                    selectedTargetMap.put(chainId, gid);
-                }
-                radio.setChecked(gid == (selectedGid != null ? selectedGid : -1L));
 
                 nameText.setText(folder.getTitle().isEmpty() ? folder.getName() : folder.getTitle());
                 infoText.setText(String.format(Locale.getDefault(),
@@ -103,21 +127,6 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
                 } else {
                     arrowView.setVisibility(View.VISIBLE);
                 }
-
-                radio.setOnCheckedChangeListener((buttonView, isChecked) -> {
-                    if (isChecked) {
-                        selectedTargetMap.put(chainId, gid);
-                        for (int j = 0; j < holder.foldersContainer.getChildCount(); j++) {
-                            View child = holder.foldersContainer.getChildAt(j);
-                            RadioButton otherRadio = child.findViewById(R.id.folder_radio);
-                            if (otherRadio != null && otherRadio != buttonView) {
-                                otherRadio.setChecked(false);
-                            }
-                        }
-                    }
-                });
-
-                rootView.setOnClickListener(v -> radio.setChecked(true));
 
                 holder.foldersContainer.addView(folderView);
             }
@@ -131,12 +140,11 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
 
         holder.btnMerge.setOnClickListener(v -> {
             if (listener == null) return;
-            Long targetGid = selectedTargetMap.get(chainId);
-            if (targetGid == null) {
-                targetGid = chain.getFolders().get(0).getGid();
-            }
+            int ti = selectedTargetIndex.getOrDefault(chainId, 0);
+            if (ti >= folders.size()) ti = 0;
+            long targetGid = folders.get(ti).getGid();
             List<Long> sourceGids = new ArrayList<>();
-            for (ProgressiveScanTask.FolderInfo f : chain.getFolders()) {
+            for (ProgressiveScanTask.FolderInfo f : folders) {
                 if (f.getGid() != targetGid) {
                     sourceGids.add(f.getGid());
                 }
@@ -157,13 +165,21 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
         return chains.size();
     }
 
+    public long getSelectedTargetGid(int chainId, ProgressiveScanTask.ProgressiveChain chain) {
+        int ti = selectedTargetIndex.getOrDefault(chainId, 0);
+        List<ProgressiveScanTask.FolderInfo> folders = chain.getFolders();
+        if (ti >= folders.size()) ti = 0;
+        return folders.get(ti).getGid();
+    }
+
     static class ChainViewHolder extends RecyclerView.ViewHolder {
         View header;
         TextView title;
         TextView depth;
         TextView expandIcon;
-        TextView summary;
         View detailsPanel;
+        TextView summary;
+        Spinner spinner;
         LinearLayout foldersContainer;
         Button btnMerge;
         Button btnIgnore;
@@ -175,8 +191,9 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
             title = itemView.findViewById(R.id.chain_title);
             depth = itemView.findViewById(R.id.chain_depth);
             expandIcon = itemView.findViewById(R.id.expand_icon);
-            summary = itemView.findViewById(R.id.chain_summary);
             detailsPanel = itemView.findViewById(R.id.details_panel);
+            summary = itemView.findViewById(R.id.chain_summary);
+            spinner = itemView.findViewById(R.id.spinner_target);
             foldersContainer = itemView.findViewById(R.id.folders_container);
             btnMerge = itemView.findViewById(R.id.btn_merge);
             btnIgnore = itemView.findViewById(R.id.btn_ignore);

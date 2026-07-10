@@ -23,6 +23,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.lab.ip.SubscriptionManager;
 import com.hippo.ehviewer.lab.ip.model.IpInfo;
 import com.hippo.ehviewer.lab.ip.model.Subscription;
@@ -37,6 +38,19 @@ public class SubscriptionManagerActivity extends EhActivity {
     private SubscriptionAdapter adapter;
     private SubscriptionManager subscriptionManager;
     private List<Subscription> subscriptions;
+
+    @Override
+    protected int getThemeResId(int theme) {
+        switch (theme) {
+            case Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme_Toolbar;
+            case Settings.THEME_DARK:
+                return R.style.AppTheme_Toolbar_Dark;
+            case Settings.THEME_BLACK:
+                return R.style.AppTheme_Toolbar_Black;
+        }
+    }
 
     private final ActivityResultLauncher<Intent> scanLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),

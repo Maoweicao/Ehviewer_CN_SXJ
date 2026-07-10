@@ -16,6 +16,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.google.android.material.appbar.MaterialToolbar;
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.lab.ip.IpPoolManager;
 import com.hippo.ehviewer.lab.ip.model.IpInfo;
 import com.hippo.ehviewer.ui.EhActivity;
@@ -37,6 +38,19 @@ public class NodeListActivity extends EhActivity {
     private Button btnTestAll;
     private final List<IpInfo> nodes = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+
+    @Override
+    protected int getThemeResId(int theme) {
+        switch (theme) {
+            case Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme_Toolbar;
+            case Settings.THEME_DARK:
+                return R.style.AppTheme_Toolbar_Dark;
+            case Settings.THEME_BLACK:
+                return R.style.AppTheme_Toolbar_Black;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

@@ -99,6 +99,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
 
     companion object {
         private const val TAG = "MergeDuplicateGalleryTask"
+        private const val SHELL_TIMEOUT_SECONDS = 300L
 
         /**
          * 合并扫描结果缓存，1 小时内共享扫描结果避免重复解析文件元数据。
@@ -212,9 +213,17 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             "done"
             )
         return try {
-            val process = Runtime.getRuntime().exec(arrayOf("/system/bin/sh", "-c", script))
-            val output = process.inputStream.bufferedReader().readText()
-            val exitCode = process.waitFor()
+            val process = ProcessBuilder("/system/bin/sh", "-c", script)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val completed = process.waitFor(SHELL_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
+            if (!completed) {
+                process.destroyForcibly()
+                Log.w(TAG, "Shell scan timed out after ${SHELL_TIMEOUT_SECONDS}s, will use fallback")
+                return null
+            }
+            val exitCode = process.exitValue()
             if (exitCode != 0) {
                 Log.w(TAG, "Shell scan failed with exit code $exitCode")
                 null

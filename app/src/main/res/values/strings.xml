@@ -1192,6 +1192,9 @@
     <string name="dialog_size_range_from_hint">Min size, e.g. 128MB</string>
     <string name="dialog_size_range_to_hint">Max size, e.g. 2GB</string>
     <string name="dialog_size_range_tip">Supports B/KB/MB/GB; no unit defaults to MB.</string>
+    <string name="dialog_page_range_filter_label">Page count range (optional)</string>
+    <string name="dialog_page_range_from_hint">Min pages</string>
+    <string name="dialog_page_range_to_hint">Max pages</string>
     <string name="dialog_search_download_title">Search download gallery</string>
     <string name="dialog_search_options_label">Search options</string>
     <string name="reset">Reset</string>
@@ -1518,6 +1521,7 @@
 
     <!-- Lab -->
     <string name="settings_lab">Lab</string>
+    <string name="settings_help">Help</string>
     <string name="lab_warning">Experimental</string>
     <string name="lab_warning_title">Experimental Features</string>
     <string name="lab_warning_description">These features may be unstable. Use at your own risk. It is recommended to backup important data before use.</string>
@@ -1665,6 +1669,19 @@
     <string name="progressive_merge_preparing">Preparing merge…</string>
     <string name="progressive_ignore">Ignore</string>
     <string name="progressive_view_in_downloads">View in Downloads</string>
+    <string name="progressive_step_scan">Step 1: Scan</string>
+    <string name="progressive_step_plan">Step 2: Generate Plan</string>
+    <string name="progressive_step_merge">Step 3: Confirm Merge</string>
+    <string name="progressive_scan_expired">Scan results expired (over 7 days). Please re-scan.</string>
+    <string name="progressive_scan_date">Scan time: %1$s</string>
+    <string name="progressive_plan_generate">Generate Merge Plan</string>
+    <string name="progressive_plan_generated">Merge plan generated and saved to external storage (%1$s)\nTotal %2$d chains. Please audit before confirming merge.</string>
+    <string name="progressive_plan_expired">Merge plan expired (over 7 days). Please regenerate.</string>
+    <string name="progressive_plan_confirm">Confirm Merge All</string>
+    <string name="progressive_backup_checkbox">Backup to external storage before merging</string>
+    <string name="progressive_backup_task_name">Progressive Backup</string>
+    <string name="progressive_backup_task_desc">Backing up %1$d chains\' galleries…</string>
+    <string name="progressive_target_label">Target:</string>
     <string name="settings_download_show_folder_time">Show folder time</string>
     <string name="settings_download_show_folder_time_summary">Show folder time in download cards</string>
     <string name="settings_download_show_folder_size">Show folder size</string>
@@ -1673,4 +1690,6 @@
     <string name="settings_download_merge_on_download_summary">Merge duplicate galleries when downloading</string>
     <string name="merge_duplicate_gallery_single_title">Merge duplicate gallery</string>
     <string name="merge_duplicate_gallery_single_summary">Merge duplicate gallery &quot;%1$s&quot;?</string>
+    <string name="search_help_title">Search Syntax Help</string>
+    <string name="search_help_summary">View E-Hentai search syntax rules and advanced search tips</string>
 </resources>

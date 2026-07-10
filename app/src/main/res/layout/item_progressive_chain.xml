@@ -25,20 +25,21 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:textSize="16sp"
+                android:textSize="15sp"
                 android:textColor="?android:attr/textColorPrimary"
                 android:text="Chain Title"
-                android:maxLines="2"
+                android:maxLines="3"
                 android:ellipsize="end" />
 
             <androidx.appcompat.widget.AppCompatTextView
                 android:id="@+id/chain_depth"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:textSize="16sp"
-                android:textColor="?android:attr/textColorPrimary"
-                android:text="3 levels"
-                android:layout_marginStart="8dp" />
+                android:textSize="13sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:text="N levels"
+                android:layout_marginStart="4dp"
+                android:layout_marginEnd="4dp" />
 
             <androidx.appcompat.widget.AppCompatTextView
                 android:id="@+id/expand_icon"
@@ -46,19 +47,9 @@
                 android:layout_height="24dp"
                 android:text="\u25BC"
                 android:gravity="center"
-                android:textSize="12sp"
-                android:layout_marginStart="4dp" />
+                android:textSize="12sp" />
 
         </LinearLayout>
-
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/chain_summary"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textSize="14sp"
-            android:textColor="?android:attr/textColorSecondary"
-            android:text="10 common, 25 total pages"
-            android:layout_marginTop="4dp" />
 
         <LinearLayout
             android:id="@+id/details_panel"
@@ -73,6 +64,37 @@
                 android:layout_height="1dp"
                 android:background="?android:attr/listDivider"
                 android:layout_marginBottom="8dp" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/chain_summary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="13sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:text="10 common, 25 total pages"
+                android:layout_marginBottom="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="8dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/progressive_target_label"
+                    android:textSize="13sp"
+                    android:layout_marginEnd="8dp" />
+
+                <Spinner
+                    android:id="@+id/spinner_target"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+            </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/folders_container"
@@ -93,7 +115,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/progressive_view_in_downloads"
-                    android:textSize="14sp" />
+                    android:textSize="13sp" />
 
                 <Button
                     android:id="@+id/btn_ignore"
@@ -101,7 +123,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/progressive_ignore"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginStart="4dp" />
 
                 <Button
@@ -109,7 +131,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/progressive_merge"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:textColor="@android:color/white"
                     android:backgroundTint="?attr/colorPrimary"
                     android:layout_marginStart="8dp" />

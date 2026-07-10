@@ -8,36 +8,40 @@ import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import kotlinx.coroutines.ensureActive
-import org.json.JSONArray
 import java.io.BufferedInputStream
 import java.io.BufferedReader
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
-import java.util.Collections
 import java.util.Locale
 import kotlin.coroutines.coroutineContext
 
-class ProgressiveMergeTask @JvmOverloads constructor(
+class ProgressiveMergeAllTask @JvmOverloads constructor(
     context: Context,
-    private val targetGid: Long,
-    private val sourceGids: List<Long>,
-    private val taskId: String = "progressive_merge_${System.currentTimeMillis()}"
+    private val plan: ProgressiveMergePlan,
+    private val taskId: String = "progressive_merge_all_${System.currentTimeMillis()}"
 ) : BaseBackgroundTask(context) {
 
-    private var copiedCount = 0
-    private var deletedCount = 0
-    private var errorCount = 0
+    private var totalCopied = 0
+    private var totalDeleted = 0
+    private var totalErrors = 0
+    private var mergedChains = 0
+    private var failedChains = 0
     private var lastError = ""
 
     private val imageExtensions = setOf(".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".bmp")
+
+    companion object {
+        private const val TAG = "ProgressiveMergeAllTask"
+    }
 
     override fun getTaskId(): String = taskId
 
     override fun getTaskName(): String = context.getString(R.string.progressive_merge_task_name)
 
-    override fun getTaskDescription(): String = context.getString(R.string.progressive_merge_task_desc, sourceGids.size)
+    override fun getTaskDescription(): String =
+        context.getString(R.string.progressive_merge_all_started, plan.chains.size)
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.MERGE
 
@@ -45,44 +49,92 @@ class ProgressiveMergeTask @JvmOverloads constructor(
 
     override fun isPausable(): Boolean = false
 
-    override fun isPersistable(): Boolean = false
-
-    companion object {
-        private const val TAG = "ProgressiveMergeTask"
-    }
+    override fun isPersistable(): Boolean = true
 
     override suspend fun execute(): Result<Unit> {
         return try {
-            Log.i(TAG, "Starting merge: targetGid=$targetGid, sourceGids=$sourceGids")
-            updateProgress(0, context.getString(R.string.progressive_merge_preparing))
+            Log.i(TAG, "Starting merge all: totalChains=${plan.chains.size}")
+            updateProgress(0, "Starting merge all...")
 
+            val totalChains = plan.chains.size
+            var chainIndex = 0
+
+            for (entry in plan.chains) {
+                ensureNotCancelled()
+                chainIndex++
+
+                if (entry.status == ChainMergeStatus.COMPLETED) {
+                    mergedChains++
+                    updateProgress(chainIndex * 100 / totalChains, "Skipped already completed: ${entry.displayName}")
+                    continue
+                }
+
+                if (entry.sourceGids.isEmpty()) {
+                    entry.status = ChainMergeStatus.COMPLETED
+                    ProgressivePlanManager.updateChainStatus(plan, entry.chainId, ChainMergeStatus.COMPLETED)
+                    mergedChains++
+                    updateProgress(chainIndex * 100 / totalChains, "Skipped empty: ${entry.displayName}")
+                    continue
+                }
+
+                Log.i(TAG, "Merging chain: ${entry.displayName} target=${entry.targetGid} sources=${entry.sourceGids}")
+                entry.status = ChainMergeStatus.IN_PROGRESS
+                ProgressivePlanManager.saveMergePlan(plan)
+                updateProgress(chainIndex * 100 / totalChains, "Merging: ${entry.displayName}")
+
+                val result = mergeOneChain(entry)
+                if (result) {
+                    entry.status = ChainMergeStatus.COMPLETED
+                    ProgressivePlanManager.updateChainStatus(plan, entry.chainId, ChainMergeStatus.COMPLETED)
+                    mergedChains++
+                    appendTaskLog("Merged: %s (%d/%d)", entry.displayName, mergedChains, totalChains)
+                } else {
+                    entry.status = ChainMergeStatus.FAILED
+                    ProgressivePlanManager.updateChainStatus(plan, entry.chainId, ChainMergeStatus.FAILED, lastError)
+                    failedChains++
+                    appendTaskLog("FAILED: %s - %s", entry.displayName, lastError)
+                }
+
+                updateProgress(chainIndex * 100 / totalChains, "Progress: $mergedChains/$totalChains")
+            }
+
+            val summary = "Merge all done: $mergedChains merged, $failedChains failed, $totalCopied copied, $totalErrors errors"
+            updateProgress(100, summary)
+            appendTaskLog(summary)
+            notifyCompleted()
+            Result.success(Unit)
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) {
+                notifyCancelled()
+                return Result.failure(e)
+            }
+            lastError = e.message ?: "Unknown error"
+            appendTaskLog("ERROR: %s", lastError)
+            notifyError(e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun mergeOneChain(entry: ChainMergeEntry): Boolean {
+        return try {
             ensureNotCancelled()
 
-            val targetInfo = EhDB.getDownloadInfo(targetGid)
+            val targetInfo = EhDB.getDownloadInfo(entry.targetGid)
             if (targetInfo == null) {
-                lastError = "Target download record not found: gid=$targetGid"
+                lastError = "Target download record not found: gid=${entry.targetGid}"
                 appendTaskLog("ERROR: %s", lastError)
-                notifyError(IllegalStateException(lastError))
-                return Result.failure(IllegalStateException(lastError))
+                return false
             }
 
             val targetDir = SpiderDen.getGalleryDownloadDir(targetInfo)
             if (targetDir == null || !targetDir.exists() || !targetDir.isDirectory) {
-                lastError = "Target directory not found: gid=$targetGid"
+                lastError = "Target directory not found: gid=${entry.targetGid}"
                 appendTaskLog("ERROR: %s", lastError)
-                notifyError(IllegalStateException(lastError))
-                return Result.failure(IllegalStateException(lastError))
+                return false
             }
 
-            val targetName = targetDir.name ?: targetGid.toString()
-            Log.d(TAG, "Target folder: $targetName (gid=$targetGid)")
-            appendTaskLog("Target: %s (gid=%d)", targetName, targetGid)
-
-            ensureNotCancelled()
-            updateProgress(5, "Collecting source folders...")
-
             val sourceFolders = mutableListOf<SourceFolder>()
-            for (gid in sourceGids) {
+            for (gid in entry.sourceGids) {
                 ensureNotCancelled()
                 val info = EhDB.getDownloadInfo(gid)
                 if (info == null) {
@@ -91,36 +143,23 @@ class ProgressiveMergeTask @JvmOverloads constructor(
                 }
                 val dir = SpiderDen.getGalleryDownloadDir(info)
                 if (dir == null || !dir.exists() || !dir.isDirectory) {
-                    Log.w(TAG, "Source directory not found: gid=$gid")
                     appendTaskLog("Skip: gid=%d directory not found", gid)
                     continue
                 }
-                val name = dir.name ?: gid.toString()
-                Log.d(TAG, "Source folder: $name (gid=$gid)")
-                sourceFolders.add(SourceFolder(gid = gid, info = info, dir = dir, name = name))
+                sourceFolders.add(SourceFolder(gid = gid, info = info, dir = dir, name = dir.name ?: gid.toString()))
             }
 
             if (sourceFolders.isEmpty()) {
-                Log.w(TAG, "No valid source folders to merge for target gid=$targetGid")
-                appendTaskLog("No valid source folders to merge")
-                updateProgress(100, "Skipped: no valid sources")
-                notifyCompleted()
-                return Result.success(Unit)
+                appendTaskLog("No valid sources for %s", entry.displayName)
+                return true
             }
 
-            val totalSteps = sourceFolders.size
-            var step = 0
-
             ensureNotCancelled()
-            updateProgress(10, "Merging content...")
-
             val targetMeta = parseEhviewerMeta(targetDir)
+
             for (source in sourceFolders) {
                 ensureNotCancelled()
-                step++
-                val pct = 10 + (step * 70 / totalSteps)
-                updateProgress(pct, "Merging: ${source.name}")
-                Log.i(TAG, "Merging source: ${source.name} (gid=${source.gid}) -> target gid=$targetGid")
+                appendTaskLog("  Merging source: %s -> target", source.name)
 
                 if (targetMeta != null) {
                     val sourceMeta = parseEhviewerMeta(source.dir)
@@ -135,49 +174,23 @@ class ProgressiveMergeTask @JvmOverloads constructor(
             }
 
             ensureNotCancelled()
-            updateProgress(80, "Deleting source folders...")
-
             for (source in sourceFolders) {
-                ensureNotCancelled()
                 if (deleteRecursively(source.dir)) {
                     EhDB.removeDownloadDirname(source.gid)
                     EhDB.removeDownloadInfo(source.gid)
-                    deletedCount++
-                    Log.i(TAG, "Deleted source: ${source.name} (gid=${source.gid}), removed DB records")
-                    appendTaskLog("Deleted: %s (gid=%d)", source.name, source.gid)
+                    totalDeleted++
+                    appendTaskLog("  Deleted: %s", source.name)
                 } else {
-                    errorCount++
-                    Log.e(TAG, "Failed to delete source: ${source.name} (gid=${source.gid})")
-                    appendTaskLog("ERROR: Failed to delete %s", source.name)
+                    totalErrors++
+                    appendTaskLog("  ERROR: Failed to delete %s", source.name)
                 }
             }
 
-            // Update target download record with new page count
-            if (copiedCount > 0) {
-                try {
-                    targetInfo.pages = targetInfo.pages + copiedCount
-                    targetInfo.finished = targetInfo.finished + copiedCount
-                    EhDB.putDownloadInfo(targetInfo)
-                    Log.i(TAG, "Updated target DownloadInfo: gid=$targetGid pages=${targetInfo.pages}")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to update target DownloadInfo", e)
-                }
-            }
-
-            Log.i(TAG, "Merge complete: targetGid=$targetGid, copied=$copiedCount, deleted=$deletedCount, errors=$errorCount")
-            updateProgress(100, "Done: copied $copiedCount, deleted $deletedCount, errors $errorCount")
-            appendTaskLog("Merge complete: copied=%d, deleted=%d, errors=%d", copiedCount, deletedCount, errorCount)
-            notifyCompleted()
-            Result.success(Unit)
+            true
         } catch (e: Throwable) {
-            if (e is kotlinx.coroutines.CancellationException) {
-                notifyCancelled()
-                return Result.failure(e)
-            }
+            if (e is kotlinx.coroutines.CancellationException) throw e
             lastError = e.message ?: "Unknown error"
-            appendTaskLog("ERROR: %s", lastError)
-            notifyError(e)
-            Result.failure(e)
+            false
         }
     }
 
@@ -205,13 +218,13 @@ class ProgressiveMergeTask @JvmOverloads constructor(
             val newName = String.format(Locale.US, "%08d%s", currentIndex + 1, ext)
             val targetFile = createUniqueFile(targetDir, newName)
             if (targetFile == null || !copyFile(sourceFile, targetFile)) {
-                errorCount++
+                totalErrors++
                 continue
             }
             newEntries.add(currentIndex to hashVal)
             targetHashes.add(hashVal)
             currentIndex++
-            copiedCount++
+            totalCopied++
         }
 
         if (newEntries.isNotEmpty()) {
@@ -233,18 +246,18 @@ class ProgressiveMergeTask @JvmOverloads constructor(
                 if (targetMd5s.containsKey(md5)) continue
                 val targetFile = createUniqueFile(targetDir, name)
                 if (targetFile == null || !copyFile(file, targetFile)) {
-                    errorCount++
+                    totalErrors++
                 } else {
                     targetMd5s[md5] = targetFile.name
-                    copiedCount++
+                    totalCopied++
                 }
             } else {
                 if (targetDir.findFile(name) != null) continue
                 val targetFile = targetDir.createFile(name)
                 if (targetFile == null || !copyFile(file, targetFile)) {
-                    errorCount++
+                    totalErrors++
                 } else {
-                    copiedCount++
+                    totalCopied++
                 }
             }
         }
