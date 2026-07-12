@@ -706,4 +706,17 @@
         <item>custom</item>
     </string-array>
 
+    <!-- Remote Auth Mode -->
+    <string-array name="remote_auth_mode_entries">
+        <item>No Authentication (LAN only)</item>
+        <item>Password</item>
+        <item>Token</item>
+    </string-array>
+
+    <string-array name="remote_auth_mode_values">
+        <item>none</item>
+        <item>password</item>
+        <item>token</item>
+    </string-array>
+
 </resources>

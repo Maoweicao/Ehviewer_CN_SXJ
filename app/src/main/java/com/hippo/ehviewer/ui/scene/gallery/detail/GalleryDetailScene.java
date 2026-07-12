@@ -1372,6 +1372,26 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         if (null == gd) {
             return;
         }
+        List<String> tokens = EhUtils.tokenizeTitle(gd.title);
+        if (!tokens.isEmpty()) {
+            ListUrlBuilder lub = new ListUrlBuilder();
+            lub.setMode(ListUrlBuilder.MODE_NORMAL);
+            // Take top 3 most distinctive tokens, quote multi-word tokens
+            int count = Math.min(tokens.size(), 3);
+            StringBuilder query = new StringBuilder();
+            for (int i = 0; i < count; i++) {
+                if (i > 0) query.append(" ");
+                String token = tokens.get(i);
+                if (token.contains(" ")) {
+                    query.append("\"").append(token).append("\"");
+                } else {
+                    query.append(token);
+                }
+            }
+            lub.setKeyword(query.toString());
+            GalleryListScene.startScene(this, lub);
+            return;
+        }
         String keyword = EhUtils.extractTitle(gd.title);
         if (null != keyword) {
             ListUrlBuilder lub = new ListUrlBuilder();

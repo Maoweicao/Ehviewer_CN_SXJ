@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EhViewer API 文档</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fafafa; color: #333; }
+        .header { background: #1a1a2e; color: #fff; padding: 20px; }
+        .header h1 { font-size: 24px; margin-bottom: 8px; }
+        .header p { color: #aaa; font-size: 14px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .section { background: #fff; border-radius: 8px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+        .section-header { padding: 16px; background: #f5f5f5; border-bottom: 1px solid #e0e0e0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+        .section-header:hover { background: #eee; }
+        .section-header h2 { font-size: 16px; color: #333; }
+        .section-body { padding: 16px; display: none; }
+        .section-body.active { display: block; }
+        .endpoint { border: 1px solid #e0e0e0; border-radius: 6px; margin-bottom: 12px; overflow: hidden; }
+        .endpoint-header { padding: 12px 16px; display: flex; align-items: center; gap: 12px; cursor: pointer; background: #fff; }
+        .endpoint-header:hover { background: #f9f9f9; }
+        .method { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; min-width: 60px; text-align: center; }
+        .method-get { background: #61affe; color: #fff; }
+        .method-post { background: #49cc90; color: #fff; }
+        .method-put { background: #fca130; color: #fff; }
+        .method-delete { background: #f93e3e; color: #fff; }
+        .method-query { background: #9c27b0; color: #fff; }
+        .endpoint-path { font-family: monospace; font-size: 14px; color: #333; }
+        .endpoint-desc { font-size: 13px; color: #666; margin-left: auto; }
+        .endpoint-detail { padding: 16px; background: #fafafa; border-top: 1px solid #e0e0e0; display: none; }
+        .endpoint-detail.active { display: block; }
+        .param-table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+        .param-table th, .param-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #e0e0e0; font-size: 13px; }
+        .param-table th { background: #f0f0f0; font-weight: 600; }
+        .param-table code { background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+        .response-example { background: #1a1a2e; color: #e0e0e0; padding: 16px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 13px; line-height: 1.5; margin: 12px 0; }
+        .try-btn { background: #2196F3; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 13px; margin-top: 12px; }
+        .try-btn:hover { background: #1976D2; }
+        .try-result { background: #1a1a2e; color: #e0e0e0; padding: 16px; border-radius: 6px; margin-top: 12px; font-family: monospace; font-size: 13px; display: none; white-space: pre-wrap; word-break: break-all; max-height: 400px; overflow-y: auto; }
+        .auth-section { background: #fff3cd; border: 1px solid #ffc107; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; }
+        .auth-section h3 { font-size: 14px; margin-bottom: 8px; }
+        .auth-input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        .base-url { background: #e3f2fd; padding: 12px 16px; border-radius: 6px; margin-bottom: 16px; font-family: monospace; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>EhViewer Remote Manager API</h1>
+        <p>版本 1.0.0 | 基于 OpenAPI 3.0 规范</p>
+    </div>
+    
+    <div class="container">
+        <div class="base-url">
+            <strong>Base URL:</strong> <span id="baseUrl"></span>
+        </div>
+        
+        <div class="auth-section">
+            <h3>认证</h3>
+            <p style="font-size:13px;margin-bottom:8px;">输入 Bearer Token（登录后获取）：</p>
+            <input type="text" id="authToken" class="auth-input" placeholder="Bearer Token" />
+        </div>
+        
+        <!-- Auth API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>认证 (Auth)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/auth/status</span>
+                        <span class="endpoint-desc">获取认证状态</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回当前认证模式、是否已认证、是否局域网等信息。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/auth/status')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/auth/login</span>
+                        <span class="endpoint-desc">登录</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>使用密码或 Token 进行认证。</p>
+                        <table class="param-table">
+                            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+                            <tr><td><code>password</code></td><td>string</td><td>密码（password 模式）</td></tr>
+                            <tr><td><code>token</code></td><td>string</td><td>Token（token 模式）</td></tr>
+                        </table>
+                        <button class="try-btn" onclick="tryLogin(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/auth/logout</span>
+                        <span class="endpoint-desc">登出</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>注销当前会话。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/auth/logout')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Gallery API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>画廊 (Galleries)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/galleries</span>
+                        <span class="endpoint-desc">获取画廊列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>分页获取画廊列表，支持搜索和标签筛选。</p>
+                        <table class="param-table">
+                            <tr><th>参数</th><th>类型</th><th>必填</th><th>说明</th></tr>
+                            <tr><td><code>page</code></td><td>int</td><td>否</td><td>页码，默认1</td></tr>
+                            <tr><td><code>limit</code></td><td>int</td><td>否</td><td>每页数量，默认20</td></tr>
+                            <tr><td><code>label</code></td><td>string</td><td>否</td><td>标签筛选</td></tr>
+                            <tr><td><code>search</code></td><td>string</td><td>否</td><td>搜索关键词</td></tr>
+                        </table>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/galleries?page=1&limit=10')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/galleries/{gid}</span>
+                        <span class="endpoint-desc">获取画廊详情</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取指定画廊的详细信息。</p>
+                        <button class="try-btn" onclick="tryGalleryDetail(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/galleries/{gid}/thumbnail</span>
+                        <span class="endpoint-desc">获取缩略图</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回缩略图图片数据（JPEG）。</p>
+                        <table class="param-table">
+                            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+                            <tr><td><code>maxWidth</code></td><td>int</td><td>最大宽度，默认300</td></tr>
+                            <tr><td><code>maxHeight</code></td><td>int</td><td>最大高度，默认400</td></tr>
+                            <tr><td><code>quality</code></td><td>int</td><td>质量(1-100)，默认80</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/galleries/{gid}/pages</span>
+                        <span class="endpoint-desc">获取页面列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回画廊所有页面信息及下载状态。</p>
+                        <button class="try-btn" onclick="tryPageList(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/galleries/{gid}/pages/{page}</span>
+                        <span class="endpoint-desc">获取页面图片</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回指定页面的图片数据。</p>
+                        <table class="param-table">
+                            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+                            <tr><td><code>mode</code></td><td>string</td><td>local(默认)/proxy</td></tr>
+                        </table>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-delete">DELETE</span>
+                        <span class="endpoint-path">/api/v1/galleries/{gid}</span>
+                        <span class="endpoint-desc">删除画廊</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>删除指定画廊。</p>
+                        <button class="try-btn" onclick="tryDeleteGallery(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Labels API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>标签 (Labels)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/labels</span>
+                        <span class="endpoint-desc">获取标签列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取所有下载标签及其画廊数量。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/labels')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/labels/{label}/galleries</span>
+                        <span class="endpoint-desc">获取标签下的画廊</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取指定标签下的画廊列表。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/labels/默认/galleries?page=1&limit=10')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Files API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>文件 (Files)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/folders</span>
+                        <span class="endpoint-desc">获取文件夹列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取 EhViewer 所有可用文件夹。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/folders')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/folders/{folder}/files</span>
+                        <span class="endpoint-desc">获取文件列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>分页获取指定文件夹中的文件。</p>
+                        <table class="param-table">
+                            <tr><th>参数</th><th>类型</th><th>说明</th></tr>
+                            <tr><td><code>page</code></td><td>int</td><td>页码，默认1</td></tr>
+                            <tr><td><code>limit</code></td><td>int</td><td>每页数量，默认50</td></tr>
+                            <tr><td><code>sort</code></td><td>string</td><td>time/name/size</td></tr>
+                            <tr><td><code>order</code></td><td>string</td><td>asc/desc</td></tr>
+                            <tr><td><code>search</code></td><td>string</td><td>搜索关键词</td></tr>
+                        </table>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/folders/Output/files?page=1&limit=10')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- System API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>系统 (System)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/system/info</span>
+                        <span class="endpoint-desc">获取系统信息</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回设备信息、存储状态、应用版本等。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/system/info')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/system/stats</span>
+                        <span class="endpoint-desc">获取系统统计</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回画廊下载状态统计。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/system/stats')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Push API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>推送 (Push)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/push/tasks</span>
+                        <span class="endpoint-desc">获取任务列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取所有推送任务列表。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/push/tasks')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings API -->
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>设置 (Settings)</h2>
+                <span>▼</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/settings/receive</span>
+                        <span class="endpoint-desc">获取接收设置</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>获取自动接收设置。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/settings/receive')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-put">PUT</span>
+                        <span class="endpoint-path">/api/v1/settings/receive</span>
+                        <span class="endpoint-desc">更新接收设置</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>更新自动接收设置。</p>
+                        <button class="try-btn" onclick="tryUpdateSettings(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 初始化
+        document.getElementById('baseUrl').textContent = window.location.origin;
+        
+        function getAuthHeader() {
+            const token = document.getElementById('authToken').value;
+            return token ? { 'Authorization': 'Bearer ' + token } : {};
+        }
+        
+        function toggleSection(header) {
+            const body = header.nextElementSibling;
+            body.classList.toggle('active');
+            header.querySelector('span').textContent = body.classList.contains('active') ? '▲' : '▼';
+        }
+        
+        function toggleEndpoint(header) {
+            const detail = header.nextElementSibling;
+            detail.classList.toggle('active');
+        }
+        
+        async function tryApi(btn, method, path) {
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(path, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeader()
+                    }
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        async function tryLogin(btn) {
+            const password = prompt('输入密码:');
+            if (!password) return;
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+                if (data.token) {
+                    document.getElementById('authToken').value = data.token;
+                    alert('登录成功！Token 已自动填入。');
+                }
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        async function tryGalleryDetail(btn) {
+            const gid = prompt('输入画廊 GID:');
+            if (!gid) return;
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('/api/v1/galleries/' + gid, {
+                    headers: getAuthHeader()
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        async function tryPageList(btn) {
+            const gid = prompt('输入画廊 GID:');
+            if (!gid) return;
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('/api/v1/galleries/' + gid + '/pages', {
+                    headers: getAuthHeader()
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        async function tryDeleteGallery(btn) {
+            const gid = prompt('输入画廊 GID:');
+            if (!gid) return;
+            if (!confirm('确定要删除画廊 ' + gid + ' 吗？')) return;
+            
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('/api/v1/galleries/' + gid, {
+                    method: 'DELETE',
+                    headers: getAuthHeader()
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+        
+        async function tryUpdateSettings(btn) {
+            const resultDiv = btn.nextElementSibling;
+            resultDiv.style.display = 'block';
+            resultDiv.textContent = 'Loading...';
+            
+            try {
+                const response = await fetch('/api/v1/settings/receive', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...getAuthHeader()
+                    },
+                    body: JSON.stringify({
+                        autoReceiveBookmarks: true,
+                        autoReceiveDownloads: false,
+                        autoReceiveFavorites: false,
+                        pageSize: 50
+                    })
+                });
+                const data = await response.json();
+                resultDiv.textContent = JSON.stringify(data, null, 2);
+            } catch (e) {
+                resultDiv.textContent = 'Error: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>

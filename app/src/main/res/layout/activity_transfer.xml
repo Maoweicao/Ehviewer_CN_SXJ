@@ -87,7 +87,7 @@
                 android:layout_marginTop="24dp"
                 android:layout_marginBottom="16dp" />
 
-            <!-- Client Operation Section -->
+            <!-- Address List Section -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -98,9 +98,71 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="@string/transfer_client_operations"
+                    android:text="@string/address_list"
                     android:textSize="16sp"
                     android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/address_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+            </LinearLayout>
+
+            <!-- Separator -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="?android:attr/dividerHorizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Remote Management Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/remote_management"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <ImageButton
+                        android:id="@+id/remote_settings_button"
+                        android:layout_width="40dp"
+                        android:layout_height="40dp"
+                        android:src="@drawable/v_settings_dark_x24"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:scaleType="centerInside"
+                        android:contentDescription="@string/remote_settings" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/remote_access_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/remote_access_info_default"
+                    android:textSize="14sp"
+                    android:fontFamily="monospace"
+                    android:padding="12dp"
+                    android:background="?android:attr/selectableItemBackground"
                     android:layout_marginBottom="8dp" />
 
                 <LinearLayout
@@ -109,45 +171,239 @@
                     android:orientation="horizontal">
 
                     <Button
-                        android:id="@+id/transfer_client_send_bookmarks"
+                        android:id="@+id/remote_open_browser"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/transfer_send_bookmarks" />
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/remote_open_in_browser" />
 
                     <Button
-                        android:id="@+id/transfer_client_send_downloads"
+                        android:id="@+id/remote_copy_url"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/transfer_send_downloads" />
+                        android:layout_marginStart="4dp"
+                        android:text="@string/remote_copy_url" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- Separator -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="?android:attr/dividerHorizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Send Data Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/send_data"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <Button
+                        android:id="@+id/send_bookmarks_all"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/send_bookmarks_all"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/send_bookmarks_select"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="4dp"
+                        android:text="@string/send_bookmarks_select"
+                        android:textSize="12sp" />
+
                 </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:layout_marginTop="8dp">
+                    android:layout_marginBottom="8dp">
 
                     <Button
-                        android:id="@+id/transfer_client_send_favorites"
+                        android:id="@+id/send_downloads_all"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginEnd="8dp"
-                        android:text="@string/transfer_send_favorites" />
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/send_downloads_all"
+                        android:textSize="12sp" />
 
                     <Button
-                        android:id="@+id/transfer_client_send_export"
+                        android:id="@+id/send_downloads_select"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
-                        android:layout_marginStart="8dp"
-                        android:text="@string/transfer_send_export" />
+                        android:layout_marginStart="4dp"
+                        android:text="@string/send_downloads_select"
+                        android:textSize="12sp" />
+
                 </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/send_favorites_all"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="4dp"
+                        android:text="@string/send_favorites_all"
+                        android:textSize="12sp" />
+
+                    <Button
+                        android:id="@+id/send_favorites_select"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="4dp"
+                        android:text="@string/send_favorites_select"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
             </LinearLayout>
+
+            <!-- Separator -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="?android:attr/dividerHorizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Connect To Section -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/connect_to"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/refresh_devices"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/refresh"
+                        android:textSize="12sp" />
+
+                    <Spinner
+                        android:id="@+id/refresh_interval_spinner"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp" />
+
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <EditText
+                        android:id="@+id/address_input"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:hint="@string/manual_connect_hint"
+                        android:inputType="text"
+                        android:singleLine="true"
+                        android:layout_marginEnd="8dp" />
+
+                    <Button
+                        android:id="@+id/connect_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/connect" />
+
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/discovered_devices"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="8dp"
+                    android:layout_marginBottom="4dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/discovered_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/connected_devices"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp"
+                    android:layout_marginBottom="4dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/connected_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:nestedScrollingEnabled="false"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+            </LinearLayout>
+
+            <!-- Separator -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="?android:attr/dividerHorizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
 
             <!-- Client Information Section -->
             <LinearLayout
@@ -175,7 +431,87 @@
                     android:id="@+id/transfer_client_list"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:minHeight="300dp"
+                    android:minHeight="200dp"
+                    app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+            </LinearLayout>
+
+            <!-- Separator -->
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="?android:attr/dividerHorizontal"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="16dp" />
+
+            <!-- Log Section (可折叠) -->
+            <LinearLayout
+                android:id="@+id/log_section"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="16dp">
+
+                <!-- 日志标题栏 -->
+                <LinearLayout
+                    android:id="@+id/log_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="12dp"
+                    android:background="?android:attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true">
+
+                    <TextView
+                        android:id="@+id/log_expand_icon"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="▶"
+                        android:textSize="14sp"
+                        android:layout_marginEnd="8dp" />
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="@string/log_title"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <Spinner
+                        android:id="@+id/log_level_spinner"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:layout_marginEnd="8dp" />
+
+                    <Button
+                        android:id="@+id/log_clear_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/log_clear"
+                        android:textSize="12sp"
+                        android:layout_marginEnd="8dp" />
+
+                    <Button
+                        android:id="@+id/log_export_button"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
+                        android:text="@string/log_export"
+                        android:textSize="12sp" />
+
+                </LinearLayout>
+
+                <!-- 日志列表（默认隐藏） -->
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/log_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="300dp"
+                    android:visibility="gone"
+                    android:background="#1a1a1a"
+                    android:padding="8dp"
+                    android:scrollbars="vertical"
                     app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
 
             </LinearLayout>

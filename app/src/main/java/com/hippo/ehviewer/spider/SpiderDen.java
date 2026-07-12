@@ -67,6 +67,11 @@ public final class SpiderDen {
                 MathUtils.clamp(Settings.getReadCacheSize(), 40, 640) * 1024 * 1024);
     }
 
+    @Nullable
+    public static SimpleDiskCache getCache() {
+        return sCache;
+    }
+
     public static class StartWithFilenameFilter implements FilenameFilter {
 
         private final String mPrefix;

@@ -1692,4 +1692,104 @@
     <string name="merge_duplicate_gallery_single_summary">Merge duplicate gallery &quot;%1$s&quot;?</string>
     <string name="search_help_title">Search Syntax Help</string>
     <string name="search_help_summary">View E-Hentai search syntax rules and advanced search tips</string>
+
+    <!-- Remote Management -->
+    <string name="remote_management">Remote Management</string>
+    <string name="remote_management_description">Remote Management</string>
+    <string name="remote_management_summary">Manage downloads via web browser on your computer</string>
+    <string name="remote_auth_mode">Authentication Mode</string>
+    <string name="remote_auth_mode_summary">Choose authentication method for remote connections</string>
+    <string name="remote_delete_enabled">Allow Remote Delete</string>
+    <string name="remote_delete_enabled_summary">Allow remote clients to delete galleries (web UI still requires confirmation)</string>
+    <string name="delete_files_on_remote_delete">Delete Files on Remote Delete</string>
+    <string name="delete_files_on_remote_delete_summary">Delete downloaded files when deleting galleries remotely</string>
+    <string name="remote_access_info_default">Start transfer service to use remote management</string>
+    <string name="remote_open_in_browser">Open in Browser</string>
+    <string name="remote_copy_url">Copy Access URL</string>
+
+    <!-- Remote Settings -->
+    <string name="remote_settings">Remote Settings</string>
+    <string name="auth_mode">Authentication Mode</string>
+    <string name="auth_mode_none">No Authentication (LAN only)</string>
+    <string name="auth_mode_password">Password</string>
+    <string name="auth_mode_token">Token</string>
+    <string name="local_bypass">LAN Bypass</string>
+    <string name="local_bypass_summary">Skip authentication for LAN IP addresses</string>
+    <string name="settings_restart_required">Settings will take effect after restarting service</string>
+
+    <!-- Address List -->
+    <string name="address_list">Accessible Addresses</string>
+    <string name="copy">Copy</string>
+    <string name="copied">Copied</string>
+
+    <!-- Send Data -->
+    <string name="send_data">Send Data</string>
+    <string name="send_bookmarks_all">Bookmarks - All</string>
+    <string name="send_bookmarks_select">Bookmarks - Select</string>
+    <string name="send_downloads_all">Downloads - All</string>
+    <string name="send_downloads_select">Downloads - Select</string>
+    <string name="send_favorites_all">Favorites - All</string>
+    <string name="send_favorites_select">Favorites - Select</string>
+
+    <!-- Connect To -->
+    <string name="connect_to">Connect To</string>
+    <string name="manual_connect">Manual Connect</string>
+    <string name="manual_connect_hint">IP:Port</string>
+    <string name="connect">Connect</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="discovered_devices">Discovered Devices</string>
+    <string name="connected_devices">Connected</string>
+    <string name="push_data">Push</string>
+    <string name="no_devices_found">No devices found</string>
+    <string name="no_connected_devices">No connected devices</string>
+
+    <!-- Push -->
+    <string name="receive_confirm">Receive Confirmation</string>
+    <string name="receive_confirm_message">%1$s wants to send %2$d %3$s</string>
+    <string name="push_progress">Pushing: %1$d/%2$d (%3$d%%)</string>
+    <string name="push_completed">Push completed</string>
+    <string name="push_failed">Push failed</string>
+
+    <!-- Data Selector -->
+    <string name="select_bookmarks">Select Bookmarks</string>
+    <string name="select_downloads">Select Downloads</string>
+    <string name="select_favorites">Select Favorites</string>
+    <string name="select_data">Select Data</string>
+    <string name="selected_count">Selected: %d</string>
+    <string name="prev_page">Prev</string>
+    <string name="next_page">Next</string>
+    <string name="page_info">Page %1$d / %2$d</string>
+    <string name="pages_count">%d pages</string>
+
+    <!-- Receive Confirm -->
+    <string name="data_type">Data Type:</string>
+    <string name="source_device">Source:</string>
+    <string name="data_count">Count:</string>
+    <string name="bookmarks">Bookmarks</string>
+
+    <!-- Transfer Service -->
+    <string name="transfer_service_started">Transfer service started</string>
+    <string name="transfer_service_stopped">Transfer service stopped</string>
+    <string name="transfer_service_running">Transfer service running</string>
+    <string name="connected_clients_count">Connected clients: %d</string>
+    <string name="access_address">Access address:</string>
+    <string name="token_label">Token</string>
+    <string name="remote_access_hint">Open the above address in a browser to access remote management</string>
+    <string name="cannot_open_browser">Cannot open browser</string>
+    <string name="save">Save</string>
+    <string name="invalid_address">Invalid address format</string>
+    <string name="refreshing">Refreshing...</string>
+    <string name="error_prefix">Error: %s</string>
+
+    <!-- Log Section -->
+    <string name="log_title">Logs</string>
+    <string name="log_clear">Clear</string>
+    <string name="log_export">Export</string>
+    <string name="log_exported">Logs exported to: %s</string>
+    <string name="log_export_failed">Export failed</string>
+    <string name="log_level_all">All</string>
+    <string name="log_level_debug">Debug</string>
+    <string name="log_level_info">Info</string>
+    <string name="log_level_warn">Warn</string>
+    <string name="log_level_error">Error</string>
 </resources>

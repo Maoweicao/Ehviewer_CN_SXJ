@@ -1,0 +1,13 @@
+{
+  "name": "ehviewer-test-server",
+  "version": "2.0.0",
+  "description": "EhViewer Remote Manager API Mock Server with OpenAPI/Swagger UI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "swagger-ui-dist": "^5.18.0"
+  }
+}

@@ -20,6 +20,7 @@ import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadGalleryMetaHelper;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.spider.SpiderDen;
+import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.unifile.UniFile;
 
 import java.util.ArrayList;
@@ -350,6 +351,14 @@ public class DownloadListInfosExecutor {
                                       @Nullable Long timeFrom, @Nullable Long timeTo,
                                       @Nullable Long sizeFrom, @Nullable Long sizeTo,
                                       boolean duplicateOnly, float ratingFrom, float ratingTo) {
+        executeFilterAndSort(categoryIds, statusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, null, null, duplicateOnly, ratingFrom, ratingTo);
+    }
+
+    public void executeFilterAndSort(Set<Integer> categoryIds, Set<Integer> statusIds, int sortId,
+                                      @Nullable Long timeFrom, @Nullable Long timeTo,
+                                      @Nullable Long sizeFrom, @Nullable Long sizeTo,
+                                      @Nullable Long pageFrom, @Nullable Long pageTo,
+                                      boolean duplicateOnly, float ratingFrom, float ratingTo) {
         Log.d("DownloadListInfos", "executeFilterAndSort: 开始, categoryIds=" + categoryIds + ", statusIds=" + statusIds + ", sortId=" + sortId + ", ratingFrom=" + ratingFrom + ", ratingTo=" + ratingTo);
         Log.d("DownloadListInfos", "executeFilterAndSort: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
@@ -370,6 +379,7 @@ public class DownloadListInfosExecutor {
 
             filteredList = filterByTimeRange(filteredList, timeFrom, timeTo);
             filteredList = filterBySizeRange(filteredList, sizeFrom, sizeTo);
+            filteredList = filterByPageRange(filteredList, pageFrom, pageTo);
             filteredList = filterByRating(filteredList, ratingFrom, ratingTo);
             filteredList = filterDuplicateNamedGalleries(filteredList, duplicateOnly);
 
@@ -409,6 +419,31 @@ public class DownloadListInfosExecutor {
         }
         Log.d("DownloadListInfos", "filterByRating: range=" + ratingFrom + "~" + ratingTo + ", 过滤后列表大小=" + list.size());
         return list;
+    }
+
+    private List<DownloadInfo> filterByPageRange(@Nullable List<DownloadInfo> sourceList,
+                                                  @Nullable Long pageFrom,
+                                                  @Nullable Long pageTo) {
+        if (sourceList == null || sourceList.isEmpty()) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        if (pageFrom == null && pageTo == null) {
+            return sourceList;
+        }
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            long pages = info.total > 0 ? info.total : 0;
+            if (pages == 0) {
+                SpiderInfo spiderInfo = SpiderInfo.getSpiderInfo(info);
+                if (spiderInfo != null) {
+                    pages = spiderInfo.pages;
+                }
+            }
+            if (isInRange(pages, pageFrom, pageTo)) {
+                result.add(info);
+            }
+        }
+        return result;
     }
 
     private List<DownloadInfo> filterDuplicateNamedGalleries(@Nullable List<DownloadInfo> sourceList,

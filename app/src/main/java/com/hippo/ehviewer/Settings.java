@@ -2471,4 +2471,133 @@ public class Settings {
     public static void putAiTranslateAutoDetect(boolean value) {
         putBoolean(KEY_AI_TRANSLATE_AUTO_DETECT, value);
     }
+
+    // Remote Management Settings
+    
+    public static final String KEY_REMOTE_DELETE_ENABLED = "remote_delete_enabled";
+    private static final boolean DEFAULT_REMOTE_DELETE_ENABLED = false;
+
+    public static boolean isRemoteDeleteEnabled() {
+        return getBoolean(KEY_REMOTE_DELETE_ENABLED, DEFAULT_REMOTE_DELETE_ENABLED);
+    }
+
+    public static void putRemoteDeleteEnabled(boolean value) {
+        putBoolean(KEY_REMOTE_DELETE_ENABLED, value);
+    }
+
+    public static final String KEY_DELETE_FILES_ON_REMOTE_DELETE = "delete_files_on_remote_delete";
+    private static final boolean DEFAULT_DELETE_FILES_ON_REMOTE_DELETE = false;
+
+    public static boolean isDeleteFilesOnRemoteDelete() {
+        return getBoolean(KEY_DELETE_FILES_ON_REMOTE_DELETE, DEFAULT_DELETE_FILES_ON_REMOTE_DELETE);
+    }
+
+    public static void putDeleteFilesOnRemoteDelete(boolean value) {
+        putBoolean(KEY_DELETE_FILES_ON_REMOTE_DELETE, value);
+    }
+
+    public static final String KEY_REMOTE_AUTH_MODE = "remote_auth_mode";
+    private static final String DEFAULT_REMOTE_AUTH_MODE = "none";
+
+    public static String getRemoteAuthMode() {
+        return getString(KEY_REMOTE_AUTH_MODE, DEFAULT_REMOTE_AUTH_MODE);
+    }
+
+    public static void putRemoteAuthMode(String value) {
+        putString(KEY_REMOTE_AUTH_MODE, value);
+    }
+
+    public static final String KEY_REMOTE_PASSWORD = "remote_password";
+    private static final String DEFAULT_REMOTE_PASSWORD = "";
+
+    public static String getRemotePassword() {
+        return getString(KEY_REMOTE_PASSWORD, DEFAULT_REMOTE_PASSWORD);
+    }
+
+    public static void putRemotePassword(String value) {
+        putString(KEY_REMOTE_PASSWORD, value);
+    }
+
+    public static final String KEY_REMOTE_TOKEN = "remote_token";
+    private static final String DEFAULT_REMOTE_TOKEN = "";
+
+    public static String getRemoteToken() {
+        return getString(KEY_REMOTE_TOKEN, DEFAULT_REMOTE_TOKEN);
+    }
+
+    public static void putRemoteToken(String value) {
+        putString(KEY_REMOTE_TOKEN, value);
+    }
+
+    // 分页大小
+    public static final String KEY_SELECTOR_PAGE_SIZE = "selector_page_size";
+    private static final int DEFAULT_SELECTOR_PAGE_SIZE = 20;
+
+    public static int getSelectorPageSize() {
+        return getIntFromStr(KEY_SELECTOR_PAGE_SIZE, DEFAULT_SELECTOR_PAGE_SIZE);
+    }
+
+    public static void putSelectorPageSize(int value) {
+        putIntToStr(KEY_SELECTOR_PAGE_SIZE, value);
+    }
+
+    // mDNS刷新间隔（秒）
+    public static final String KEY_MDNS_REFRESH_INTERVAL = "mdns_refresh_interval";
+    private static final int DEFAULT_MDNS_REFRESH_INTERVAL = 60;
+
+    public static int getMdnsRefreshInterval() {
+        return getIntFromStr(KEY_MDNS_REFRESH_INTERVAL, DEFAULT_MDNS_REFRESH_INTERVAL);
+    }
+
+    public static void putMdnsRefreshInterval(int value) {
+        putIntToStr(KEY_MDNS_REFRESH_INTERVAL, value);
+    }
+
+    // 局域网免认证
+    public static final String KEY_LOCAL_BYPASS_ENABLED = "remote_local_bypass_enabled";
+    private static final boolean DEFAULT_LOCAL_BYPASS_ENABLED = true;
+
+    public static boolean isLocalBypassEnabled() {
+        return getBoolean(KEY_LOCAL_BYPASS_ENABLED, DEFAULT_LOCAL_BYPASS_ENABLED);
+    }
+
+    public static void putLocalBypassEnabled(boolean value) {
+        putBoolean(KEY_LOCAL_BYPASS_ENABLED, value);
+    }
+
+    // 自动接收书签
+    public static final String KEY_AUTO_RECEIVE_BOOKMARKS = "auto_receive_bookmarks";
+    private static final boolean DEFAULT_AUTO_RECEIVE_BOOKMARKS = false;
+
+    public static boolean isAutoReceiveBookmarks() {
+        return getBoolean(KEY_AUTO_RECEIVE_BOOKMARKS, DEFAULT_AUTO_RECEIVE_BOOKMARKS);
+    }
+
+    public static void putAutoReceiveBookmarks(boolean value) {
+        putBoolean(KEY_AUTO_RECEIVE_BOOKMARKS, value);
+    }
+
+    // 自动接收下载
+    public static final String KEY_AUTO_RECEIVE_DOWNLOADS = "auto_receive_downloads";
+    private static final boolean DEFAULT_AUTO_RECEIVE_DOWNLOADS = false;
+
+    public static boolean isAutoReceiveDownloads() {
+        return getBoolean(KEY_AUTO_RECEIVE_DOWNLOADS, DEFAULT_AUTO_RECEIVE_DOWNLOADS);
+    }
+
+    public static void putAutoReceiveDownloads(boolean value) {
+        putBoolean(KEY_AUTO_RECEIVE_DOWNLOADS, value);
+    }
+
+    // 自动接收收藏
+    public static final String KEY_AUTO_RECEIVE_FAVORITES = "auto_receive_favorites";
+    private static final boolean DEFAULT_AUTO_RECEIVE_FAVORITES = false;
+
+    public static boolean isAutoReceiveFavorites() {
+        return getBoolean(KEY_AUTO_RECEIVE_FAVORITES, DEFAULT_AUTO_RECEIVE_FAVORITES);
+    }
+
+    public static void putAutoReceiveFavorites(boolean value) {
+        putBoolean(KEY_AUTO_RECEIVE_FAVORITES, value);
+    }
 }

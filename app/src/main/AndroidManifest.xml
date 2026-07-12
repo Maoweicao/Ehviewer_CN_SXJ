@@ -227,6 +227,11 @@
             android:label="@string/license"
             android:theme="@style/AppTheme.Toolbar" />
         <activity
+            android:name=".ui.MarkdownViewerActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/search_help_title"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
             android:name=".ui.FilterActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/filter"
@@ -295,6 +300,12 @@
             android:name="com.hippo.ehviewer.ui.transfer.TransferActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_transfer"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.transfer.DataSelectorActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/select_data"
             android:theme="@style/AppTheme.Toolbar" />
 
         <service

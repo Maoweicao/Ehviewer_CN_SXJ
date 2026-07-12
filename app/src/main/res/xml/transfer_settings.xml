@@ -67,4 +67,47 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory
+        android:title="@string/remote_management"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="remote_management_description"
+            android:title="@string/remote_management_description"
+            android:selectable="false"
+            android:summary="@string/remote_management_summary"
+            app:allowDividerAbove="false" />
+
+        <ListPreference
+            android:key="remote_auth_mode"
+            android:title="@string/remote_auth_mode"
+            android:summary="@string/remote_auth_mode_summary"
+            android:entries="@array/remote_auth_mode_entries"
+            android:entryValues="@array/remote_auth_mode_values"
+            android:defaultValue="none"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="remote_delete_enabled"
+            android:title="@string/remote_delete_enabled"
+            android:summary="@string/remote_delete_enabled_summary"
+            android:defaultValue="false"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="delete_files_on_remote_delete"
+            android:title="@string/delete_files_on_remote_delete"
+            android:summary="@string/delete_files_on_remote_delete_summary"
+            android:defaultValue="false"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="sync_download_while_reading"
+            android:title="@string/settings_download_sync_while_reading"
+            android:summary="@string/settings_download_sync_while_reading_summary"
+            android:defaultValue="false"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

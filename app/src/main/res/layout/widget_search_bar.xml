@@ -50,7 +50,22 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:layout_gravity="right|center_vertical"
-                android:padding="12dp"/>
+                android:padding="12dp"
+                android:src="@drawable/v_close_dark_x24"
+                android:tint="?attr/drawableColorPrimary"
+                android:background="?attr/selectableItemBackgroundBorderless"/>
+
+            <ImageView
+                android:id="@+id/search_advance"
+                android:layout_width="40dp"
+                android:layout_height="48dp"
+                android:layout_gravity="right|center_vertical"
+                android:layout_marginRight="48dp"
+                android:padding="10dp"
+                android:src="@drawable/v_magnify_dark_x24"
+                android:tint="?attr/drawableColorPrimary"
+                android:visibility="gone"
+                android:background="?attr/selectableItemBackgroundBorderless"/>
 
             <com.hippo.ehviewer.widget.SearchEditText
                 android:id="@+id/search_edit_text"
@@ -68,6 +83,16 @@
                 android:inputType="text"/>
 
         </FrameLayout>
+
+        <com.hippo.widget.AutoWrapLayout
+            android:id="@+id/search_tag_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingLeft="8dp"
+            android:paddingRight="8dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:visibility="gone"/>
 
         <LinearLayout
             android:id="@+id/list_container"

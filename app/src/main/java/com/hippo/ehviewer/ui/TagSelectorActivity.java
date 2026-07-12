@@ -185,15 +185,7 @@ public class TagSelectorActivity extends EhActivity {
         // 修复部分深色主题下背景太白的问题
         if (isDarkMode) {
             recyclerView.setBackgroundColor(Color.parseColor("#121212"));
-//            tvSelectedCount.setTextColor(Color.LTGRAY);
             cardSelectedTags.setCardBackgroundColor(Color.parseColor("#1E1E1E"));
-        }
-
-        // Fix background color issues in some Dark Mode themes
-        // 修复部分深色主题下背景太白的问题
-        if (isDarkMode) {
-            recyclerView.setBackgroundColor(Color.parseColor("#121212"));
-            tvSelectedCount.setTextColor(Color.LTGRAY);
         }
 
         findViewById(R.id.btn_confirm_search).setOnClickListener(v -> {

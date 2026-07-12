@@ -21,6 +21,7 @@ import static com.hippo.ehviewer.client.EhTagDatabase.NAMESPACE_TO_PREFIX;
 import android.animation.Animator;
 import android.animation.ObjectAnimator;
 import android.content.Context;
+import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -48,12 +49,16 @@ import androidx.cardview.widget.CardView;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.android.resource.AttrResources;
 import com.hippo.ehviewer.client.EhTagDatabase;
 import com.hippo.view.ViewTransition;
 import com.hippo.lib.yorozuya.AnimationUtils;
 import com.hippo.lib.yorozuya.MathUtils;
 import com.hippo.lib.yorozuya.SimpleAnimatorListener;
 import com.hippo.lib.yorozuya.ViewUtils;
+import com.hippo.widget.AutoWrapLayout;
+
+import com.google.android.material.chip.Chip;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -82,6 +87,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
     private ImageView mMenuButton;
     private TextView mTitleTextView;
     private ImageView mActionButton;
+    private ImageView mAdvanceButton;
     public SearchEditText mEditText;
     private ListView mListView;
     private View mListContainer;
@@ -108,6 +114,10 @@ public class SearchBar extends CardView implements View.OnClickListener,
     // 标志位：建议列表是否被手动控制
     private boolean mSuggestionsListManuallyControlled = false;
 
+    // Tag chip container and data
+    private AutoWrapLayout mTagContainer;
+    private final List<SearchTagChip> mTagChips = new ArrayList<>();
+
     public SearchBar(Context context) {
         super(context);
         init(context);
@@ -132,16 +142,19 @@ public class SearchBar extends CardView implements View.OnClickListener,
         mMenuButton = (ImageView) ViewUtils.$$(this, R.id.search_menu);
         mTitleTextView = (TextView) ViewUtils.$$(this, R.id.search_title);
         mActionButton = (ImageView) ViewUtils.$$(this, R.id.search_action);
+        mAdvanceButton = (ImageView) ViewUtils.$$(this, R.id.search_advance);
         mEditText = (SearchEditText) ViewUtils.$$(this, R.id.search_edit_text);
         mListContainer = ViewUtils.$$(this, R.id.list_container);
         mListView = (ListView) ViewUtils.$$(mListContainer, R.id.search_bar_list);
         mListHeader = ViewUtils.$$(mListContainer, R.id.list_header);
+        mTagContainer = (AutoWrapLayout) ViewUtils.$$(this, R.id.search_tag_container);
 
         mViewTransition = new ViewTransition(mTitleTextView, mEditText);
 
         mTitleTextView.setOnClickListener(this);
         mMenuButton.setOnClickListener(this);
         mActionButton.setOnClickListener(this);
+        mAdvanceButton.setOnClickListener(this);
         mEditText.setSearchEditTextListener(this);
         mEditText.setOnEditorActionListener(this);
         mEditText.addTextChangedListener(this);
@@ -232,6 +245,9 @@ public class SearchBar extends CardView implements View.OnClickListener,
                     List<Pair<String, String>> searchHints = ehTagDatabase.suggest(keyword);
 
                     for (Pair<String, String> searchHint : searchHints) {
+                        if (isTagAlreadyAdded(searchHint.second)) {
+                            continue;
+                        }
                         if (showTranslation) {
                             mSuggestionList.add(new TagSuggestion(searchHint.first, searchHint.second));
                         } else {
@@ -352,11 +368,10 @@ public class SearchBar extends CardView implements View.OnClickListener,
     }
 
     private void applySearch() {
-        if( mEditText.getText()==null){
+        String query = buildCombinedQuery();
+        if (query.isEmpty()) {
             return;
         }
-        String query = mEditText.getText().toString().trim();
-        query.replaceAll("\n","");
         if (!mAllowEmptySearch && TextUtils.isEmpty(query)) {
             return;
         }
@@ -365,6 +380,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
         mSearchDatabase.addQuery(query);
         // Callback
         mHelper.onApplySearch(query);
+        // Clear chips after search
+        clearTagChips();
     }
 
     public void applySearch(boolean hideKeyboard) {
@@ -392,6 +409,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
             }
         } else if (v == mActionButton) {
             mHelper.onClickRightIcon();
+        } else if (v == mAdvanceButton) {
+            mHelper.onClickAdvance();
         }
     }
 
@@ -422,6 +441,16 @@ public class SearchBar extends CardView implements View.OnClickListener,
             
             // 状态改变时重置手动控制标志
             mSuggestionsListManuallyControlled = false;
+
+            // Clear chips when leaving search mode
+            if (state == STATE_NORMAL) {
+                clearTagChips();
+            }
+
+            // Toggle advance search button visibility
+            if (mAdvanceButton != null) {
+                mAdvanceButton.setVisibility(state == STATE_NORMAL ? View.VISIBLE : View.GONE);
+            }
 
             switch (oldState) {
                 default:
@@ -641,6 +670,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
         void onClickRightIcon();
 
+        void onClickAdvance();
+
         void onSearchEditTextClick();
 
         void onApplySearch(String query);
@@ -721,6 +752,85 @@ public class SearchBar extends CardView implements View.OnClickListener,
         }
     }
 
+    private static class SearchTagChip {
+        String displayName;
+        String searchKey;
+        View chipView;
+
+        SearchTagChip(String displayName, String searchKey) {
+            this.displayName = displayName;
+            this.searchKey = searchKey;
+        }
+    }
+
+    private void addTagChip(String displayName, String searchKey) {
+        // Deduplicate
+        for (SearchTagChip chip : mTagChips) {
+            if (chip.searchKey.equals(searchKey)) {
+                return;
+            }
+        }
+        int colorTag = AttrResources.getAttrColor(getContext(), R.attr.tagBackgroundColor);
+        Chip chip = (Chip) LayoutInflater.from(getContext()).inflate(R.layout.item_chip_tag, mTagContainer, false);
+        chip.setText(displayName);
+        chip.setChipBackgroundColor(ColorStateList.valueOf(colorTag));
+        chip.setTextColor(android.graphics.Color.WHITE);
+        chip.setCloseIconVisible(true);
+        chip.setOnCloseIconClickListener(v -> removeTagChip(chip));
+        mTagContainer.addView(chip);
+        SearchTagChip tagChip = new SearchTagChip(displayName, searchKey);
+        tagChip.chipView = chip;
+        mTagChips.add(tagChip);
+        mTagContainer.setVisibility(View.VISIBLE);
+    }
+
+    private void removeTagChip(Chip chipView) {
+        mTagContainer.removeView(chipView);
+        SearchTagChip toRemove = null;
+        for (SearchTagChip tc : mTagChips) {
+            if (tc.chipView == chipView) {
+                toRemove = tc;
+                break;
+            }
+        }
+        if (toRemove != null) {
+            mTagChips.remove(toRemove);
+        }
+        if (mTagChips.isEmpty()) {
+            mTagContainer.setVisibility(View.GONE);
+        }
+    }
+
+    public void clearTagChips() {
+        mTagContainer.removeAllViews();
+        mTagChips.clear();
+        mTagContainer.setVisibility(View.GONE);
+    }
+
+    private String buildCombinedQuery() {
+        StringBuilder sb = new StringBuilder();
+        for (SearchTagChip chip : mTagChips) {
+            sb.append(chip.searchKey).append(" ");
+        }
+        Editable editable = mEditText.getText();
+        if (editable != null && editable.length() > 0) {
+            sb.append(editable.toString().trim());
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * Returns a set of search keys currently in chips to exclude from suggestions
+     */
+    private boolean isTagAlreadyAdded(String englishKey) {
+        for (SearchTagChip chip : mTagChips) {
+            if (chip.searchKey.equals(englishKey)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private class TagSuggestion extends Suggestion {
         public String show, mKeyword;
 
@@ -787,14 +897,12 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
         @Override
         public void onClick() {
-            Editable editable = mEditText.getText();
-            if (editable != null) {
-                String tagKey = rebuildKeyword(mKeyword);
-//                String newText = removeCommonSubstring(editable.toString(), mKeyword)+" "+tagKey;
-                String newText = replaceCommonSubstring(tagKey,editable);
-                mEditText.setText(newText);
-                mEditText.setSelection(mEditText.getText().length());
-            }
+            String searchKey = rebuildKeyword(mKeyword);
+            String displayName = show != null && !show.isEmpty() ? show : mKeyword;
+            addTagChip(displayName, searchKey);
+            mEditText.setText("");
+            mEditText.requestFocus();
+            updateSuggestions();
         }
 
         private String rebuildKeyword(String key) {

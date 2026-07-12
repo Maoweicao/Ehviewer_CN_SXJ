@@ -1725,4 +1725,104 @@ SSID: %1$s
     <string name="settings_help">帮助</string>
     <string name="search_help_title">搜索语法说明</string>
     <string name="search_help_summary">查看 E-Hentai 搜索语法规则和高级搜索技巧</string>
+
+    <!-- Remote Management -->
+    <string name="remote_management">远程管理</string>
+    <string name="remote_management_description">远程管理功能</string>
+    <string name="remote_management_summary">通过Web浏览器远程管理下载内容，可在电脑上浏览、删除画廊</string>
+    <string name="remote_auth_mode">认证模式</string>
+    <string name="remote_auth_mode_summary">选择远程连接的认证方式</string>
+    <string name="remote_delete_enabled">允许远程删除</string>
+    <string name="remote_delete_enabled_summary">允许远程客户端删除画廊（Web端仍需二次确认）</string>
+    <string name="delete_files_on_remote_delete">远程删除时删除文件</string>
+    <string name="delete_files_on_remote_delete_summary">远程删除画廊时同时删除下载的文件</string>
+    <string name="remote_access_info_default">请先启动传输服务以使用远程管理功能</string>
+    <string name="remote_open_in_browser">在浏览器中打开</string>
+    <string name="remote_copy_url">复制访问地址</string>
+
+    <!-- Remote Settings -->
+    <string name="remote_settings">远程设置</string>
+    <string name="auth_mode">认证模式</string>
+    <string name="auth_mode_none">无认证（仅局域网）</string>
+    <string name="auth_mode_password">密码认证</string>
+    <string name="auth_mode_token">Token认证</string>
+    <string name="local_bypass">局域网免认证</string>
+    <string name="local_bypass_summary">局域网IP段的设备无需认证即可访问</string>
+    <string name="settings_restart_required">设置将在重启服务后生效</string>
+
+    <!-- Address List -->
+    <string name="address_list">可访问地址</string>
+    <string name="copy">复制</string>
+    <string name="copied">已复制</string>
+
+    <!-- Send Data -->
+    <string name="send_data">发送数据</string>
+    <string name="send_bookmarks_all">书签-全部发送</string>
+    <string name="send_bookmarks_select">书签-选择发送</string>
+    <string name="send_downloads_all">下载-全部发送</string>
+    <string name="send_downloads_select">下载-选择发送</string>
+    <string name="send_favorites_all">收藏-全部发送</string>
+    <string name="send_favorites_select">收藏-选择发送</string>
+
+    <!-- Connect To -->
+    <string name="connect_to">连接到</string>
+    <string name="manual_connect">手动连接</string>
+    <string name="manual_connect_hint">IP:端口</string>
+    <string name="connect">连接</string>
+    <string name="disconnect">断开</string>
+    <string name="discovered_devices">发现的设备</string>
+    <string name="connected_devices">已连接</string>
+    <string name="push_data">推送</string>
+    <string name="no_devices_found">未发现设备</string>
+    <string name="no_connected_devices">暂无已连接设备</string>
+
+    <!-- Push -->
+    <string name="receive_confirm">接收确认</string>
+    <string name="receive_confirm_message">%1$s 想要发送 %2$d 个%3$s</string>
+    <string name="push_progress">推送中: %1$d/%2$d (%3$d%%)</string>
+    <string name="push_completed">推送完成</string>
+    <string name="push_failed">推送失败</string>
+
+    <!-- Data Selector -->
+    <string name="select_bookmarks">选择书签</string>
+    <string name="select_downloads">选择下载</string>
+    <string name="select_favorites">选择收藏</string>
+    <string name="select_data">选择数据</string>
+    <string name="selected_count">已选: %d</string>
+    <string name="prev_page">上一页</string>
+    <string name="next_page">下一页</string>
+    <string name="page_info">第 %1$d / %2$d 页</string>
+    <string name="pages_count">%d 页</string>
+
+    <!-- Receive Confirm -->
+    <string name="data_type">数据类型:</string>
+    <string name="source_device">来源设备:</string>
+    <string name="data_count">数据数量:</string>
+    <string name="bookmarks">书签</string>
+
+    <!-- Transfer Service -->
+    <string name="transfer_service_started">传输服务已启动</string>
+    <string name="transfer_service_stopped">传输服务已停止</string>
+    <string name="transfer_service_running">传输服务运行中</string>
+    <string name="connected_clients_count">已连接客户端: %d</string>
+    <string name="access_address">访问地址:</string>
+    <string name="token_label">Token</string>
+    <string name="remote_access_hint">在浏览器中打开上述地址即可访问远程管理界面</string>
+    <string name="cannot_open_browser">无法打开浏览器</string>
+    <string name="save">保存</string>
+    <string name="invalid_address">地址格式无效</string>
+    <string name="refreshing">刷新中...</string>
+    <string name="error_prefix">错误: %s</string>
+
+    <!-- Log Section -->
+    <string name="log_title">日志</string>
+    <string name="log_clear">清空</string>
+    <string name="log_export">导出</string>
+    <string name="log_exported">日志已导出: %s</string>
+    <string name="log_export_failed">导出失败</string>
+    <string name="log_level_all">全部</string>
+    <string name="log_level_debug">调试</string>
+    <string name="log_level_info">信息</string>
+    <string name="log_level_warn">警告</string>
+    <string name="log_level_error">错误</string>
 </resources>

@@ -178,6 +178,82 @@ object EhUtils {
         }
     }
 
+    // Match content inside brackets: [XXX], (XXX), （XXX）, {XXX}, ~XXX~
+    private val PATTERN_BRACKET_CONTENT: Pattern = Pattern.compile(
+        "(?:\\[([^\\]]+)\\])|(?:\\(([^\\)]+)\\))|(?:（([^）]+)）)|(?:\\{([^\\}]+)\\})|(?:~([^~]+)~)"
+    )
+
+    // Noise tokens that don't help with search
+    private val NOISE_PATTERNS = setOf(
+        "AI翻译", "机翻", "汉化", "中国翻訳", "個人漢化",
+        "无修", "DL版", "中国翻訳", "闲的没事干"
+    )
+
+    private fun isNoiseToken(token: String): Boolean {
+        if (token.length <= 1) return true
+        // Filter pure CJK single chars or noise words
+        if (NOISE_PATTERNS.any { token.contains(it) }) return true
+        return false
+    }
+
+    private fun isAlphaNumeric(c: Char): Boolean {
+        return c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
+    }
+
+    /**
+     * Tokenize gallery title into search keywords.
+     * Extracts author names, series names, and other meaningful tokens from brackets and title body,
+     * filters noise, and returns prioritized tokens for AND-based search.
+     *
+     * Example: "[Ourobot] GattoSpread (Animal Crossing)（闲的没事干AI翻译）"
+     *   -> ["Ourobot", "GattoSpread", "Animal Crossing"]
+     */
+    @JvmStatic
+    fun tokenizeTitle(title: String?): List<String> {
+        if (title == null) return emptyList()
+        val tokens = LinkedHashSet<String>()
+
+        // Step 1: Extract content from brackets first
+        val matcher = PATTERN_BRACKET_CONTENT.matcher(title)
+        while (matcher.find()) {
+            for (i in 1..5) {
+                val group = matcher.group(i)
+                if (group != null) {
+                    val trimmed = group.trim()
+                    // Split bracket content by common delimiters
+                    for (part in trimmed.split(Regex("[\\s|\\-_/]+"))) {
+                        val t = part.trim()
+                        if (t.isNotEmpty() && !isNoiseToken(t)) {
+                            tokens.add(t)
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 2: Extract text between brackets
+        var remaining = PATTERN_BRACKET_CONTENT.matcher(title).replaceAll(" ").trim()
+        // Remove leftover bracket characters
+        remaining = remaining.replace(Regex("[\\[\\]\\(\\)（）\\{\\}~]"), " ")
+        // Split by whitespace and common delimiters
+        for (part in remaining.split(Regex("[\\s|\\-]+"))) {
+            val t = part.trim()
+            if (t.isNotEmpty() && !isNoiseToken(t)) {
+                tokens.add(t)
+            }
+        }
+
+        // Step 3: Sort by priority - alphanumeric/English first, then by length desc
+        return tokens.toList().sortedWith(compareByDescending<String> { token ->
+            var score = 0
+            // English/alphanumeric tokens get higher priority
+            if (token.any { isAlphaNumeric(it) }) score += 1000
+            // Longer tokens are more distinctive
+            score += token.length
+            score
+        })
+    }
+
     @JvmStatic
     fun handleThumbUrlResolution(url: String?): String? {
         if (null == url) {

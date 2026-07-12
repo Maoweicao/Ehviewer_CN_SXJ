@@ -46,6 +46,12 @@
         <item>系统OCR (ML Kit)</item>
     </string-array>
 
+    <!-- Remote Auth Mode -->
+    <string-array name="remote_auth_mode_entries">
+        <item>无认证（仅局域网）</item>
+        <item>密码认证</item>
+        <item>Token认证</item>
+    </string-array>
 
 
 </resources>

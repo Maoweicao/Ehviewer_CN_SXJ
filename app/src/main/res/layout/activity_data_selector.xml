@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright 2025 EhViewer Contributors
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <!-- Top Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="16dp"
+        android:gravity="center_vertical"
+        android:background="?android:attr/colorPrimary"
+        android:elevation="4dp">
+
+        <TextView
+            android:id="@+id/title_text"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/selected_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textColor="@android:color/white"
+            android:layout_marginEnd="16dp" />
+
+        <Button
+            android:id="@+id/select_all_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="@string/select_all"
+            android:textSize="12sp"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/confirm_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="@string/confirm"
+            android:textSize="12sp" />
+
+    </LinearLayout>
+
+    <!-- Data List -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/data_list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+
+    <!-- Bottom Pagination -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="12dp"
+        android:gravity="center_vertical"
+        android:background="?android:attr/colorBackground"
+        android:elevation="4dp">
+
+        <Button
+            android:id="@+id/prev_page_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="@string/prev_page"
+            android:textSize="12sp"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/page_info"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:textAlignment="center"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/next_page_button"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="@string/next_page"
+            android:textSize="12sp"
+            android:layout_marginStart="8dp" />
+
+        <Spinner
+            android:id="@+id/page_size_spinner"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

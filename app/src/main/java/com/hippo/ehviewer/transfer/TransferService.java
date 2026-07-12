@@ -31,6 +31,7 @@ import androidx.core.content.ContextCompat;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.transfer.core.TransferServerManager;
 import com.hippo.ehviewer.transfer.data.ClientInfo;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.ehviewer.ui.transfer.TransferActivity;
 
 import java.util.ArrayList;
@@ -101,12 +102,14 @@ public class TransferService extends Service implements Observer {
      * 启动传输服务器
      */
     private void startServer() {
+        TransferLogger.getInstance().i(TAG, "startServer() 开始");
         mainHandler.post(() -> {
             try {
                 serverManager.start();
+                TransferLogger.getInstance().i(TAG, "服务器启动成功");
                 notifyStatus("传输服务已启动");
             } catch (Exception e) {
-                Log.e(TAG, "Failed to start server", e);
+                TransferLogger.getInstance().e(TAG, "服务器启动失败", e);
                 notifyError("启动服务失败: " + e.getMessage());
             }
         });
@@ -116,14 +119,14 @@ public class TransferService extends Service implements Observer {
      * 停止传输服务器
      */
     private void stopServer() {
-        mainHandler.post(() -> {
-            try {
-                serverManager.stop();
-                notifyStatus("传输服务已停止");
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to stop server", e);
-            }
-        });
+        TransferLogger.getInstance().i(TAG, "stopServer() 开始");
+        try {
+            serverManager.stop();
+            TransferLogger.getInstance().i(TAG, "服务器停止成功");
+            notifyStatus("传输服务已停止");
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "服务器停止失败", e);
+        }
     }
 
     /**

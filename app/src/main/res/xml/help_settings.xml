@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <Preference
+        android:key="search_help"
+        android:title="@string/search_help_title"
+        android:summary="@string/search_help_summary"
+        app:allowDividerAbove="true" />
+
+</PreferenceScreen>

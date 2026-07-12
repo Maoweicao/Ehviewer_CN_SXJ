@@ -20,6 +20,8 @@ import android.content.Context;
 import android.util.Log;
 
 import com.hippo.ehviewer.transfer.data.ClientInfo;
+import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +47,7 @@ public class TransferServerManager extends Observable {
     public TransferServerManager(Context context) {
         this.context = context;
         this.connectedClients = new CopyOnWriteArrayList<>();
-        this.httpServer = new TransferHttpServer(DEFAULT_PORT, this);
+        this.httpServer = new TransferHttpServer(DEFAULT_PORT, this, context);
         this.discoveryManager = new MdnsDiscoveryManager(context, SERVICE_TYPE, DEFAULT_PORT);
     }
 
@@ -53,15 +55,19 @@ public class TransferServerManager extends Observable {
      * 启动传输服务器
      */
     public void start() throws Exception {
-        Log.d(TAG, "Starting transfer server...");
+        TransferLogger logger = TransferLogger.getInstance();
+        logger.i(TAG, "启动传输服务器...");
         
         // 启动HTTP服务器
+        logger.d(TAG, "启动HTTP服务器，端口: " + DEFAULT_PORT);
         httpServer.start();
-        Log.d(TAG, "HTTP Server started on port " + DEFAULT_PORT);
+        logger.i(TAG, "HTTP服务器启动成功");
 
         // 注册mDNS服务
-        discoveryManager.registerService(getServiceName(), SERVICE_TYPE, DEFAULT_PORT);
-        Log.d(TAG, "mDNS service registered: " + getServiceName());
+        String serviceName = getServiceName();
+        logger.d(TAG, "注册mDNS服务: " + serviceName);
+        discoveryManager.registerService(serviceName, SERVICE_TYPE, DEFAULT_PORT);
+        logger.i(TAG, "mDNS服务注册成功");
 
         isRunning = true;
         setChanged();
@@ -72,19 +78,23 @@ public class TransferServerManager extends Observable {
      * 停止传输服务器
      */
     public void stop() throws Exception {
-        Log.d(TAG, "Stopping transfer server...");
+        TransferLogger logger = TransferLogger.getInstance();
+        logger.i(TAG, "停止传输服务器...");
         
         if (httpServer != null) {
+            logger.d(TAG, "停止HTTP服务器");
             httpServer.stop();
         }
 
         if (discoveryManager != null) {
+            logger.d(TAG, "注销mDNS服务");
             discoveryManager.unregisterService();
         }
 
         isRunning = false;
         connectedClients.clear();
         
+        logger.i(TAG, "传输服务器已停止");
         setChanged();
         notifyObservers("传输服务已停止");
     }
@@ -94,9 +104,9 @@ public class TransferServerManager extends Observable {
      */
     public void addClient(ClientInfo client) {
         connectedClients.add(client);
+        TransferLogger.getInstance().i(TAG, "客户端已连接: " + client.getDeviceName());
         setChanged();
         notifyObservers("客户端已连接: " + client.getDeviceName());
-        Log.d(TAG, "Client added: " + client);
     }
 
     /**
@@ -104,9 +114,9 @@ public class TransferServerManager extends Observable {
      */
     public void removeClient(String deviceId) {
         connectedClients.removeIf(client -> client.getDeviceId().equals(deviceId));
+        TransferLogger.getInstance().i(TAG, "客户端已断开: " + deviceId);
         setChanged();
         notifyObservers("客户端已断开连接");
-        Log.d(TAG, "Client removed: " + deviceId);
     }
 
     /**
@@ -155,6 +165,34 @@ public class TransferServerManager extends Observable {
      */
     public int getPort() {
         return DEFAULT_PORT;
+    }
+    
+    /**
+     * 获取HTTP服务器
+     */
+    public TransferHttpServer getHttpServer() {
+        return httpServer;
+    }
+    
+    /**
+     * 获取认证管理器
+     */
+    public AuthManager getAuthManager() {
+        return httpServer.getAuthManager();
+    }
+    
+    /**
+     * 获取生成的密码（密码模式）
+     */
+    public String getGeneratedPassword() {
+        return httpServer.getGeneratedPassword();
+    }
+    
+    /**
+     * 获取生成的Token（Token模式）
+     */
+    public String getGeneratedToken() {
+        return httpServer.getGeneratedToken();
     }
 
     /**

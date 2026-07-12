@@ -753,6 +753,10 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         onBackPressed()
     }
 
+    @Implemented(SearchBar.Helper::class)
+    override fun onClickAdvance() {
+    }
+
     override fun onExpand(expanded: Boolean) {
         if (expanded) {
             mActionFabDrawable!!.setDelete(ANIMATE_TIME)

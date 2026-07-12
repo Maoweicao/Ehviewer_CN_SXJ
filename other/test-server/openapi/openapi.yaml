@@ -1,0 +1,1334 @@
+openapi: 3.0.3
+info:
+  title: EhViewer Remote Manager API
+  description: |
+    EhViewer Android 应用远程管理 API。
+    支持画廊浏览、文件管理、设备信息查询等功能。
+  version: 1.0.0
+  contact:
+    name: EhViewer
+    url: https://github.com/xiaojieonly/Ehviewer_CN_SXJ
+
+servers:
+  - url: http://localhost:8080
+    description: 本地测试服务器
+  - url: http://{host}:8080
+    description: Android 设备服务器
+    variables:
+      host:
+        default: localhost
+        description: Android 设备 IP 地址
+
+tags:
+  - name: Auth
+    description: 认证管理
+  - name: Galleries
+    description: 画廊操作
+  - name: Pages
+    description: 画廊页面/图片
+  - name: Labels
+    description: 标签/分类管理
+  - name: Folders
+    description: 文件夹管理
+  - name: Files
+    description: 文件操作
+  - name: System
+    description: 系统信息
+  - name: Push
+    description: 推送任务
+  - name: Settings
+    description: 远程设置
+  - name: Device
+    description: 设备信息
+  - name: Debug
+    description: 调试工具
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: UUID
+    QueryToken:
+      type: apiKey
+      in: query
+      name: token
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+          example: "Not found"
+
+    AuthStatus:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [none, password, token]
+          example: none
+        authenticated:
+          type: boolean
+          example: true
+        isLocalNetwork:
+          type: boolean
+          example: true
+        remoteIp:
+          type: string
+          example: "192.168.1.100"
+
+    LoginRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          description: 密码（password 模式）
+        token:
+          type: string
+          description: Token（token 模式）
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        token:
+          type: string
+          example: "session-uuid"
+        expires:
+          type: integer
+          description: 过期时间（秒）
+          example: 86400
+        mode:
+          type: string
+          enum: [none, password, token]
+
+    Gallery:
+      type: object
+      properties:
+        gid:
+          type: integer
+          format: int64
+          example: 3344621
+        token:
+          type: string
+          example: "86299b843d"
+        title:
+          type: string
+          example: "[Author] Gallery Title"
+        titleJpn:
+          type: string
+          example: "[作者] 日文标题"
+        thumb:
+          type: string
+          format: uri
+        category:
+          type: string
+          enum: [Doujinshi, Manga, Artist CG, Game CG, Image Set, Cosplay]
+        posted:
+          type: string
+          example: "2026-01-15"
+        uploader:
+          type: string
+          example: "user_alpha"
+        rating:
+          type: number
+          format: float
+          example: 4.5
+        pages:
+          type: integer
+          example: 25
+        language:
+          type: string
+          example: "Chinese"
+        tags:
+          type: array
+          items:
+            type: string
+          example: ["artist:artist1", "language:chinese", "female:tag1"]
+        label:
+          type: string
+          example: "收藏"
+
+    GalleryDetail:
+      allOf:
+        - $ref: "#/components/schemas/Gallery"
+        - type: object
+          properties:
+            apiUid:
+              type: integer
+              format: int64
+            apiKey:
+              type: string
+            torrentCount:
+              type: integer
+            torrentUrl:
+              type: string
+            archiveUrl:
+              type: string
+            parent:
+              type: string
+            visible:
+              type: string
+            size:
+              type: string
+              example: "125 MB"
+            favoriteCount:
+              type: integer
+            isFavorited:
+              type: boolean
+            ratingCount:
+              type: integer
+            previewPages:
+              type: integer
+            comments:
+              type: array
+              items:
+                $ref: "#/components/schemas/Comment"
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        user:
+          type: string
+        content:
+          type: string
+        score:
+          type: integer
+        time:
+          type: string
+
+    GalleryListResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          example: 100
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        galleries:
+          type: array
+          items:
+            $ref: "#/components/schemas/Gallery"
+
+    GalleryBatchDeleteRequest:
+      type: object
+      properties:
+        gids:
+          type: array
+          items:
+            type: integer
+            format: int64
+          example: [3344621, 3344622]
+
+    PageListResponse:
+      type: object
+      properties:
+        gid:
+          type: integer
+          format: int64
+        pages:
+          type: integer
+        pageList:
+          type: array
+          items:
+            $ref: "#/components/schemas/PageInfo"
+
+    PageInfo:
+      type: object
+      properties:
+        page:
+          type: integer
+        state:
+          type: string
+          enum: [pending, downloaded, cached]
+        pToken:
+          type: string
+
+    Label:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "默认"
+        count:
+          type: integer
+          example: 67
+
+    LabelListResponse:
+      type: object
+      properties:
+        labels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Label"
+
+    Folder:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "Output"
+        path:
+          type: string
+          example: "/sdcard/EhViewer/Output"
+        fileCount:
+          type: integer
+          example: 15
+        totalSize:
+          type: integer
+          format: int64
+        totalSizeFormatted:
+          type: string
+          example: "50.0 MB"
+
+    FolderListResponse:
+      type: object
+      properties:
+        folders:
+          type: array
+          items:
+            $ref: "#/components/schemas/Folder"
+
+    FileItem:
+      type: object
+      properties:
+        name:
+          type: string
+          example: "image_001.jpg"
+        path:
+          type: string
+          example: "/sdcard/EhViewer/Output/image_001.jpg"
+        size:
+          type: integer
+          format: int64
+        sizeFormatted:
+          type: string
+          example: "1.5 MB"
+        lastModified:
+          type: integer
+          format: int64
+        lastModifiedFormatted:
+          type: string
+          example: "2026/1/15 10:30:00"
+        extension:
+          type: string
+          example: "jpg"
+
+    FileListResponse:
+      type: object
+      properties:
+        folder:
+          type: string
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        sort:
+          type: string
+          enum: [time, name, size]
+        order:
+          type: string
+          enum: [asc, desc]
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileItem"
+
+    FilePreviewResponse:
+      type: object
+      properties:
+        name:
+          type: string
+        size:
+          type: integer
+        sizeFormatted:
+          type: string
+        type:
+          type: string
+          enum: [text, image, binary]
+        content:
+          type: string
+        truncated:
+          type: boolean
+
+    BatchDeleteRequest:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: string
+          example: ["file1.txt", "file2.txt"]
+
+    BatchDeleteResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deleted:
+          type: integer
+        failed:
+          type: integer
+
+    SystemInfo:
+      type: object
+      properties:
+        deviceName:
+          type: string
+          example: "Pixel 7"
+        deviceManufacturer:
+          type: string
+          example: "Google"
+        androidVersion:
+          type: string
+          example: "14"
+        sdkVersion:
+          type: integer
+          example: 34
+        appVersion:
+          type: string
+          example: "2.0.2.2"
+        appVersionCode:
+          type: integer
+          example: 100
+        downloadLocation:
+          type: string
+        totalGalleries:
+          type: integer
+        downloadedGalleries:
+          type: integer
+        totalPages:
+          type: integer
+        storageTotal:
+          type: integer
+          format: int64
+        storageUsed:
+          type: integer
+          format: int64
+        storageFree:
+          type: integer
+          format: int64
+        storageTotalFormatted:
+          type: string
+        storageUsedFormatted:
+          type: string
+        storageFreeFormatted:
+          type: string
+        authMode:
+          type: string
+          enum: [none, password, token]
+        deleteEnabled:
+          type: boolean
+        syncDownloadEnabled:
+          type: boolean
+
+    SystemStats:
+      type: object
+      properties:
+        totalGalleries:
+          type: integer
+        downloading:
+          type: integer
+        waiting:
+          type: integer
+        finished:
+          type: integer
+        failed:
+          type: integer
+        none:
+          type: integer
+
+    PushTask:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [bookmarks, downloads, favorites]
+        status:
+          type: string
+          enum: [pending, accepted, rejected, transferring, completed, failed]
+        mode:
+          type: string
+          enum: [all, selected]
+        createdTime:
+          type: integer
+          format: int64
+        fromDevice:
+          type: string
+        progress:
+          type: number
+          format: float
+        total:
+          type: integer
+        transferred:
+          type: integer
+
+    PushCreateRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [bookmarks, downloads, favorites]
+        mode:
+          type: string
+          enum: [all, selected]
+        selectedIds:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    PushListResponse:
+      type: object
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushTask"
+
+    ReceiveSettings:
+      type: object
+      properties:
+        autoReceiveBookmarks:
+          type: boolean
+          example: false
+        autoReceiveDownloads:
+          type: boolean
+          example: false
+        autoReceiveFavorites:
+          type: boolean
+          example: false
+        pageSize:
+          type: integer
+          example: 50
+
+    DeviceInfo:
+      type: object
+      properties:
+        deviceId:
+          type: string
+        deviceName:
+          type: string
+        deviceType:
+          type: string
+          example: "android"
+        appVersion:
+          type: string
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+
+    ThumbnailParams:
+      type: object
+      properties:
+        maxWidth:
+          type: integer
+          description: 最大宽度（像素）
+          example: 300
+        maxHeight:
+          type: integer
+          description: 最大高度（像素）
+          example: 400
+        quality:
+          type: integer
+          description: JPEG 质量 (1-100)
+          example: 80
+
+security:
+  - BearerAuth: []
+  - QueryToken: []
+
+paths:
+  # ==================== Auth ====================
+  /api/v1/auth/status:
+    get:
+      tags: [Auth]
+      summary: 获取认证状态
+      description: 返回当前认证模式、是否已认证、是否局域网等信息
+      security: []
+      operationId: getAuthStatus
+      responses:
+        "200":
+          description: 认证状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthStatus"
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 登录
+      description: 使用密码或 Token 进行认证
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: 认证失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 登出
+      description: 注销当前会话
+      operationId: logout
+      responses:
+        "200":
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # ==================== Galleries ====================
+  /api/v1/galleries:
+    get:
+      tags: [Galleries]
+      summary: 获取画廊列表
+      description: 分页获取画廊列表，支持搜索和标签筛选
+      operationId: getGalleries
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: label
+          in: query
+          description: 按标签筛选
+          schema:
+            type: string
+        - name: search
+          in: query
+          description: 搜索关键词
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 画廊列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryListResponse"
+
+    query:
+      tags: [Galleries]
+      summary: QUERY 方法查询画廊
+      description: 使用 HTTP QUERY 方法进行高级筛选
+      operationId: queryGalleries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                filter:
+                  type: object
+                  properties:
+                    category:
+                      type: array
+                      items:
+                        type: string
+      responses:
+        "200":
+          description: 画廊列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryListResponse"
+
+  /api/v1/galleries/{gid}:
+    get:
+      tags: [Galleries]
+      summary: 获取画廊详情
+      operationId: getGalleryDetail
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 画廊详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryDetail"
+        "404":
+          description: 画廊不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      tags: [Galleries]
+      summary: 删除画廊
+      operationId: deleteGallery
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/galleries/batch:
+    delete:
+      tags: [Galleries]
+      summary: 批量删除画廊
+      operationId: batchDeleteGalleries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GalleryBatchDeleteRequest"
+      responses:
+        "200":
+          description: 批量删除结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDeleteResponse"
+
+  /api/v1/galleries/{gid}/thumbnail:
+    get:
+      tags: [Galleries]
+      summary: 获取画廊缩略图
+      description: 返回缩略图图片数据（JPEG）
+      operationId: getGalleryThumbnail
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: maxWidth
+          in: query
+          schema:
+            type: integer
+            default: 300
+        - name: maxHeight
+          in: query
+          schema:
+            type: integer
+            default: 400
+        - name: quality
+          in: query
+          schema:
+            type: integer
+            default: 80
+      responses:
+        "200":
+          description: 缩略图图片
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: 画廊不存在
+
+  # ==================== Pages ====================
+  /api/v1/galleries/{gid}/pages:
+    get:
+      tags: [Pages]
+      summary: 获取画廊页面列表
+      description: 返回画廊所有页面信息及下载状态
+      operationId: getGalleryPages
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 页面列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PageListResponse"
+
+  /api/v1/galleries/{gid}/pages/{page}:
+    get:
+      tags: [Pages]
+      summary: 获取画廊页面图片
+      description: 返回指定页面的图片数据
+      operationId: getGalleryPageImage
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+        - name: page
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: mode
+          in: query
+          description: 获取模式（local=本地, proxy=代理下载）
+          schema:
+            type: string
+            enum: [local, proxy]
+            default: local
+      responses:
+        "200":
+          description: 图片数据
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: 页面不存在
+
+  # ==================== Labels ====================
+  /api/v1/labels:
+    get:
+      tags: [Labels]
+      summary: 获取标签列表
+      description: 获取所有下载标签及其画廊数量
+      operationId: getLabels
+      responses:
+        "200":
+          description: 标签列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LabelListResponse"
+
+  /api/v1/labels/{label}/galleries:
+    get:
+      tags: [Labels]
+      summary: 获取标签下的画廊
+      operationId: getLabelGalleries
+      parameters:
+        - name: label
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: 画廊列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryListResponse"
+
+  # ==================== Folders ====================
+  /api/v1/folders:
+    get:
+      tags: [Folders]
+      summary: 获取文件夹列表
+      description: 获取 EhViewer 所有可用文件夹
+      operationId: getFolders
+      responses:
+        "200":
+          description: 文件夹列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FolderListResponse"
+
+  # ==================== Files ====================
+  /api/v1/folders/{folder}/files:
+    get:
+      tags: [Files]
+      summary: 获取文件列表
+      description: 分页获取指定文件夹中的文件
+      operationId: getFiles
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [time, name, size]
+            default: time
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 文件列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileListResponse"
+
+  /api/v1/folders/{folder}/files/{filename}:
+    get:
+      tags: [Files]
+      summary: 下载文件
+      description: 下载指定文件，支持 HTTP Range 断点续传
+      operationId: downloadFile
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          description: 断点续传范围
+          schema:
+            type: string
+            example: "bytes=0-1023"
+      responses:
+        "200":
+          description: 文件内容
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 部分内容（断点续传）
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: 文件不存在
+
+    delete:
+      tags: [Files]
+      summary: 删除文件
+      operationId: deleteFile
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/folders/{folder}/files/{filename}/preview:
+    get:
+      tags: [Files]
+      summary: 预览文件
+      description: 获取文件预览内容（支持文本文件）
+      operationId: previewFile
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 文件预览
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FilePreviewResponse"
+
+  /api/v1/folders/{folder}/files/batch:
+    delete:
+      tags: [Files]
+      summary: 批量删除文件
+      operationId: batchDeleteFiles
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchDeleteRequest"
+      responses:
+        "200":
+          description: 批量删除结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchDeleteResponse"
+
+  # ==================== System ====================
+  /api/v1/system/info:
+    get:
+      tags: [System]
+      summary: 获取系统信息
+      description: 返回设备信息、存储状态、应用版本等
+      operationId: getSystemInfo
+      responses:
+        "200":
+          description: 系统信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+
+  /api/v1/system/stats:
+    get:
+      tags: [System]
+      summary: 获取系统统计
+      description: 返回画廊下载状态统计
+      operationId: getSystemStats
+      responses:
+        "200":
+          description: 系统统计
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStats"
+
+  # ==================== Push ====================
+  /api/v1/push/create:
+    post:
+      tags: [Push]
+      summary: 创建推送任务
+      operationId: createPushTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushCreateRequest"
+      responses:
+        "200":
+          description: 推送任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTask"
+
+  /api/v1/push/tasks:
+    get:
+      tags: [Push]
+      summary: 获取推送任务列表
+      operationId: getPushTasks
+      responses:
+        "200":
+          description: 推送任务列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushListResponse"
+
+  /api/v1/push/tasks/{id}:
+    get:
+      tags: [Push]
+      summary: 获取推送任务详情
+      operationId: getPushTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 推送任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTask"
+
+  /api/v1/push/tasks/{id}/accept:
+    post:
+      tags: [Push]
+      summary: 接受推送任务
+      operationId: acceptPushTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 任务已接受
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/push/tasks/{id}/reject:
+    post:
+      tags: [Push]
+      summary: 拒绝推送任务
+      operationId: rejectPushTask
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 任务已拒绝
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/push/tasks/{id}/data:
+    get:
+      tags: [Push]
+      summary: 获取推送任务数据
+      description: 分页获取推送任务的数据内容
+      operationId: getPushTaskData
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: 任务数据
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Gallery"
+
+  # ==================== Settings ====================
+  /api/v1/settings/receive:
+    get:
+      tags: [Settings]
+      summary: 获取接收设置
+      operationId: getReceiveSettings
+      responses:
+        "200":
+          description: 接收设置
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReceiveSettings"
+
+    put:
+      tags: [Settings]
+      summary: 更新接收设置
+      operationId: updateReceiveSettings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ReceiveSettings"
+      responses:
+        "200":
+          description: 设置已更新
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # ==================== Device ====================
+  /api/v1/device/info:
+    get:
+      tags: [Device]
+      summary: 获取设备信息
+      description: 返回连接设备的基本信息（用于设备发现验证）
+      security: []
+      operationId: getDeviceInfo
+      responses:
+        "200":
+          description: 设备信息
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceInfo"
+
+  # ==================== Debug ====================
+  /api/v1/debug:
+    get:
+      tags: [Debug]
+      summary: API 调试页面
+      description: 返回交互式 API 测试页面（HTML）
+      operationId: getDebugPage
+      responses:
+        "200":
+          description: 调试页面
+          content:
+            text/html:
+              schema:
+                type: string
+
+  # ==================== OpenAPI ====================
+  /openapi.yaml:
+    get:
+      tags: [Debug]
+      summary: OpenAPI 规范文件
+      description: 返回本 API 的 OpenAPI 3.0 YAML 规范
+      security: []
+      operationId: getOpenApiSpec
+      responses:
+        "200":
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+
+  /docs:
+    get:
+      tags: [Debug]
+      summary: Swagger UI 文档页面
+      description: 返回 Swagger UI 交互式文档页面
+      security: []
+      operationId: getSwaggerUI
+      responses:
+        "200":
+          description: Swagger UI 页面
+          content:
+            text/html:
+              schema:
+                type: string

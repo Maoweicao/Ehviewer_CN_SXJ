@@ -436,21 +436,51 @@ public class EhTagDatabase {
         return searchTag(tagList, keyword);
     }
 
-    private List<Pair<String, String>> searchTag(List<Tag> tags, String keyword) {
+    private boolean containsCJK(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
+                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS) {
+                return true;
+            }
+        }
+        return false;
+    }
 
+    private List<Pair<String, String>> searchTag(List<Tag> tags, String keyword) {
+        boolean isCJK = containsCJK(keyword);
         List<Pair<String, String>> searchList = new ArrayList<>();
+        List<Pair<String, String>> chineseMatchList = new ArrayList<>();
+        List<Pair<String, String>> englishMatchList = new ArrayList<>();
         int total = 0;
         for (Tag tag : tags) {
-            if (total >= 40) {
+            if (total >= 80) {
                 break;
             }
             if (tag.involve(keyword)) {
-                searchList.add(new Pair<>(tag.chinese, tag.english));
+                boolean chineseMatch = tag.chinese.contains(keyword);
+                boolean englishMatch = tag.english.contains(keyword);
+                if (chineseMatch && !"null".equals(tag.chinese)) {
+                    chineseMatchList.add(new Pair<>(tag.chinese, tag.english));
+                } else if (englishMatch) {
+                    englishMatchList.add(new Pair<>(tag.chinese, tag.english));
+                } else {
+                    searchList.add(new Pair<>(tag.chinese, tag.english));
+                }
                 total++;
             }
         }
-
-        return searchList;
+        // When user types CJK, prioritize Chinese translation matches
+        if (isCJK) {
+            searchList.addAll(chineseMatchList);
+            searchList.addAll(englishMatchList);
+        } else {
+            searchList.addAll(0, chineseMatchList);
+            searchList.addAll(englishMatchList);
+        }
+        return searchList.subList(0, Math.min(searchList.size(), 40));
     }
     public List<Tag> getTagList() {
         return tagList;

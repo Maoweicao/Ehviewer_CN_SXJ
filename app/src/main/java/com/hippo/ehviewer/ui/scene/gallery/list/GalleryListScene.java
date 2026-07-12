@@ -224,7 +224,7 @@ public final class GalleryListScene extends BaseScene
     @Nullable
     private DrawerArrowDrawable mLeftDrawable;
     @Nullable
-    private AddDeleteDrawable mRightDrawable;
+    private Drawable mRightDrawable;
     @Nullable
     private SearchBarMover mSearchBarMover;
     @Nullable
@@ -725,7 +725,7 @@ public final class GalleryListScene extends BaseScene
         refreshLayout.setHeaderTranslationY(paddingTopSB);
 
         mLeftDrawable = new DrawerArrowDrawable(context, AttrResources.getAttrColor(context, R.attr.drawableColorPrimary));
-        mRightDrawable = new AddDeleteDrawable(context, AttrResources.getAttrColor(context, R.attr.drawableColorPrimary));
+        mRightDrawable = getResources().getDrawable(R.drawable.v_close_dark_x24);
         mSearchBar.setLeftDrawable(mLeftDrawable);
         mSearchBar.setRightDrawable(mRightDrawable);
         mSearchBar.setHelper(this);
@@ -1951,9 +1951,12 @@ public final class GalleryListScene extends BaseScene
 
         if (mSearchBar.getState() == SearchBar.STATE_NORMAL) {
             toggleDrawer(Gravity.LEFT);
-        } else {
-            setState(STATE_NORMAL);
         }
+    }
+
+    @Override
+    public void onClickAdvance() {
+        setState(STATE_SEARCH);
     }
 
     @Override
@@ -1961,12 +1964,10 @@ public final class GalleryListScene extends BaseScene
         if (null == mSearchBar) {
             return;
         }
-        if (mSearchBar.getState() == SearchBar.STATE_NORMAL) {
-            setState(STATE_SEARCH);
-        } else {
-            // 右侧图标恢复为原本的：清空搜索框内容
-            mSearchBar.setText("");
-        }
+        mSearchBar.clearTagChips();
+        mSearchBar.setText("");
+        mSearchBar.resetManualControl();
+        setState(STATE_NORMAL);
     }
 
     @Override
@@ -2044,22 +2045,19 @@ public final class GalleryListScene extends BaseScene
             return;
         }
 
-        switch (oldState) {
+            switch (oldState) {
             default:
             case SearchBar.STATE_NORMAL:
                 mLeftDrawable.setArrow(animation ? ANIMATE_TIME : 0);
-                mRightDrawable.setDelete(animation ? ANIMATE_TIME : 0);
                 break;
             case SearchBar.STATE_SEARCH:
                 if (newState == SearchBar.STATE_NORMAL) {
                     mLeftDrawable.setMenu(animation ? ANIMATE_TIME : 0);
-                    mRightDrawable.setAdd(animation ? ANIMATE_TIME : 0);
                 }
                 break;
             case SearchBar.STATE_SEARCH_LIST:
                 if (newState == STATE_NORMAL) {
                     mLeftDrawable.setMenu(animation ? ANIMATE_TIME : 0);
-                    mRightDrawable.setAdd(animation ? ANIMATE_TIME : 0);
                 }
                 break;
         }

@@ -59,4 +59,10 @@
         app:allowDividerAbove="true"
         app:fragment="com.hippo.ehviewer.ui.fragment.LabFragment" />
 
+    <com.hippo.ehviewer.ui.fragment.BasePreference
+        android:icon="@drawable/v_help_circle_x24"
+        android:title="@string/settings_help"
+        app:allowDividerAbove="true"
+        app:fragment="com.hippo.ehviewer.ui.fragment.HelpFragment" />
+
 </PreferenceScreen>

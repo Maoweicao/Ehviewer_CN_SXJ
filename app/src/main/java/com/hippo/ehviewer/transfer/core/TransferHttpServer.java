@@ -16,44 +16,110 @@
 
 package com.hippo.ehviewer.transfer.core;
 
+import android.content.Context;
 import android.util.Log;
 
+import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.transfer.api.AuthApiHandler;
+import com.hippo.ehviewer.transfer.api.DebugApiHandler;
+import com.hippo.ehviewer.transfer.api.FileApiHandler;
+import com.hippo.ehviewer.transfer.api.GalleryApiHandler;
+import com.hippo.ehviewer.transfer.api.LabelApiHandler;
+import com.hippo.ehviewer.transfer.api.PageApiHandler;
+import com.hippo.ehviewer.transfer.api.PushApiHandler;
+import com.hippo.ehviewer.transfer.api.ResponseBuilder;
+import com.hippo.ehviewer.transfer.api.SettingsApiHandler;
+import com.hippo.ehviewer.transfer.api.SystemApiHandler;
+import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.auth.AuthMode;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.UUID;
 
 import fi.iki.elonen.NanoHTTPD;
 
 /**
  * HTTP传输服务器
- * 提供REST API接口用于文件传输和任务管理
+ * 提供REST API接口用于远程管理
  *
  * 端点:
- * - GET  /api/v1/device/info             获取设备信息
- * - POST /api/v1/transfer/tasks          创建传输任务（type: backup|restore|sync|bookmarks|downloads|favorites|export）
- * - GET  /api/v1/transfer/tasks/{id}     查询传输状态
- * - PATCH /api/v1/transfer/tasks/{id}    暂停/恢复传输
- * - PUT  /api/v1/transfer/files/{fileId} 分块上传文件（Content-Range 可选）
+ * - GET    /api/v1/auth/status            获取认证状态
+ * - POST   /api/v1/auth/login             登录认证
+ * - POST   /api/v1/auth/logout            登出
+ * - GET    /api/v1/galleries              获取画廊列表
+ * - QUERY  /api/v1/galleries              查询画廊列表（带过滤）
+ * - GET    /api/v1/galleries/{gid}        获取画廊详情
+ * - DELETE /api/v1/galleries/{gid}        删除画廊
+ * - DELETE /api/v1/galleries/batch        批量删除画廊
+ * - GET    /api/v1/galleries/{gid}/thumbnail  获取缩略图
+ * - GET    /api/v1/galleries/{gid}/pages  获取页面列表
+ * - GET    /api/v1/galleries/{gid}/pages/{page}  获取图片
+ * - GET    /api/v1/labels                 获取标签列表
+ * - GET    /api/v1/labels/{label}/galleries  获取标签下的画廊
+ * - GET    /api/v1/system/info            获取系统信息
+ * - GET    /api/v1/system/stats           获取系统统计
+ * - GET    /api/v1/debug                  调试页面
+ * - POST   /api/v1/push/create            创建推送任务
+ * - GET    /api/v1/push/tasks             获取待处理任务列表
+ * - GET    /api/v1/push/tasks/{id}        获取任务状态
+ * - POST   /api/v1/push/tasks/{id}/accept 接受任务
+ * - POST   /api/v1/push/tasks/{id}/reject 拒绝任务
+ * - GET    /api/v1/push/tasks/{id}/data   获取任务数据
+ * - GET    /api/v1/settings/receive       获取接收设置
+ * - PUT    /api/v1/settings/receive       更新接收设置
+ * - GET    /api/v1/device/info            设备信息
+ * - GET    /docs                          Swagger UI 文档页面
+ * - GET    /openapi.yaml                  OpenAPI 规范文件
+ * - GET    /web/*                         静态资源
  */
 public class TransferHttpServer {
 
     private static final String TAG = "TransferHttpServer";
     private final int port;
     private final TransferServerManager serverManager;
+    private final Context context;
     private boolean isRunning = false;
 
     private HttpServerImpl httpServer;
+    private AuthManager authManager;
+    
+    // API处理器
+    private AuthApiHandler authApiHandler;
+    private GalleryApiHandler galleryApiHandler;
+    private PageApiHandler pageApiHandler;
+    private LabelApiHandler labelApiHandler;
+    private SystemApiHandler systemApiHandler;
+    private DebugApiHandler debugApiHandler;
+    private PushApiHandler pushApiHandler;
+    private SettingsApiHandler settingsApiHandler;
+    private FileApiHandler fileApiHandler;
 
-    // 内存中的任务与文件状态（示例实现）
-    private final Map<String, Map<String, Object>> tasks = new HashMap<>();
-    private final Map<String, Long> fileTransferred = new HashMap<>();
-
-    public TransferHttpServer(int port, TransferServerManager serverManager) {
+    public TransferHttpServer(int port, TransferServerManager serverManager, Context context) {
         this.port = port;
         this.serverManager = serverManager;
+        this.context = context;
+        
+        // 初始化认证管理器
+        this.authManager = new AuthManager();
+        String authModeStr = Settings.getRemoteAuthMode();
+        AuthMode authMode = AuthMode.fromString(authModeStr);
+        authManager.initialize(authMode);
+        
+        // 初始化API处理器
+        this.authApiHandler = new AuthApiHandler(context, authManager);
+        this.galleryApiHandler = new GalleryApiHandler(context, authManager);
+        this.pageApiHandler = new PageApiHandler(context, authManager);
+        this.labelApiHandler = new LabelApiHandler(context, authManager);
+        this.systemApiHandler = new SystemApiHandler(context, authManager);
+        this.debugApiHandler = new DebugApiHandler(context, authManager);
+        this.pushApiHandler = new PushApiHandler(context, authManager);
+        this.settingsApiHandler = new SettingsApiHandler(context, authManager);
+        this.fileApiHandler = new FileApiHandler(context, authManager);
     }
 
     /** 启动HTTP服务器 */
@@ -81,6 +147,15 @@ public class TransferHttpServer {
 
     /** 获取服务器端口 */
     public int getPort() { return port; }
+    
+    /** 获取认证管理器 */
+    public AuthManager getAuthManager() { return authManager; }
+    
+    /** 获取生成的密码（密码模式） */
+    public String getGeneratedPassword() { return authManager.getGeneratedPassword(); }
+    
+    /** 获取生成的Token（Token模式） */
+    public String getGeneratedToken() { return authManager.getGeneratedToken(); }
 
     private class HttpServerImpl extends NanoHTTPD {
         HttpServerImpl(int port) { super(port); }
@@ -89,137 +164,234 @@ public class TransferHttpServer {
         public Response serve(IHTTPSession session) {
             String uri = session.getUri();
             Method method = session.getMethod();
-            Log.d(TAG, method + " " + uri);
+            String methodName = method.name();
+            String remoteIp = session.getRemoteIpAddress();
+            
+            TransferLogger.getInstance().d(TAG, 
+                String.format("请求: %s %s [%s]", methodName, uri, remoteIp));
 
             try {
-                if (Method.GET.equals(method) && "/api/v1/device/info".equals(uri)) {
-                    String deviceName = android.os.Build.MODEL;
-                    String json = "{" +
-                            "\"version\":\"1.0\"," +
-                            "\"device_name\":\"" + deviceName + "\"," +
-                            "\"device_type\":\"android\"," +
-                            "\"capabilities\":\"file_transfer,backup,restore\"" +
-                            "}";
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
+                // 支持QUERY方法（RFC 10008）
+                if ("QUERY".equals(methodName)) {
+                    return handleRequest(session, uri, "QUERY");
                 }
-
-                if (Method.POST.equals(method) && "/api/v1/transfer/tasks".equals(uri)) {
-                    String body = readBody(session);
-                    String taskId = UUID.randomUUID().toString();
-                    Map<String, Object> status = new HashMap<>();
-                    status.put("task_id", taskId);
-                    status.put("status", "pending");
-                    status.put("type", extractJsonField(body, "type", "backup"));
-                    status.put("transferred_files", 0);
-                    status.put("total_files", 0);
-                    tasks.put(taskId, status);
-                    String json = "{\"task_id\":\"" + taskId + "\",\"status\":\"pending\"}";
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
-                }
-
-                if (Method.GET.equals(method) && uri.startsWith("/api/v1/transfer/tasks/")) {
-                    String taskId = uri.substring("/api/v1/transfer/tasks/".length());
-                    Map<String, Object> status = tasks.get(taskId);
-                    if (status == null) {
-                        return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json", "{}");
-                    }
-                    String json = toJson(status);
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
-                }
-
-                if (Method.PATCH.equals(method) && uri.startsWith("/api/v1/transfer/tasks/")) {
-                    String taskId = uri.substring("/api/v1/transfer/tasks/".length());
-                    Map<String, Object> status = tasks.get(taskId);
-                    String body = readBody(session);
-                    String newStatus = extractJsonField(body, "status", null);
-                    if (status != null && newStatus != null) {
-                        status.put("status", newStatus);
-                        return newFixedLengthResponse(Response.Status.OK, "application/json", toJson(status));
-                    }
-                    return newFixedLengthResponse(Response.Status.BAD_REQUEST, "application/json", "{}");
-                }
-
-                if (Method.PUT.equals(method) && uri.startsWith("/api/v1/transfer/files/")) {
-                    String fileId = uri.substring("/api/v1/transfer/files/".length());
-                    long contentLength = getContentLength(session);
-                    Long progressed = fileTransferred.getOrDefault(fileId, 0L);
-                    progressed += contentLength;
-                    fileTransferred.put(fileId, progressed);
-                    String json = "{\"file_id\":\"" + fileId + "\",\"received\":" + progressed + "}";
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
-                }
-
-                // 简易导入/导出占位端点（客户端四项）
-                if (Method.POST.equals(method) && uri.startsWith("/api/v1/import/")) {
-                    String type = uri.substring("/api/v1/import/".length());
-                    // 这里只做占位，实际导入留待后续实现
-                    readBody(session);
-                    String json = "{\"result\":\"accepted\",\"type\":\"" + type + "\"}";
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
-                }
-
-                if (Method.GET.equals(method) && uri.startsWith("/api/v1/export/")) {
-                    String type = uri.substring("/api/v1/export/".length());
-                    // 返回占位数据
-                    String json = "{\"type\":\"" + type + "\",\"data\":[]}";
-                    return newFixedLengthResponse(Response.Status.OK, "application/json", json);
-                }
-
-                return newFixedLengthResponse(Response.Status.NOT_FOUND, "application/json", "{}");
+                
+                return handleRequest(session, uri, methodName);
+                
             } catch (Exception e) {
-                Log.e(TAG, "HTTP handle error", e);
-                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, "application/json", "{}");
+                TransferLogger.getInstance().e(TAG, "请求处理异常: " + uri, e);
+                return ResponseBuilder.internalError(e.getMessage());
             }
         }
-
-        private String readBody(IHTTPSession session) throws Exception {
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            InputStream is = session.getInputStream();
-            byte[] buf = new byte[8192];
-            int r;
-            while ((r = is.read(buf)) > 0) {
-                bos.write(buf, 0, r);
-                // NanoHTTPD input stream provides only request body; break if available length consumed
-                if (bos.size() >= getContentLength(session)) break;
+        
+        private Response handleRequest(IHTTPSession session, String uri, String method) {
+            // 认证检查（白名单端点除外）
+            if (!AuthManager.isWhitelisted(uri) && !authManager.authenticate(session)) {
+                return ResponseBuilder.unauthorized();
             }
-            return bos.toString(StandardCharsets.UTF_8.name());
-        }
-
-        private long getContentLength(IHTTPSession session) {
-            String len = session.getHeaders().get("content-length");
-            try { return len != null ? Long.parseLong(len) : 0L; } catch (Exception ignored) { return 0L; }
-        }
-
-        private String extractJsonField(String json, String field, String def) {
-            if (json == null) return def;
-            String key = "\"" + field + "\":";
-            int idx = json.indexOf(key);
-            if (idx < 0) return def;
-            int start = json.indexOf('"', idx + key.length());
-            int end = json.indexOf('"', start + 1);
-            if (start >= 0 && end > start) {
-                return json.substring(start + 1, end);
+            
+            // Web界面路由
+            if (uri.equals("/")) {
+                return ResponseBuilder.redirect("/web/index.html");
             }
-            return def;
+            
+            // Swagger UI 文档页面
+            if (uri.equals("/docs") || uri.equals("/docs/") || uri.equals("/swagger")) {
+                return serveStaticResource("/web/docs/index.html");
+            }
+            
+            // OpenAPI 规范文件
+            if (uri.equals("/openapi.yaml") || uri.equals("/openapi")) {
+                return serveStaticResource("/web/docs/openapi.yaml");
+            }
+            
+            // 静态资源
+            if (uri.startsWith("/web/")) {
+                return serveStaticResource(uri);
+            }
+            
+            // API路由分发
+            switch (method) {
+                case "GET":
+                    return handleGet(session, uri);
+                case "POST":
+                    return handlePost(session, uri);
+                case "PUT":
+                    return handlePut(session, uri);
+                case "DELETE":
+                    return handleDelete(session, uri);
+                case "PATCH":
+                    return handlePatch(session, uri);
+                case "QUERY":
+                    return handleQuery(session, uri);
+                default:
+                    return ResponseBuilder.methodNotAllowed();
+            }
         }
-
-        private String toJson(Map<String, Object> map) {
-            StringBuilder sb = new StringBuilder();
-            sb.append('{');
-            boolean first = true;
-            for (Map.Entry<String, Object> e : map.entrySet()) {
-                if (!first) sb.append(',');
-                first = false;
-                sb.append('"').append(e.getKey()).append('"').append(':');
-                Object v = e.getValue();
-                if (v instanceof Number) {
-                    sb.append(v.toString());
-                } else {
-                    sb.append('"').append(String.valueOf(v)).append('"');
+        
+        private Response handleGet(IHTTPSession session, String uri) {
+            // 认证API
+            if (uri.startsWith("/api/v1/auth")) {
+                return authApiHandler.handleGet(session, uri);
+            }
+            
+            // 页面API（必须在画廊API之前检查，因为路径包含 /api/v1/galleries）
+            if (uri.matches("/api/v1/galleries/\\d+/pages.*")) {
+                return pageApiHandler.handleGet(session, uri);
+            }
+            
+            // 画廊API
+            if (uri.startsWith("/api/v1/galleries")) {
+                return galleryApiHandler.handleGet(session, uri);
+            }
+            
+            // 标签API
+            if (uri.startsWith("/api/v1/labels")) {
+                return labelApiHandler.handleGet(session, uri);
+            }
+            
+            // 系统API
+            if (uri.startsWith("/api/v1/system")) {
+                return systemApiHandler.handleGet(session, uri);
+            }
+            
+            // 调试API
+            if (uri.startsWith("/api/v1/debug")) {
+                return debugApiHandler.handleGet(session, uri);
+            }
+            
+            // 推送API
+            if (uri.startsWith("/api/v1/push")) {
+                return pushApiHandler.handleGet(session, uri);
+            }
+            
+            // 设置API
+            if (uri.startsWith("/api/v1/settings")) {
+                return settingsApiHandler.handleGet(session, uri);
+            }
+            
+            // 文件API
+            if (uri.startsWith("/api/v1/folders")) {
+                return fileApiHandler.handleGet(session, uri);
+            }
+            
+            // 设备信息（保持向后兼容）
+            if (uri.equals("/api/v1/device/info")) {
+                String deviceName = android.os.Build.MODEL;
+                String json = "{" +
+                        "\"version\":\"1.0\"," +
+                        "\"device_name\":\"" + deviceName + "\"," +
+                        "\"device_type\":\"android\"," +
+                        "\"capabilities\":\"file_transfer,backup,restore,gallery_management\"" +
+                        "}";
+                return ResponseBuilder.jsonSuccess(json);
+            }
+            
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response handlePost(IHTTPSession session, String uri) {
+            // 认证API
+            if (uri.startsWith("/api/v1/auth")) {
+                return authApiHandler.handlePost(session, uri);
+            }
+            
+            // 推送API
+            if (uri.startsWith("/api/v1/push")) {
+                return pushApiHandler.handlePost(session, uri);
+            }
+            
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response handlePut(IHTTPSession session, String uri) {
+            // 设置API
+            if (uri.startsWith("/api/v1/settings")) {
+                return settingsApiHandler.handlePut(session, uri);
+            }
+            
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response handleDelete(IHTTPSession session, String uri) {
+            // 画廊API
+            if (uri.startsWith("/api/v1/galleries")) {
+                return galleryApiHandler.handleDelete(session, uri);
+            }
+            
+            // 文件API
+            if (uri.startsWith("/api/v1/folders")) {
+                return fileApiHandler.handleDelete(session, uri);
+            }
+            
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response handlePatch(IHTTPSession session, String uri) {
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response handleQuery(IHTTPSession session, String uri) {
+            // 画廊API
+            if (uri.startsWith("/api/v1/galleries")) {
+                return galleryApiHandler.handleQuery(session, uri);
+            }
+            
+            return ResponseBuilder.notFound("Endpoint");
+        }
+        
+        private Response serveStaticResource(String uri) {
+            TransferLogger logger = TransferLogger.getInstance();
+            logger.d(TAG, "加载静态资源: " + uri);
+            
+            try {
+                // 从assets加载静态资源
+                String path = uri.substring(1); // 去掉开头的/
+                logger.d(TAG, "资源路径: " + path);
+                
+                InputStream stream = context.getAssets().open(path);
+                logger.d(TAG, "资源加载成功: " + path + " (" + stream.available() + " bytes)");
+                
+                // 确定MIME类型
+                String mimeType = getMimeType(path);
+                
+                // 读取内容
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                byte[] buffer = new byte[4096];
+                int len;
+                while ((len = stream.read(buffer)) > 0) {
+                    baos.write(buffer, 0, len);
                 }
+                stream.close();
+                
+                byte[] content = baos.toByteArray();
+                logger.d(TAG, "资源读取完成: " + content.length + " bytes");
+                
+                return NanoHTTPD.newFixedLengthResponse(
+                    Response.Status.OK,
+                    mimeType,
+                    new java.io.ByteArrayInputStream(content),
+                    content.length
+                );
+                
+            } catch (IOException e) {
+                logger.e(TAG, "资源加载失败: " + uri, e);
+                return ResponseBuilder.notFound("Resource");
             }
-            sb.append('}');
-            return sb.toString();
+        }
+        
+        private String getMimeType(String path) {
+            if (path.endsWith(".html")) return "text/html";
+            if (path.endsWith(".css")) return "text/css";
+            if (path.endsWith(".js")) return "application/javascript";
+            if (path.endsWith(".json")) return "application/json";
+            if (path.endsWith(".yaml") || path.endsWith(".yml")) return "application/yaml";
+            if (path.endsWith(".png")) return "image/png";
+            if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+            if (path.endsWith(".gif")) return "image/gif";
+            if (path.endsWith(".svg")) return "image/svg+xml";
+            if (path.endsWith(".ico")) return "image/x-icon";
+            return "application/octet-stream";
         }
     }
 }
