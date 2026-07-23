@@ -1,6 +1,7 @@
 package com.hippo.ehviewer.task
 
 import androidx.annotation.MainThread
+import androidx.annotation.StringRes
 import kotlinx.coroutines.Job
 
 /**
@@ -17,6 +18,13 @@ interface BackgroundTask {
      * 获取任务名称（显示在通知栏和设置中）
      */
     fun getTaskName(): String
+
+    /**
+     * 获取任务显示名称的资源ID（用于定时任务注册表）
+     * 返回0表示未设置
+     */
+    @StringRes
+    fun getDisplayNameResId(): Int = 0
 
     /**
      * 获取任务描述（显示在通知栏和设置中）

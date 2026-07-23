@@ -685,10 +685,11 @@
     <string name="download_queue_order_most_first">多图画廊优先</string>
     <string name="download_queue_order_category_priority">按画廊类型优先级</string>
     <string name="download_queue_secondary_order">二级排序</string>
-    <string name="download_queue_secondary_order_summary">当一级排序选择「按画廊类型优先级」时生效。设定同一类型内画廊的排序方式</string>
+    <string name="download_queue_secondary_order_summary">当一级排序不为「默认」时生效。设定相同一级排序值内的二级排序方式</string>
     <string name="download_queue_secondary_none">无（保持原顺序）</string>
     <string name="download_queue_secondary_fewest_first">少图画廊优先</string>
     <string name="download_queue_secondary_most_first">多图画廊优先</string>
+    <string name="download_queue_secondary_category_priority">按画廊类型优先级</string>
     <string name="settings_download_metered_network_policy">按量网络行为</string>
     <string name="settings_download_metered_network_policy_summary">在按量网络（移动数据）上进行下载时的策略</string>
     <string name="settings_download_metered_policy_continue">继续下载</string>
@@ -761,6 +762,21 @@
     <string name="settings_download_rebuild_no_records">未找到有效的下载记录</string>
     <string name="settings_download_rebuild_confirm">您确定要从下载路径重建下载记录吗？此操作将扫描所有文件夹，并将有效的画廊添加到下载列表中。没有.ehviewer文件的文件夹将被创建为本地画廊记录。</string>
     <string name="settings_download_rebuild_download_records_started">重建任务已启动，请查看任务管理器以了解进度。</string>
+    <string name="settings_download_repair_thumbnail">修复已下载缩略图</string>
+    <string name="settings_download_repair_thumbnail_summary">扫描所有已下载画廊，为缺失缩略图的画廊用首张图片生成缩略图</string>
+    <string name="repair_thumbnail_confirm">确定要修复缺失的缩略图吗？此操作将为缺失缩略图的已下载画廊用首张图片生成缩略图。</string>
+    <string name="repair_thumbnail_start">正在开始修复缩略图…</string>
+    <string name="repair_thumbnail_progress">修复中：%1$d/%2$d（已修复：%3$d，跳过：%4$d）</string>
+    <string name="repair_thumbnail_complete">缩略图修复完成，已修复 %1$d 个，跳过 %2$d 个</string>
+    <string name="repair_thumbnail_nothing">所有缩略图完好，无需修复</string>
+    <string name="repair_thumbnail_menu">修复缩略图</string>
+    <string name="repair_thumbnail_for_selected">为选中项修复缩略图</string>
+    <string name="settings_download_verify_integrity">校验已下载画廊完整性</string>
+    <string name="settings_download_verify_integrity_summary">检查所有已完成下载的画廊是否存在缺失或损坏的图片，将不完整的画廊重置为待下载状态</string>
+    <string name="verify_integrity_confirm">确定要校验所有已下载画廊的完整性吗？不完整的画廊将被重置为待下载状态，已被远端删除的画廊将被标记为已完成。</string>
+    <string name="verify_integrity_start">开始校验下载完整性…</string>
+    <string name="verify_integrity_progress">校验中: %1$d/%2$d (完整: %3$d, 不完整: %4$d)</string>
+    <string name="verify_integrity_complete">校验完成: %1$d 个完整, %2$d 个不完整（已重置为待下载）</string>
     <string name="settings_download_clean_redundancy_started">清理冗余任务已启动，请查看任务管理器以了解进度。</string>
     <string name="settings_advanced_advanced_download_sort">高级下载排序</string>
     <string name="settings_advanced_advanced_download_sort_summary">启用下载队列高级排序功能，包括按画廊类型优先级排序</string>
@@ -799,6 +815,34 @@
     <string name="settings_advanced_clear_download_path_cache_message">清除下载路径缓存？</string>
     <string name="settings_advanced_clear_memory_cache">清除内存缓存</string>
     <string name="settings_advanced_clear_memory_cache_summary">清除缩略图、画廊信息内存缓存</string>
+    <string name="settings_advanced_performance_monitor">性能监测</string>
+    <string name="settings_advanced_performance_monitor_summary">启用后台性能监测，定时采集内存、线程、GC等指标，用于诊断卡顿问题</string>
+    <string name="settings_advanced_performance_monitor_log">查看性能日志</string>
+    <string name="settings_advanced_performance_monitor_log_summary">查看最近的性能采集快照和导出日志</string>
+    <string name="settings_advanced_pre_anr_detection">无响应预判与诊断</string>
+    <string name="settings_advanced_pre_anr_detection_summary">常驻看门狗，在主线程卡死触发 ANR 前检测并保存线程栈与网络诊断到磁盘</string>
+    <string name="settings_advanced_pre_anr_detection_enabled">看门狗已启动</string>
+    <string name="settings_advanced_pre_anr_detection_disabled">看门狗已停止</string>
+    <string name="settings_advanced_export_diagnostic">导出完整诊断</string>
+    <string name="settings_advanced_export_diagnostic_summary">将性能日志、无响应前诊断文件与网络快照合并为一个文件</string>
+    <string name="settings_advanced_export_diagnostic_done">诊断已导出至 %1$s</string>
+    <string name="settings_advanced_export_diagnostic_empty">暂无可导出的诊断数据</string>
+    <string name="settings_advanced_export_diagnostic_failed">导出诊断失败</string>
+    <string name="performance_monitor_channel_name">性能监测</string>
+    <string name="performance_monitor_channel_description">性能监测服务通知</string>
+    <string name="performance_monitor_notification_title">性能监测运行中</string>
+    <string name="performance_monitor_notification_text">JVM: %1$d%% | Native: %2$dMB | 线程: %3$d</string>
+    <string name="performance_log_title">性能日志</string>
+    <string name="performance_log_export_success">性能日志已导出至 %1$s</string>
+    <string name="performance_log_export_failed">性能日志导出失败</string>
+    <string name="performance_log_empty">暂无性能数据，请等待监测采集</string>
+    <string name="performance_log_clear">清空记录</string>
+    <string name="performance_log_export">导出日志</string>
+    <string name="performance_log_header_format">共 %1$d 条记录（采样间隔 30 秒）</string>
+    <string name="performance_log_summary_jvm">JVM: %1$d/%2$d MB (%3$d%%)</string>
+    <string name="performance_log_summary_native">Native: %1$d MB</string>
+    <string name="performance_log_summary_threads">线程: %1$d</string>
+    <string name="performance_log_summary_download">下载: %1$d / 等待: %2$d</string>
     <string name="settings_advanced_read_cache_size">读取缓存大小</string>
     <string name="settings_advanced_read_cache_size_unlimited">不限</string>
     <string name="settings_advanced_app_language_title">应用语言</string>
@@ -830,6 +874,29 @@
     <string name="site_inaccessible_with_error">✗ 无法访问 (%1$s)</string>
     <string name="ip_address_format">IP: %1$s</string>
     <string name="refresh_diagnostic">刷新诊断</string>
+    <string name="diagnostic_advanced_api">高级 API 诊断</string>
+    <string name="diagnostic_advanced_api_summary">检测各 API 端点的详细联通情况</string>
+    <string name="diagnostic_outer_section">外围连通性检测</string>
+    <string name="api_diagnostic_title">高级 API 诊断</string>
+    <string name="api_diagnostic_warning">注意：API 测试（特别是 gdata、showpage）可能会消耗浏览次数 (NEI/Hath)。建议在浏览额度充足时使用。点击关闭此提示。</string>
+    <string name="api_diagnostic_warning_title">浏览次数消耗提示</string>
+    <string name="api_diagnostic_need_login">需要登录后才能测试 Ex-Hentai</string>
+    <string name="expand_collapse_all">全部展开/折叠</string>
+    <string name="expand_all">全部展开</string>
+    <string name="collapse_all">全部折叠</string>
+    <string name="diagnostic_running">正在测试中...</string>
+    <string name="diagnostic_progress_format">正在测试: %1$s (%2$d)</string>
+    <string name="diagnostic_complete">诊断完成，共捕获 %1$d 个请求</string>
+    <string name="share_diagnostic_log">分享诊断日志</string>
+    <string name="diagnostic_log_exported">诊断日志已导出: %1$s</string>
+    <string name="diagnostic_log_saved">诊断日志已保存至: %1$s</string>
+    <string name="diagnostic_log_export_failed">诊断日志导出失败</string>
+    <string name="timeout_label">超时:</string>
+    <string name="timeout_prompt">选择超时时间</string>
+    <string name="timeout_unit_seconds">秒</string>
+    <string name="cancel_diagnostic">取消</string>
+    <string name="diagnostic_cancelled">诊断已取消</string>
+    <string name="export_diagnostic_log">导出诊断日志 (HAR)</string>
     <string name="settings_advanced_export_data">导出数据</string>
     <string name="settings_advanced_export_data_summary">将下载列表、快速搜索列表等数据保存至外部存储</string>
     <string name="settings_advanced_export_data_to">已将数据导出至 %1$s</string>
@@ -902,6 +969,18 @@
     <string name="settings_advanced_built_ex_hosts_title">内置 ExHentai hosts.txt</string>
     <string name="settings_advanced_built_ex_hosts_summary">应用程序提供的主机到IP映射\n可通过自定义hosts.txt文件覆盖</string>
     <string name="network_remind">检测到VPN，请注意您的网络安全。</string>
+    <string name="settings_vpn_aware_mode_title">VPN 联动模式</string>
+    <string name="settings_vpn_aware_mode_summary">检测到 VPN 时的网络功能处理方式</string>
+    <string name="settings_vpn_status_title">VPN 状态</string>
+    <string name="settings_vpn_status_summary">当前网络功能状态</string>
+    <string name="settings_vpn_status_active">VPN 已连接</string>
+    <string name="settings_vpn_status_inactive">VPN 未连接</string>
+    <string name="settings_vpn_status_doh_disabled">DoH 已临时禁用</string>
+    <string name="settings_vpn_status_df_disabled">域名前置已临时禁用</string>
+    <string name="settings_vpn_status_all_enabled">所有网络功能正常</string>
+    <string name="vpn_mode_auto_disable">自动禁用</string>
+    <string name="vpn_mode_prompt">提示用户</string>
+    <string name="vpn_mode_ignore">忽略 VPN</string>
     <string name="excluded_languages">排除的语言</string>
     <string name="select_all">全选</string>
     <string name="deselect_all">全不选</string>
@@ -1206,6 +1285,16 @@ SSID: %1$s
     <string name="task_log_empty">尚无日志条目</string>
     <string name="task_log_save_to">日志已保存至 %1$s</string>
     <string name="task_log_file_missing">日志文件不可用</string>
+    <string name="task_eta_format">剩余 ~%1$s</string>
+    <string name="task_eta_unknown">剩余 --</string>
+    <string name="task_info_panel">任务信息</string>
+    <string name="task_progress_panel">进度</string>
+    <string name="task_log_panel">任务日志</string>
+    <string name="task_export_log_txt">导出 TXT</string>
+    <string name="task_export_log_json">导出 JSON</string>
+    <string name="task_export_share_title">分享任务日志</string>
+    <string name="task_type_label">类型</string>
+    <string name="task_no_description">暂无描述</string>
     <string name="settings_advanced_background_tasks">后台任务</string>
     <string name="settings_advanced_background_tasks_summary">查看和管理正在运行的后台任务</string>
     <string name="settings_advanced_background_concurrent_tasks">后台并发任务数</string>
@@ -1734,6 +1823,12 @@ SSID: %1$s
     <string name="remote_auth_mode_summary">选择远程连接的认证方式</string>
     <string name="remote_delete_enabled">允许远程删除</string>
     <string name="remote_delete_enabled_summary">允许远程客户端删除画廊（Web端仍需二次确认）</string>
+    <string name="remote_delete_disabled">已禁止远程删除</string>
+    <string name="remote_management_enabled">启用远程管理</string>
+    <string name="remote_management_enabled_summary">启用基于网页的远程管理界面（关闭后API仍可用）</string>
+    <string name="remote_management_disabled">远程管理已关闭</string>
+    <string name="remote_management_enabled_label">远程管理: 已开启</string>
+    <string name="remote_management_disabled_label">远程管理: 已关闭</string>
     <string name="delete_files_on_remote_delete">远程删除时删除文件</string>
     <string name="delete_files_on_remote_delete_summary">远程删除画廊时同时删除下载的文件</string>
     <string name="remote_access_info_default">请先启动传输服务以使用远程管理功能</string>
@@ -1763,6 +1858,16 @@ SSID: %1$s
     <string name="send_downloads_select">下载-选择发送</string>
     <string name="send_favorites_all">收藏-全部发送</string>
     <string name="send_favorites_select">收藏-选择发送</string>
+    <string name="send_all_data">全部传输（数据库）</string>
+    <string name="send_all_data_confirm">将导出完整数据库（书签、收藏、下载、历史等）并发送到 %1$s？接收端会按导入数据进行合并导入。</string>
+    <string name="send_all_data_exporting">正在导出数据库…</string>
+    <string name="send_all_data_sending">正在发送数据库到 %1$s…</string>
+    <string name="send_all_data_success">数据库已发送，接收端已完成导入</string>
+    <string name="send_all_data_failed">传输失败：%1$s</string>
+    <string name="select_target_device">选择目标设备</string>
+    <string name="battery_optimization_title">允许后台运行</string>
+    <string name="battery_optimization_message">为了保证应用退到后台后传输服务仍能正常响应，请将 EhViewer 的省电策略设置为「无限制」。</string>
+    <string name="battery_optimization_go">去设置</string>
 
     <!-- Connect To -->
     <string name="connect_to">连接到</string>
@@ -1825,4 +1930,216 @@ SSID: %1$s
     <string name="log_level_info">信息</string>
     <string name="log_level_warn">警告</string>
     <string name="log_level_error">错误</string>
+
+    <!-- 网络流量抓包 -->
+    <string name="settings_advanced_traffic_capture">网络流量抓包</string>
+    <string name="settings_advanced_traffic_capture_summary">捕获应用网络流量为HAR文件用于分析</string>
+    <string name="settings_advanced_traffic_capture_page">抓包设置</string>
+    <string name="settings_advanced_traffic_capture_page_summary">查看抓包状态、统计信息和管理HAR文件</string>
+    <string name="capture_title">网络抓包</string>
+    <string name="capture_control_title">网络抓包</string>
+    <string name="capture_stats_title">统计信息</string>
+    <string name="capture_history_title">HAR 文件</string>
+    <string name="capture_no_files">暂无抓取的HAR文件</string>
+    <string name="capture_status_active">正在捕获网络流量…</string>
+    <string name="capture_status_idle">抓包已停止</string>
+    <string name="capture_started">网络抓包已启动</string>
+    <string name="capture_stopped">网络抓包已停止</string>
+    <string name="capture_saved">抓包已保存并停止</string>
+    <string name="capture_stats_requests">请求数: %d</string>
+    <string name="capture_stats_duration">时长: %1$d分%2$d秒</string>
+    <string name="capture_stats_sent">已发送: %s</string>
+    <string name="capture_stats_received">已接收: %s</string>
+    <string name="capture_file_info">%1$s (%2$s)</string>
+    <string name="capture_empty">暂无抓取的HAR文件</string>
+    <string name="capture_delete">删除</string>
+    <string name="capture_save">保存并停止</string>
+    <string name="capture_start">开始抓包</string>
+    <string name="capture_stop">停止抓包</string>
+    <string name="capture_delete_title">删除HAR文件</string>
+    <string name="capture_delete_confirm">确定删除 %s？</string>
+    <string name="capture_deleted">HAR文件已删除</string>
+    <string name="capture_share">分享HAR文件</string>
+    <string name="capture_share_failed">分享失败: %s</string>
+    <string name="capture_service_channel">网络抓包</string>
+    <string name="capture_service_channel_desc">网络流量抓包通知</string>
+    <string name="capture_notification_started">正在捕获网络流量</string>
+    <string name="capture_notification_stats">请求数: %1$d | 已发送: %2$s | 已接收: %3$s</string>
+    <string name="capture_notification_stop">停止并保存</string>
+    <string name="capture_save_failed">保存失败: %s</string>
+    <string name="capture_channel_name">网络抓包</string>
+    <string name="capture_channel_description">网络流量抓包通知</string>
+    <string name="capture_notification_title">网络流量抓包</string>
+    <string name="capture_notification_text">请求数: %1$d | 已发送: %2$s | 已接收: %3$s</string>
+    <string name="capture_stop_save">停止并保存</string>
+
+    <!-- 定时任务相关 -->
+    <string name="settings_advanced_scheduled_tasks">定时任务</string>
+    <string name="settings_advanced_scheduled_tasks_summary">管理和配置定时执行的后台任务</string>
+
+    <string name="scheduled_task_title">定时任务管理</string>
+    <string name="scheduled_task_add">添加定时任务</string>
+    <string name="scheduled_task_edit">编辑定时任务</string>
+    <string name="scheduled_task_delete">删除定时任务</string>
+    <string name="scheduled_task_delete_confirm">确定要删除这个定时任务吗？</string>
+    <string name="scheduled_task_no_tasks">暂无定时任务</string>
+    <string name="scheduled_task_no_tasks_hint">点击右上角 + 按钮添加定时任务</string>
+
+    <!-- 任务状态 -->
+    <string name="scheduled_task_state_pending">等待中</string>
+    <string name="scheduled_task_state_waiting_condition">等待条件</string>
+    <string name="scheduled_task_state_waiting_time">等待时间</string>
+    <string name="scheduled_task_state_queued">队列中</string>
+    <string name="scheduled_task_state_running">运行中</string>
+    <string name="scheduled_task_state_completed">已完成</string>
+    <string name="scheduled_task_state_failed">失败</string>
+    <string name="scheduled_task_state_cancelled">已取消</string>
+    <string name="scheduled_task_state_paused">已暂停</string>
+
+    <!-- 延时条件 -->
+    <string name="delay_condition_title">延时条件</string>
+    <string name="delay_condition_immediate">立即执行</string>
+    <string name="delay_condition_immediate_desc">任务添加后立即执行</string>
+    <string name="delay_condition_download_complete">所有下载完成时</string>
+    <string name="delay_condition_download_complete_desc">等待所有下载任务完成后执行</string>
+    <string name="delay_condition_other_tasks_complete">其他后台任务完成时</string>
+    <string name="delay_condition_other_tasks_complete_desc">等待除自己以外的后台任务完成后执行</string>
+    <string name="delay_condition_specific_time">指定时间</string>
+    <string name="delay_condition_specific_time_desc">在指定的时间执行</string>
+
+    <!-- 重复模式 -->
+    <string name="repeat_mode_title">重复模式</string>
+    <string name="repeat_mode_once">单次</string>
+    <string name="repeat_mode_once_desc">只执行一次</string>
+    <string name="repeat_mode_daily">每天</string>
+    <string name="repeat_mode_daily_desc">每天执行一次</string>
+    <string name="repeat_mode_weekdays">工作日</string>
+    <string name="repeat_mode_weekdays_desc">在工作日执行</string>
+    <string name="repeat_mode_weekends">周末</string>
+    <string name="repeat_mode_weekends_desc">在周末执行</string>
+    <string name="repeat_mode_holidays">节假日</string>
+    <string name="repeat_mode_holidays_desc">在节假日执行</string>
+    <string name="repeat_mode_custom_cron">自定义</string>
+    <string name="repeat_mode_custom_cron_desc">使用 Cron 表达式自定义执行时间</string>
+
+    <!-- 工作日设置 -->
+    <string name="weekday_config_title">工作日设置</string>
+    <string name="weekday_monday">周一</string>
+    <string name="weekday_tuesday">周二</string>
+    <string name="weekday_wednesday">周三</string>
+    <string name="weekday_thursday">周四</string>
+    <string name="weekday_friday">周五</string>
+    <string name="weekday_saturday">周六</string>
+    <string name="weekday_sunday">周日</string>
+
+    <!-- Cron 表达式 -->
+    <string name="cron_expression_title">Cron 表达式</string>
+    <string name="cron_expression_hint">例如: 0 2 * * *</string>
+    <string name="cron_expression_generator">生成器</string>
+    <string name="cron_expression_preview">预览下次执行时间</string>
+    <string name="cron_expression_invalid">无效的 Cron 表达式</string>
+    <string name="cron_next_execution">下次执行: %1$s</string>
+
+    <!-- Cron 预设 -->
+    <string name="cron_preset_title">预设</string>
+    <string name="cron_preset_daily_00_00">每天 00:00</string>
+    <string name="cron_preset_daily_02_00">每天 02:00</string>
+    <string name="cron_preset_daily_06_00">每天 06:00</string>
+    <string name="cron_preset_weekly_monday">每周一 00:00</string>
+    <string name="cron_preset_weekly_sunday">每周日 00:00</string>
+    <string name="cron_preset_monthly_1st">每月1日 00:00</string>
+    <string name="cron_preset_custom">自定义</string>
+
+    <!-- Cron 字段 -->
+    <string name="cron_field_minute">分钟</string>
+    <string name="cron_field_hour">小时</string>
+    <string name="cron_field_day_of_month">日</string>
+    <string name="cron_field_month">月</string>
+    <string name="cron_field_day_of_week">周</string>
+    <string name="cron_field_year">年</string>
+
+    <!-- 任务组 -->
+    <string name="task_group_title">任务组</string>
+    <string name="task_group_default">默认组</string>
+    <string name="task_group_add">添加任务组</string>
+    <string name="task_group_edit">编辑任务组</string>
+    <string name="task_group_delete">删除任务组</string>
+    <string name="task_group_delete_confirm">确定要删除这个任务组吗？组内任务将移动到默认组。</string>
+    <string name="task_group_name_hint">任务组名称</string>
+    <string name="task_group_execution_mode">执行模式</string>
+    <string name="task_group_sequential">串行执行</string>
+    <string name="task_group_sequential_desc">任务按顺序依次执行</string>
+    <string name="task_group_parallel">并行执行</string>
+    <string name="task_group_parallel_desc">任务可以同时执行</string>
+    <string name="task_group_task_count">%1$d 个任务</string>
+
+    <!-- 重试配置 -->
+    <string name="retry_config_title">失败重试</string>
+    <string name="retry_mode_no_retry">不重试</string>
+    <string name="retry_mode_no_retry_desc">失败后不重试</string>
+    <string name="retry_mode_immediate">立即重试</string>
+    <string name="retry_mode_immediate_desc">失败后立即重试</string>
+    <string name="retry_mode_delayed">延迟重试</string>
+    <string name="retry_mode_delayed_desc">失败后延迟一段时间再重试</string>
+    <string name="retry_mode_next_schedule">下次执行时重试</string>
+    <string name="retry_mode_next_schedule_desc">在下次计划执行时间重试</string>
+    <string name="retry_max_retries">最大重试次数</string>
+    <string name="retry_delay_millis">重试间隔（毫秒）</string>
+
+    <!-- 节假日 -->
+    <string name="holiday_data_title">节假日数据</string>
+    <string name="holiday_data_refresh">刷新数据</string>
+    <string name="holiday_data_last_update">上次更新: %1$s</string>
+    <string name="holiday_data_expired">数据已过期，建议刷新</string>
+    <string name="holiday_data_refreshing">正在刷新节假日数据…</string>
+    <string name="holiday_data_refresh_success">节假日数据已更新</string>
+    <string name="holiday_data_refresh_failed">刷新节假日数据失败</string>
+
+    <!-- 画廊选择器 -->
+    <string name="gallery_picker_title">选择画廊</string>
+    <string name="gallery_picker_selected_count">已选: %1$d/%2$d</string>
+    <string name="gallery_picker_tab_downloads">下载</string>
+    <string name="gallery_picker_tab_favorites">本地收藏</string>
+    <string name="gallery_picker_tab_all">全部</string>
+    <string name="gallery_picker_search_hint">搜索画廊…</string>
+    <string name="gallery_picker_no_galleries">暂无画廊</string>
+    <string name="gallery_picker_select_all">全选</string>
+    <string name="gallery_picker_deselect_all">取消全选</string>
+
+    <!-- 日志 -->
+    <string name="scheduled_task_log_title">执行日志</string>
+    <string name="scheduled_task_log_clear">清空日志</string>
+    <string name="scheduled_task_log_clear_confirm">确定要清空所有执行日志吗？</string>
+    <string name="scheduled_task_log_export">导出日志</string>
+    <string name="scheduled_task_log_no_logs">暂无执行日志</string>
+    <string name="scheduled_task_no_logs">暂无执行日志</string>
+    <string name="scheduled_task_log_level_info">信息</string>
+    <string name="scheduled_task_log_level_warn">警告</string>
+    <string name="scheduled_task_log_level_error">错误</string>
+    <string name="scheduled_task_log_level_debug">调试</string>
+
+    <!-- 任务执行信息 -->
+    <string name="scheduled_task_execution_count">执行次数: %1$d</string>
+    <string name="scheduled_task_last_execution">上次执行: %1$s</string>
+    <string name="scheduled_task_next_execution">下次执行: %1$s</string>
+    <string name="scheduled_task_retry_count">重试次数: %1$d</string>
+    <string name="scheduled_task_group">所属组: %1$s</string>
+
+    <!-- 选择时间 -->
+    <string name="select_date">选择日期</string>
+    <string name="select_time">选择时间</string>
+    <string name="select_datetime">选择日期和时间</string>
+
+    <!-- 任务类型名称（用于定时任务列表显示） -->
+    <string name="task_type_download">下载</string>
+    <string name="task_type_sync">同步</string>
+    <string name="task_type_scan">扫描</string>
+    <string name="task_type_cleanup">清理</string>
+    <string name="task_type_merge">合并</string>
+    <string name="task_type_update">更新</string>
+    <string name="task_type_transfer">传输</string>
+    <string name="task_type_import">导入</string>
+    <string name="task_type_export">导出</string>
+    <string name="task_type_backup">备份</string>
+    <string name="task_type_other">其他</string>
 </resources>

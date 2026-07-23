@@ -101,6 +101,54 @@
         android:title="@string/settings_advanced_clear_memory_cache"
         app:allowDividerAbove="true" />
 
+    <!-- ========== 性能监测 ========== -->
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="performance_monitor_enabled"
+        android:summary="@string/settings_advanced_performance_monitor_summary"
+        android:title="@string/settings_advanced_performance_monitor" />
+
+    <Preference
+        android:key="performance_monitor_log"
+        android:summary="@string/settings_advanced_performance_monitor_log_summary"
+        android:title="@string/settings_advanced_performance_monitor_log"
+        android:dependency="performance_monitor_enabled" />
+
+    <!-- ========== 性能监测 END ========== -->
+
+    <!-- ========== 无响应预判与诊断 ========== -->
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="true"
+        android:key="pre_anr_detection_enabled"
+        android:summary="@string/settings_advanced_pre_anr_detection_summary"
+        android:title="@string/settings_advanced_pre_anr_detection" />
+
+    <Preference
+        android:key="export_diagnostic"
+        android:summary="@string/settings_advanced_export_diagnostic_summary"
+        android:title="@string/settings_advanced_export_diagnostic"
+        app:allowDividerAbove="true" />
+
+    <!-- ========== 无响应预判与诊断 END ========== -->
+
+    <!-- ========== 网络流量抓包 ========== -->
+
+    <com.hippo.preference.SwitchPreference
+        android:defaultValue="false"
+        android:key="traffic_capture_enabled"
+        android:summary="@string/settings_advanced_traffic_capture_summary"
+        android:title="@string/settings_advanced_traffic_capture" />
+
+    <Preference
+        android:key="traffic_capture_page"
+        android:summary="@string/settings_advanced_traffic_capture_page_summary"
+        android:title="@string/settings_advanced_traffic_capture_page"
+        android:dependency="traffic_capture_enabled" />
+
+    <!-- ========== 网络流量抓包 END ========== -->
+
     <com.hippo.ehviewer.preference.SliderPreference
         android:defaultValue="160"
         android:key="read_cache_size"
@@ -143,6 +191,25 @@
         app:activity="com.hippo.ehviewer.ui.HostsActivity"
         app:allowDividerAbove="true" />
 
+    <!-- ========== VPN 联动设置 ========== -->
+
+    <com.hippo.preference.ListPreference
+        android:defaultValue="0"
+        android:key="vpn_aware_mode"
+        android:title="@string/settings_vpn_aware_mode_title"
+        android:summary="@string/settings_vpn_aware_mode_summary"
+        app:allowDividerAbove="true"
+        app:entries="@array/vpn_aware_mode_entries"
+        app:entryValues="@array/vpn_aware_mode_entry_values" />
+
+    <Preference
+        android:key="vpn_status_indicator"
+        android:title="@string/settings_vpn_status_title"
+        android:summary="@string/settings_vpn_status_summary"
+        android:selectable="false" />
+
+    <!-- ========== VPN 联动设置 END ========== -->
+
     <com.hippo.preference.SwitchPreference
         android:defaultValue="false"
         android:key="dns_over_https"
@@ -160,41 +227,6 @@
     <!--        android:key="url_replace"-->
     <!--        android:summary="@string/settings_advanced_url_replace_summary"-->
     <!--        android:title="@string/settings_advanced_url_replace_title" />-->
-
-    <!-- ========== 高级下载排序 ========== -->
-
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="advanced_download_sort_enabled"
-        android:summary="@string/settings_advanced_advanced_download_sort_summary"
-        android:title="@string/settings_advanced_advanced_download_sort"
-        app:allowDividerAbove="true" />
-
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="download_queue_order"
-        android:summary="@string/settings_download_download_queue_order_summary"
-        android:title="@string/settings_download_download_queue_order"
-        android:dependency="advanced_download_sort_enabled"
-        app:entries="@array/download_queue_order_entries"
-        app:entryValues="@array/download_queue_order_entry_values"
-        app:iconSpaceReserved="false" />
-
-    <com.hippo.ehviewer.preference.CategoryPriorityDialogPreference
-        android:key="download_category_priority_order"
-        android:summary="@string/settings_advanced_download_category_priority_order_summary"
-        android:title="@string/settings_advanced_download_category_priority_order"
-        android:dependency="advanced_download_sort_enabled" />
-
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="download_queue_secondary_order"
-        android:title="@string/download_queue_secondary_order"
-        android:summary="@string/download_queue_secondary_order_summary"
-        android:dependency="advanced_download_sort_enabled"
-        app:entries="@array/download_queue_secondary_order_entries"
-        app:entryValues="@array/download_queue_secondary_order_entry_values"
-        app:iconSpaceReserved="false" />
 
     <com.hippo.preference.SwitchPreference
         android:defaultValue="false"
@@ -265,6 +297,12 @@
         app:maxValue="32"
         app:stepSize="1"
         app:showValue="true" />
+
+    <Preference
+        android:key="scheduled_tasks"
+        android:summary="@string/settings_advanced_scheduled_tasks_summary"
+        android:title="@string/settings_advanced_scheduled_tasks"
+        app:allowDividerAbove="true" />
 
     <Preference
         android:key="transfer_service"

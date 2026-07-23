@@ -226,4 +226,7 @@
     <color name="light_blue_50">#FFE1F5FE</color>
     <color name="light_blue_200">#FF81D4FA</color>
 
+    <!-- Warning color -->
+    <color name="warning_color">#FFFF9800</color>
+
 </resources>

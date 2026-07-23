@@ -23,6 +23,18 @@
     <string name="settings_advanced_built_ex_hosts_title">Built-in exhentai hosts.txt</string>
     <string name="settings_advanced_built_ex_hosts_summary">Application-provided host-to-IP mapping\nCan be overridden by custom hosts.txt</string>
     <string name="network_remind">VPN detected, please pay attention to your network security</string>
+    <string name="settings_vpn_aware_mode_title">VPN Aware Mode</string>
+    <string name="settings_vpn_aware_mode_summary">How to handle network features when VPN is detected</string>
+    <string name="settings_vpn_status_title">VPN Status</string>
+    <string name="settings_vpn_status_summary">Current network feature states</string>
+    <string name="settings_vpn_status_active">VPN Connected</string>
+    <string name="settings_vpn_status_inactive">VPN Disconnected</string>
+    <string name="settings_vpn_status_doh_disabled">DoH temporarily disabled</string>
+    <string name="settings_vpn_status_df_disabled">Domain Fronting temporarily disabled</string>
+    <string name="settings_vpn_status_all_enabled">All network features enabled</string>
+    <string name="vpn_mode_auto_disable">Auto Disable</string>
+    <string name="vpn_mode_prompt">Prompt</string>
+    <string name="vpn_mode_ignore">Ignore VPN</string>
     <string name="no_blicklist">This is the blacklist</string>
     <string name="settings_download_clean_invalid_download_confirm">Confirm to clear invalid download items?</string>
     <string name="settings_download_cleaning">Cleaning download items</string>
@@ -678,10 +690,11 @@
     <string name="download_queue_order_most_first">Most images first</string>
     <string name="download_queue_order_category_priority">By gallery type priority</string>
     <string name="download_queue_secondary_order">Secondary sort</string>
-    <string name="download_queue_secondary_order_summary">Effective when primary sort is "By gallery type priority". Sets the sort order within the same category</string>
+    <string name="download_queue_secondary_order_summary">Effective when primary sort is not "Default". Sets the tiebreaker order within groups of equal primary sort value</string>
     <string name="download_queue_secondary_none">None (keep original order)</string>
     <string name="download_queue_secondary_fewest_first">Fewest images first</string>
     <string name="download_queue_secondary_most_first">Most images first</string>
+    <string name="download_queue_secondary_category_priority">By gallery type priority</string>
     <string name="settings_download_download_list_pagination">Pagination List</string>
     <string name="settings_download_download_list_pagination_summary">The paging function will only take effect when the list length is greater than 500</string>
     <string name="settings_download_download_origin_image_summary">It is dangerous! You may get 509 error</string>
@@ -720,6 +733,21 @@
     <string name="settings_download_rebuild_no_records">No valid download records found</string>
     <string name="settings_download_rebuild_confirm">Are you sure you want to rebuild download records from download path? This will scan all folders and add valid galleries to the download list. Folders without .ehviewer files will be created as local gallery records.</string>
     <string name="settings_download_rebuild_download_records_started">Rebuild task started, check task manager for progress</string>
+    <string name="settings_download_repair_thumbnail">Repair downloaded thumbnails</string>
+    <string name="settings_download_repair_thumbnail_summary">Scan all downloads and create missing thumbnails from the first image</string>
+    <string name="repair_thumbnail_confirm">Are you sure you want to repair missing thumbnails? This will generate thumbnails from the first image for downloads that are missing them.</string>
+    <string name="repair_thumbnail_start">Starting thumbnail repair…</string>
+    <string name="repair_thumbnail_progress">Repairing: %1$d/%2$d (Fixed: %3$d, Skipped: %4$d)</string>
+    <string name="repair_thumbnail_complete">Thumbnail repair completed, fixed %1$d, skipped %2$d</string>
+    <string name="repair_thumbnail_nothing">All thumbnails are intact, nothing to repair</string>
+    <string name="repair_thumbnail_menu">Repair thumbnails</string>
+    <string name="repair_thumbnail_for_selected">Repair thumbnails for selected items</string>
+    <string name="settings_download_verify_integrity">Verify download integrity</string>
+    <string name="settings_download_verify_integrity_summary">Check all finished downloads for missing or corrupted images, reset incomplete ones to re-download</string>
+    <string name="verify_integrity_confirm">Are you sure you want to verify all downloaded galleries? Incomplete galleries will be reset to download state. Removed galleries will be marked as completed.</string>
+    <string name="verify_integrity_start">Starting download integrity verification…</string>
+    <string name="verify_integrity_progress">Verifying: %1$d/%2$d (Complete: %3$d, Incomplete: %4$d)</string>
+    <string name="verify_integrity_complete">Verification complete: %1$d intact, %2$d incomplete (reset to re-download)</string>
     <string name="settings_download_clean_redundancy_started">Clean redundancy task started, check task manager for progress</string>
     <string name="settings_advanced_advanced_download_sort">Advanced download sort</string>
     <string name="settings_advanced_advanced_download_sort_summary">Enable advanced sorting for download queue, including category priority</string>
@@ -1137,6 +1165,8 @@
     <string name="spen_next_page">Next page</string>
     <string name="category_all">All</string>
     <string name="import_local_archive">Import local archive</string>
+    <string name="title_text_copied">Title text copied</string>
+    <string name="local_archive">Local Archive</string>
     <string name="repair_gallery_info">Repair gallery info</string>
     <string name="repair_gallery_info_success">Gallery info repaired successfully</string>
     <string name="repair_gallery_info_failed">Failed to repair gallery info</string>
@@ -1371,10 +1401,48 @@
     <string name="task_end_time">Ended</string>
     <string name="task_error">Error</string>
     <string name="task_no_error">No error</string>
+    <string name="task_eta_format">ETA ~%1$s</string>
+    <string name="task_eta_unknown">ETA --</string>
+    <string name="task_info_panel">Task Info</string>
+    <string name="task_progress_panel">Progress</string>
+    <string name="task_log_panel">Task Log</string>
+    <string name="task_export_log_txt">Export TXT</string>
+    <string name="task_export_log_json">Export JSON</string>
+    <string name="task_export_share_title">Share task log</string>
+    <string name="task_type_label">Type</string>
+    <string name="task_no_description">No description</string>
     <string name="settings_advanced_network_diagnostic">Network Diagnostic</string>
     <string name="settings_advanced_network_diagnostic_summary">Test site connectivity and network status</string>
     <string name="settings_advanced_network_log_enabled">Record network activity logs</string>
     <string name="settings_advanced_network_log_enabled_summary">Log all HTTP requests, keep-alive, lock management activities into categorized log files (network_okhttp.log, network_download.log, network_background.log, network_error.log) under the same directory as logcat exports</string>
+    <string name="settings_advanced_performance_monitor">Performance Monitor</string>
+    <string name="settings_advanced_performance_monitor_summary">Enable background performance monitoring to periodically collect memory, thread, and GC metrics for diagnosing lag issues</string>
+    <string name="settings_advanced_performance_monitor_log">View Performance Log</string>
+    <string name="settings_advanced_performance_monitor_log_summary">View recent performance snapshots and export logs</string>
+    <string name="settings_advanced_pre_anr_detection">Unresponsive Prediction &amp; Diagnostics</string>
+    <string name="settings_advanced_pre_anr_detection_summary">Always-on watchdog that detects main-thread stalls before ANR and saves thread + network diagnostics to disk</string>
+    <string name="settings_advanced_pre_anr_detection_enabled">Watchdog started</string>
+    <string name="settings_advanced_pre_anr_detection_disabled">Watchdog stopped</string>
+    <string name="settings_advanced_export_diagnostic">Export Full Diagnostic</string>
+    <string name="settings_advanced_export_diagnostic_summary">Bundle performance log, pre-ANR dumps, and network snapshot into one file</string>
+    <string name="settings_advanced_export_diagnostic_done">Diagnostic exported to %1$s</string>
+    <string name="settings_advanced_export_diagnostic_empty">No diagnostic data to export</string>
+    <string name="settings_advanced_export_diagnostic_failed">Failed to export diagnostic</string>
+    <string name="performance_monitor_channel_name">Performance Monitor</string>
+    <string name="performance_monitor_channel_description">Performance monitor service notification</string>
+    <string name="performance_monitor_notification_title">Performance Monitor Active</string>
+    <string name="performance_monitor_notification_text">JVM: %1$d%% | Native: %2$dMB | Threads: %3$d</string>
+    <string name="performance_log_title">Performance Log</string>
+    <string name="performance_log_export_success">Performance log exported to %1$s</string>
+    <string name="performance_log_export_failed">Performance log export failed</string>
+    <string name="performance_log_empty">No performance data yet. Please wait for collection.</string>
+    <string name="performance_log_clear">Clear Log</string>
+    <string name="performance_log_export">Export Log</string>
+    <string name="performance_log_header_format">%1$d records (sampling interval 30s)</string>
+    <string name="performance_log_summary_jvm">JVM: %1$d/%2$d MB (%3$d%%)</string>
+    <string name="performance_log_summary_native">Native: %1$d MB</string>
+    <string name="performance_log_summary_threads">Threads: %1$d</string>
+    <string name="performance_log_summary_download">Downloading: %1$d / Waiting: %2$d</string>
     <string name="network_diagnostic_title">Network Connectivity Diagnostic</string>
     <string name="network_status_connected">Connected</string>
     <string name="network_status_disconnected">Disconnected</string>
@@ -1389,6 +1457,29 @@
     <string name="site_inaccessible_with_error">✗ Inaccessible (%1$s)</string>
     <string name="ip_address_format">IP: %1$s</string>
     <string name="refresh_diagnostic">Refresh Diagnostic</string>
+    <string name="diagnostic_advanced_api">Advanced API Diagnostic</string>
+    <string name="diagnostic_advanced_api_summary">Test detailed connectivity of each API endpoint</string>
+    <string name="diagnostic_outer_section">External Connectivity Tests</string>
+    <string name="api_diagnostic_title">Advanced API Diagnostic</string>
+    <string name="api_diagnostic_warning">Warning: API tests (especially gdata, showpage) may consume browsing quotas (NEI/Hath). Use when quota is sufficient. Tap to dismiss.</string>
+    <string name="api_diagnostic_warning_title">Browsing Quota Warning</string>
+    <string name="api_diagnostic_need_login">Login required to test Ex-Hentai</string>
+    <string name="expand_collapse_all">Expand/Collapse All</string>
+    <string name="expand_all">Expand All</string>
+    <string name="collapse_all">Collapse All</string>
+    <string name="diagnostic_running">Testing in progress...</string>
+    <string name="diagnostic_progress_format">Testing: %1$s (%2$d)</string>
+    <string name="diagnostic_complete">Diagnostic complete, captured %1$d requests</string>
+    <string name="share_diagnostic_log">Share Diagnostic Log</string>
+    <string name="diagnostic_log_exported">Diagnostic log exported: %1$s</string>
+    <string name="diagnostic_log_saved">Diagnostic log saved to: %1$s</string>
+    <string name="diagnostic_log_export_failed">Failed to export diagnostic log</string>
+    <string name="timeout_label">Timeout:</string>
+    <string name="timeout_prompt">Select timeout</string>
+    <string name="timeout_unit_seconds">s</string>
+    <string name="cancel_diagnostic">Cancel</string>
+    <string name="diagnostic_cancelled">Diagnostic cancelled</string>
+    <string name="export_diagnostic_log">Export Diagnostic Log (HAR)</string>
     <string name="task_completed">Task completed</string>
     <string name="task_error_format">Error: %1$s</string>
     <string name="show">Show</string>
@@ -1701,6 +1792,12 @@
     <string name="remote_auth_mode_summary">Choose authentication method for remote connections</string>
     <string name="remote_delete_enabled">Allow Remote Delete</string>
     <string name="remote_delete_enabled_summary">Allow remote clients to delete galleries (web UI still requires confirmation)</string>
+    <string name="remote_delete_disabled">Remote Delete Disabled</string>
+    <string name="remote_management_enabled">Enable Remote Management</string>
+    <string name="remote_management_enabled_summary">Enable web-based remote management interface (API still works when disabled)</string>
+    <string name="remote_management_disabled">Remote Management Disabled</string>
+    <string name="remote_management_enabled_label">Remote Management: Enabled</string>
+    <string name="remote_management_disabled_label">Remote Management: Disabled</string>
     <string name="delete_files_on_remote_delete">Delete Files on Remote Delete</string>
     <string name="delete_files_on_remote_delete_summary">Delete downloaded files when deleting galleries remotely</string>
     <string name="remote_access_info_default">Start transfer service to use remote management</string>
@@ -1730,6 +1827,16 @@
     <string name="send_downloads_select">Downloads - Select</string>
     <string name="send_favorites_all">Favorites - All</string>
     <string name="send_favorites_select">Favorites - Select</string>
+    <string name="send_all_data">Transfer All (Database)</string>
+    <string name="send_all_data_confirm">Export the full database (bookmarks, favorites, downloads, history, etc.) and send it to %1$s? The receiver will import it as data import (merge).</string>
+    <string name="send_all_data_exporting">Exporting database…</string>
+    <string name="send_all_data_sending">Sending database to %1$s…</string>
+    <string name="send_all_data_success">Database sent, imported on receiver</string>
+    <string name="send_all_data_failed">Transfer failed: %1$s</string>
+    <string name="select_target_device">Select target device</string>
+    <string name="battery_optimization_title">Allow background running</string>
+    <string name="battery_optimization_message">To keep the transfer service responsive after the app goes to background, please set EhViewer to "No restrictions" in battery optimization settings.</string>
+    <string name="battery_optimization_go">Go to settings</string>
 
     <!-- Connect To -->
     <string name="connect_to">Connect To</string>
@@ -1792,4 +1899,216 @@
     <string name="log_level_info">Info</string>
     <string name="log_level_warn">Warn</string>
     <string name="log_level_error">Error</string>
+
+    <!-- Traffic Capture -->
+    <string name="settings_advanced_traffic_capture">Network Traffic Capture</string>
+    <string name="settings_advanced_traffic_capture_summary">Capture app network traffic to HAR files for analysis</string>
+    <string name="settings_advanced_traffic_capture_page">Capture Settings</string>
+    <string name="settings_advanced_traffic_capture_page_summary">View capture status, statistics, and manage HAR files</string>
+    <string name="capture_title">Network Capture</string>
+    <string name="capture_control_title">Network Capture</string>
+    <string name="capture_stats_title">Statistics</string>
+    <string name="capture_history_title">HAR Files</string>
+    <string name="capture_no_files">No HAR files captured yet</string>
+    <string name="capture_status_active">Capturing network traffic\u2026</string>
+    <string name="capture_status_idle">Capture stopped</string>
+    <string name="capture_started">Network capture started</string>
+    <string name="capture_stopped">Network capture stopped</string>
+    <string name="capture_saved">Capture saved and stopped</string>
+    <string name="capture_stats_requests">Requests: %d</string>
+    <string name="capture_stats_duration">Duration: %1$dm %2$ds</string>
+    <string name="capture_stats_sent">Sent: %s</string>
+    <string name="capture_stats_received">Received: %s</string>
+    <string name="capture_file_info">%1$s (%2$s)</string>
+    <string name="capture_empty">No HAR files captured yet</string>
+    <string name="capture_delete">Delete</string>
+    <string name="capture_save">Save and Stop</string>
+    <string name="capture_start">Start Capture</string>
+    <string name="capture_stop">Stop Capture</string>
+    <string name="capture_delete_title">Delete HAR File</string>
+    <string name="capture_delete_confirm">Delete %s?</string>
+    <string name="capture_deleted">HAR file deleted</string>
+    <string name="capture_share">Share HAR file</string>
+    <string name="capture_share_failed">Share failed: %s</string>
+    <string name="capture_service_channel">Network Capture</string>
+    <string name="capture_service_channel_desc">Network traffic capture notifications</string>
+    <string name="capture_notification_started">Capturing network traffic</string>
+    <string name="capture_notification_stats">Requests: %1$d | Sent: %2$s | Received: %3$s</string>
+    <string name="capture_notification_stop">Stop and Save</string>
+    <string name="capture_save_failed">Save failed: %s</string>
+    <string name="capture_channel_name">Network Capture</string>
+    <string name="capture_channel_description">Network traffic capture notifications</string>
+    <string name="capture_notification_title">Network Traffic Capture</string>
+    <string name="capture_notification_text">Requests: %1$d | Sent: %2$s | Received: %3$s</string>
+    <string name="capture_stop_save">Stop and Save</string>
+
+    <!-- Scheduled Tasks -->
+    <string name="settings_advanced_scheduled_tasks">Scheduled Tasks</string>
+    <string name="settings_advanced_scheduled_tasks_summary">Manage and configure scheduled background tasks</string>
+
+    <string name="scheduled_task_title">Scheduled Tasks</string>
+    <string name="scheduled_task_add">Add Scheduled Task</string>
+    <string name="scheduled_task_edit">Edit Scheduled Task</string>
+    <string name="scheduled_task_delete">Delete Scheduled Task</string>
+    <string name="scheduled_task_delete_confirm">Are you sure you want to delete this scheduled task?</string>
+    <string name="scheduled_task_no_tasks">No scheduled tasks</string>
+    <string name="scheduled_task_no_tasks_hint">Tap the + button in the top right to add a scheduled task</string>
+
+    <!-- Task States -->
+    <string name="scheduled_task_state_pending">Pending</string>
+    <string name="scheduled_task_state_waiting_condition">Waiting for condition</string>
+    <string name="scheduled_task_state_waiting_time">Waiting for time</string>
+    <string name="scheduled_task_state_queued">Queued</string>
+    <string name="scheduled_task_state_running">Running</string>
+    <string name="scheduled_task_state_completed">Completed</string>
+    <string name="scheduled_task_state_failed">Failed</string>
+    <string name="scheduled_task_state_cancelled">Cancelled</string>
+    <string name="scheduled_task_state_paused">Paused</string>
+
+    <!-- Delay Conditions -->
+    <string name="delay_condition_title">Delay Condition</string>
+    <string name="delay_condition_immediate">Immediate</string>
+    <string name="delay_condition_immediate_desc">Execute immediately after adding</string>
+    <string name="delay_condition_download_complete">All downloads complete</string>
+    <string name="delay_condition_download_complete_desc">Execute when all download tasks are complete</string>
+    <string name="delay_condition_other_tasks_complete">Other tasks complete</string>
+    <string name="delay_condition_other_tasks_complete_desc">Execute when other background tasks are complete</string>
+    <string name="delay_condition_specific_time">Specific time</string>
+    <string name="delay_condition_specific_time_desc">Execute at a specific time</string>
+
+    <!-- Repeat Modes -->
+    <string name="repeat_mode_title">Repeat Mode</string>
+    <string name="repeat_mode_once">Once</string>
+    <string name="repeat_mode_once_desc">Execute only once</string>
+    <string name="repeat_mode_daily">Daily</string>
+    <string name="repeat_mode_daily_desc">Execute once a day</string>
+    <string name="repeat_mode_weekdays">Weekdays</string>
+    <string name="repeat_mode_weekdays_desc">Execute on weekdays</string>
+    <string name="repeat_mode_weekends">Weekends</string>
+    <string name="repeat_mode_weekends_desc">Execute on weekends</string>
+    <string name="repeat_mode_holidays">Holidays</string>
+    <string name="repeat_mode_holidays_desc">Execute on holidays</string>
+    <string name="repeat_mode_custom_cron">Custom</string>
+    <string name="repeat_mode_custom_cron_desc">Customize execution time using Cron expression</string>
+
+    <!-- Weekday Config -->
+    <string name="weekday_config_title">Weekday Settings</string>
+    <string name="weekday_monday">Mon</string>
+    <string name="weekday_tuesday">Tue</string>
+    <string name="weekday_wednesday">Wed</string>
+    <string name="weekday_thursday">Thu</string>
+    <string name="weekday_friday">Fri</string>
+    <string name="weekday_saturday">Sat</string>
+    <string name="weekday_sunday">Sun</string>
+
+    <!-- Cron Expression -->
+    <string name="cron_expression_title">Cron Expression</string>
+    <string name="cron_expression_hint">e.g.: 0 2 * * *</string>
+    <string name="cron_expression_generator">Generator</string>
+    <string name="cron_expression_preview">Preview next execution time</string>
+    <string name="cron_expression_invalid">Invalid Cron expression</string>
+    <string name="cron_next_execution">Next execution: %1$s</string>
+
+    <!-- Cron Presets -->
+    <string name="cron_preset_title">Presets</string>
+    <string name="cron_preset_daily_00_00">Daily 00:00</string>
+    <string name="cron_preset_daily_02_00">Daily 02:00</string>
+    <string name="cron_preset_daily_06_00">Daily 06:00</string>
+    <string name="cron_preset_weekly_monday">Weekly Monday 00:00</string>
+    <string name="cron_preset_weekly_sunday">Weekly Sunday 00:00</string>
+    <string name="cron_preset_monthly_1st">Monthly 1st 00:00</string>
+    <string name="cron_preset_custom">Custom</string>
+
+    <!-- Cron Fields -->
+    <string name="cron_field_minute">Minute</string>
+    <string name="cron_field_hour">Hour</string>
+    <string name="cron_field_day_of_month">Day</string>
+    <string name="cron_field_month">Month</string>
+    <string name="cron_field_day_of_week">Week</string>
+    <string name="cron_field_year">Year</string>
+
+    <!-- Task Groups -->
+    <string name="task_group_title">Task Groups</string>
+    <string name="task_group_default">Default</string>
+    <string name="task_group_add">Add Task Group</string>
+    <string name="task_group_edit">Edit Task Group</string>
+    <string name="task_group_delete">Delete Task Group</string>
+    <string name="task_group_delete_confirm">Are you sure you want to delete this task group? Tasks will be moved to the default group.</string>
+    <string name="task_group_name_hint">Task group name</string>
+    <string name="task_group_execution_mode">Execution Mode</string>
+    <string name="task_group_sequential">Sequential</string>
+    <string name="task_group_sequential_desc">Tasks execute in order</string>
+    <string name="task_group_parallel">Parallel</string>
+    <string name="task_group_parallel_desc">Tasks can execute simultaneously</string>
+    <string name="task_group_task_count">%1$d tasks</string>
+
+    <!-- Retry Config -->
+    <string name="retry_config_title">Failure Retry</string>
+    <string name="retry_mode_no_retry">No retry</string>
+    <string name="retry_mode_no_retry_desc">Do not retry on failure</string>
+    <string name="retry_mode_immediate">Immediate retry</string>
+    <string name="retry_mode_immediate_desc">Retry immediately on failure</string>
+    <string name="retry_mode_delayed">Delayed retry</string>
+    <string name="retry_mode_delayed_desc">Retry after a delay on failure</string>
+    <string name="retry_mode_next_schedule">Next schedule retry</string>
+    <string name="retry_mode_next_schedule_desc">Retry at the next scheduled execution time</string>
+    <string name="retry_max_retries">Max retries</string>
+    <string name="retry_delay_millis">Retry delay (ms)</string>
+
+    <!-- Holiday Data -->
+    <string name="holiday_data_title">Holiday Data</string>
+    <string name="holiday_data_refresh">Refresh Data</string>
+    <string name="holiday_data_last_update">Last update: %1$s</string>
+    <string name="holiday_data_expired">Data is expired, refresh recommended</string>
+    <string name="holiday_data_refreshing">Refreshing holiday data…</string>
+    <string name="holiday_data_refresh_success">Holiday data updated</string>
+    <string name="holiday_data_refresh_failed">Failed to refresh holiday data</string>
+
+    <!-- Gallery Picker -->
+    <string name="gallery_picker_title">Select Gallery</string>
+    <string name="gallery_picker_selected_count">Selected: %1$d/%2$d</string>
+    <string name="gallery_picker_tab_downloads">Downloads</string>
+    <string name="gallery_picker_tab_favorites">Local Favorites</string>
+    <string name="gallery_picker_tab_all">All</string>
+    <string name="gallery_picker_search_hint">Search galleries…</string>
+    <string name="gallery_picker_no_galleries">No galleries</string>
+    <string name="gallery_picker_select_all">Select All</string>
+    <string name="gallery_picker_deselect_all">Deselect All</string>
+
+    <!-- Logs -->
+    <string name="scheduled_task_log_title">Execution Logs</string>
+    <string name="scheduled_task_log_clear">Clear Logs</string>
+    <string name="scheduled_task_log_clear_confirm">Are you sure you want to clear all execution logs?</string>
+    <string name="scheduled_task_log_export">Export Logs</string>
+    <string name="scheduled_task_log_no_logs">No execution logs</string>
+    <string name="scheduled_task_no_logs">No execution logs</string>
+    <string name="scheduled_task_log_level_info">Info</string>
+    <string name="scheduled_task_log_level_warn">Warn</string>
+    <string name="scheduled_task_log_level_error">Error</string>
+    <string name="scheduled_task_log_level_debug">Debug</string>
+
+    <!-- Task Execution Info -->
+    <string name="scheduled_task_execution_count">Execution count: %1$d</string>
+    <string name="scheduled_task_last_execution">Last execution: %1$s</string>
+    <string name="scheduled_task_next_execution">Next execution: %1$s</string>
+    <string name="scheduled_task_retry_count">Retry count: %1$d</string>
+    <string name="scheduled_task_group">Group: %1$s</string>
+
+    <!-- Select Time -->
+    <string name="select_date">Select Date</string>
+    <string name="select_time">Select Time</string>
+    <string name="select_datetime">Select Date and Time</string>
+
+    <!-- Task Type Names -->
+    <string name="task_type_download">Download</string>
+    <string name="task_type_sync">Sync</string>
+    <string name="task_type_scan">Scan</string>
+    <string name="task_type_cleanup">Cleanup</string>
+    <string name="task_type_merge">Merge</string>
+    <string name="task_type_update">Update</string>
+    <string name="task_type_transfer">Transfer</string>
+    <string name="task_type_import">Import</string>
+    <string name="task_type_export">Export</string>
+    <string name="task_type_backup">Backup</string>
+    <string name="task_type_other">Other</string>
 </resources>
