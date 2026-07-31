@@ -27,6 +27,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
@@ -36,6 +37,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -100,6 +102,12 @@ public class FileApiHandler extends BaseApiHandler {
             return handleFileList(session, folder);
         }
 
+        // GET /api/v1/folders/downloads/files/{gid}/integrity
+        if (uri.matches("/api/v1/folders/downloads/files/\\d+/integrity")) {
+            long gid = extractGidFromUri(uri);
+            return handleGalleryIntegrity(session, gid);
+        }
+
         // GET /api/v1/folders/{folder}/files/{filename}/preview
         if (uri.matches("/api/v1/folders/[^/]+/files/[^/]+/preview")) {
             String folder = extractFolder(uri, "/api/v1/folders/", "/files");
@@ -107,11 +115,31 @@ public class FileApiHandler extends BaseApiHandler {
             return handleFilePreview(session, folder, filename);
         }
 
+        // GET /api/v1/folders/{folder}/files/{filename}/hash
+        if (uri.matches("/api/v1/folders/[^/]+/files/[^/]+/hash")) {
+            String folder = extractFolder(uri, "/api/v1/folders/", "/files");
+            String filename = extractFilename(uri);
+            return handleFileHash(session, folder, filename);
+        }
+
         // GET /api/v1/folders/{folder}/files/{filename}
         if (uri.matches("/api/v1/folders/[^/]+/files/[^/]+")) {
             String folder = extractFolder(uri, "/api/v1/folders/", "/files");
             String filename = extractFilename(uri);
             return handleFileDownload(session, folder, filename);
+        }
+
+        return ResponseBuilder.notFound("Endpoint");
+    }
+
+    @Override
+    public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
+        logRequest("POST", uri);
+
+        // POST /api/v1/folders/downloads/files/{gid}/verify
+        if (uri.matches("/api/v1/folders/downloads/files/\\d+/verify")) {
+            long gid = extractGidFromUri(uri);
+            return handleGalleryVerify(session, gid);
         }
 
         return ResponseBuilder.notFound("Endpoint");
@@ -864,6 +892,367 @@ public class FileApiHandler extends BaseApiHandler {
             TransferLogger.getInstance().e(TAG, "读取文件失败", e);
             return "";
         }
+    }
+
+    // ==================== Integrity Check Handlers ====================
+
+    /**
+     * 获取单个文件哈希
+     * GET /api/v1/folders/{folder}/files/{filename}/hash?algorithm=md5
+     */
+    private NanoHTTPD.Response handleFileHash(NanoHTTPD.IHTTPSession session, String folder, String filename) {
+        TransferLogger.getInstance().d(TAG, "获取文件哈希: " + folder + "/" + filename);
+
+        String algorithm = RequestParser.getQueryParameter(session, "algorithm", "md5");
+
+        try {
+            File file = resolveFile(folder, filename);
+            if (file == null || !file.exists() || !file.isFile()) {
+                return ResponseBuilder.notFound("File");
+            }
+
+            String hash = computeFileHash(file, algorithm);
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+
+            JSONObject response = new JSONObject();
+            response.put("filename", filename);
+            response.put("path", file.getAbsolutePath());
+            response.put("size", file.length());
+            response.put("sizeFormatted", formatSize(file.length()));
+            response.put("hash", hash);
+            response.put("algorithm", algorithm);
+            response.put("lastModified", file.lastModified());
+            response.put("lastModifiedFormatted", sdf.format(new Date(file.lastModified())));
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "获取文件哈希失败: " + e.getMessage());
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 获取画廊完整性信息（批量）
+     * GET /api/v1/folders/downloads/files/{gid}/integrity?algorithm=md5
+     */
+    private NanoHTTPD.Response handleGalleryIntegrity(NanoHTTPD.IHTTPSession session, long gid) {
+        TransferLogger.getInstance().d(TAG, "获取画廊完整性: gid=" + gid);
+
+        String algorithm = RequestParser.getQueryParameter(session, "algorithm", "md5");
+
+        // Check cache
+        String cacheKey = ResponseCache.buildKey("integrity", String.valueOf(gid), algorithm);
+        String cached = ResponseCache.getInstance().get(cacheKey);
+        if (cached != null) {
+            TransferLogger.getInstance().d(TAG, "Cache hit for integrity: gid=" + gid);
+            return ResponseBuilder.jsonSuccess(cached);
+        }
+
+        try {
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            if (info == null) {
+                return ResponseBuilder.notFound("Gallery");
+            }
+
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+            if (downloadDir == null || !downloadDir.isDirectory()) {
+                return ResponseBuilder.notFound("Download directory");
+            }
+
+            JSONObject response = new JSONObject();
+            response.put("gid", gid);
+            response.put("title", info.title);
+            response.put("algorithm", algorithm);
+
+            // Get folder name from path
+            String dirPath = downloadDir.getUri().toString();
+            String folderName = dirPath.substring(dirPath.lastIndexOf('/') + 1);
+            response.put("folderName", folderName);
+
+            // List all files and compute hashes
+            JSONArray filesArray = new JSONArray();
+            long totalSize = 0;
+
+            UniFile[] files = downloadDir.listFiles();
+            if (files != null) {
+                for (UniFile file : files) {
+                    if (file.isFile()) {
+                        String name = file.getName();
+                        long size = file.length();
+                        totalSize += size;
+
+                        JSONObject fileObj = new JSONObject();
+                        fileObj.put("filename", name);
+                        fileObj.put("size", size);
+                        fileObj.put("sizeFormatted", formatSize(size));
+
+                        // Compute hash
+                        try {
+                            File javaFile = getFileFromFilesystem(file);
+                            if (javaFile != null && javaFile.exists()) {
+                                String hash = computeFileHash(javaFile, algorithm);
+                                fileObj.put("hash", hash);
+                            } else {
+                                // Try using UniFile input stream
+                                String hash = computeUniFileHash(file, algorithm);
+                                fileObj.put("hash", hash);
+                            }
+                        } catch (Exception e) {
+                            fileObj.put("hash", "error: " + e.getMessage());
+                        }
+
+                        filesArray.add(fileObj);
+                    }
+                }
+            }
+
+            response.put("totalFiles", filesArray.size());
+            response.put("totalSize", totalSize);
+            response.put("totalSizeFormatted", formatSize(totalSize));
+            response.put("files", filesArray);
+
+            String responseJson = response.toJSONString();
+
+            // Store in cache
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+
+            TransferLogger.getInstance().d(TAG, "画廊完整性: " + filesArray.size() + "个文件");
+            return ResponseBuilder.jsonSuccess(responseJson);
+
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "获取画廊完整性失败: " + e.getMessage());
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 校验本地文件完整性
+     * POST /api/v1/folders/downloads/files/{gid}/verify
+     */
+    private NanoHTTPD.Response handleGalleryVerify(NanoHTTPD.IHTTPSession session, long gid) {
+        TransferLogger.getInstance().d(TAG, "校验画廊完整性: gid=" + gid);
+
+        try {
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            if (info == null) {
+                return ResponseBuilder.notFound("Gallery");
+            }
+
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+            if (downloadDir == null || !downloadDir.isDirectory()) {
+                return ResponseBuilder.notFound("Download directory");
+            }
+
+            // Read request body
+            String body = RequestParser.readBody(session);
+            JSONObject request = JSON.parseObject(body);
+            String algorithm = request.getString("algorithm");
+            if (algorithm == null || algorithm.isEmpty()) algorithm = "md5";
+            JSONArray clientFiles = request.getJSONArray("files");
+
+            // Build remote file hash map
+            Map<String, String> remoteHashes = new LinkedHashMap<>();
+            Map<String, Long> remoteSizes = new LinkedHashMap<>();
+
+            UniFile[] files = downloadDir.listFiles();
+            if (files != null) {
+                for (UniFile file : files) {
+                    if (file.isFile()) {
+                        String name = file.getName();
+                        try {
+                            File javaFile = getFileFromFilesystem(file);
+                            if (javaFile != null && javaFile.exists()) {
+                                remoteHashes.put(name, computeFileHash(javaFile, algorithm));
+                                remoteSizes.put(name, javaFile.length());
+                            } else {
+                                remoteHashes.put(name, computeUniFileHash(file, algorithm));
+                                remoteSizes.put(name, file.length());
+                            }
+                        } catch (Exception e) {
+                            remoteHashes.put(name, "error");
+                            remoteSizes.put(name, file.length());
+                        }
+                    }
+                }
+            }
+
+            // Compare with client files
+            int matchCount = 0;
+            int mismatchCount = 0;
+            JSONArray details = new JSONArray();
+            Set<String> clientFileNames = new HashSet<>();
+
+            if (clientFiles != null) {
+                for (int i = 0; i < clientFiles.size(); i++) {
+                    JSONObject clientFile = clientFiles.getJSONObject(i);
+                    String filename = clientFile.getString("filename");
+                    String clientHash = clientFile.getString("hash");
+                    long clientSize = clientFile.getLongValue("size");
+
+                    clientFileNames.add(filename);
+
+                    JSONObject detail = new JSONObject();
+                    detail.put("filename", filename);
+
+                    if (remoteHashes.containsKey(filename)) {
+                        String remoteHash = remoteHashes.get(filename);
+                        long remoteSize = remoteSizes.get(filename);
+
+                        if (remoteHash.equals(clientHash) && remoteSize == clientSize) {
+                            detail.put("status", "match");
+                            matchCount++;
+                        } else {
+                            detail.put("status", "mismatch");
+                            detail.put("remoteHash", remoteHash);
+                            detail.put("localHash", clientHash);
+                            detail.put("remoteSize", remoteSize);
+                            detail.put("localSize", clientSize);
+                            mismatchCount++;
+                        }
+                    } else {
+                        detail.put("status", "extra");
+                        detail.put("localHash", clientHash);
+                        detail.put("localSize", clientSize);
+                    }
+
+                    details.add(detail);
+                }
+            }
+
+            // Find missing files (in remote but not in client)
+            JSONArray missingFiles = new JSONArray();
+            for (String remoteName : remoteHashes.keySet()) {
+                if (!clientFileNames.contains(remoteName)) {
+                    missingFiles.add(remoteName);
+                }
+            }
+
+            // Build response
+            JSONObject response = new JSONObject();
+            response.put("gid", gid);
+            response.put("totalFiles", remoteHashes.size());
+            response.put("verifiedFiles", clientFiles != null ? clientFiles.size() : 0);
+            response.put("match", matchCount);
+            response.put("mismatch", mismatchCount);
+            response.put("missing", missingFiles.size());
+            response.put("details", details);
+            response.put("missingFiles", missingFiles);
+
+            TransferLogger.getInstance().d(TAG, "校验结果: match=" + matchCount + ", mismatch=" + mismatchCount + ", missing=" + missingFiles.size());
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "校验画廊完整性失败: " + e.getMessage());
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * Compute file hash using specified algorithm
+     */
+    private String computeFileHash(File file, String algorithm) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance(algorithm.toUpperCase());
+        try (FileInputStream fis = new FileInputStream(file)) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = fis.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
+        return bytesToHex(digest.digest());
+    }
+
+    /**
+     * Compute hash from UniFile input stream
+     */
+    private String computeUniFileHash(UniFile file, String algorithm) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance(algorithm.toUpperCase());
+        try (InputStream is = file.openInputStream()) {
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = is.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+        }
+        return bytesToHex(digest.digest());
+    }
+
+    /**
+     * Convert byte array to hex string
+     */
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder();
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Extract GID from URI like /api/v1/folders/downloads/files/12345/integrity
+     */
+    private long extractGidFromUri(String uri) {
+        String[] parts = uri.split("/");
+        for (int i = 0; i < parts.length; i++) {
+            if ("files".equals(parts[i]) && i + 1 < parts.length) {
+                try {
+                    return Long.parseLong(parts[i + 1]);
+                } catch (NumberFormatException e) {
+                    // ignore
+                }
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Resolve file from folder name and filename
+     */
+    private File resolveFile(String folder, String filename) {
+        if ("downloads".equals(folder)) {
+            // For downloads, filename format is {gid}/{actual_filename}
+            int slashIdx = filename.indexOf('/');
+            if (slashIdx > 0) {
+                try {
+                    long gid = Long.parseLong(filename.substring(0, slashIdx));
+                    String actualFilename = filename.substring(slashIdx + 1);
+                    DownloadInfo info = downloadManager.getDownloadInfo(gid);
+                    if (info != null) {
+                        UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+                        if (downloadDir != null) {
+                            UniFile file = downloadDir.findFile(actualFilename);
+                            if (file != null) {
+                                return getFileFromFilesystem(file);
+                            }
+                        }
+                    }
+                } catch (NumberFormatException e) {
+                    // ignore
+                }
+            }
+            return null;
+        }
+
+        String folderPath = FOLDER_MAP.get(folder);
+        if (folderPath == null) return null;
+        return new File(folderPath, filename);
+    }
+
+    /**
+     * Try to get a java.io.File from a UniFile
+     */
+    private File getFileFromFilesystem(UniFile uniFile) {
+        try {
+            // Try to get the file path from the URI
+            String path = uniFile.getUri().getPath();
+            if (path != null) {
+                return new File(path);
+            }
+        } catch (Exception e) {
+            // ignore
+        }
+        return null;
     }
 
     /**

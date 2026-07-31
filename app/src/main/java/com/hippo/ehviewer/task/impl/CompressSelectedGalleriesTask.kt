@@ -250,11 +250,9 @@ class CompressSelectedGalleriesTask @JvmOverloads constructor(
         } catch (e: Exception) {
             try { /* final close */ } catch (_: Exception) {}
             // Save plan state so resume can pick up
-            if (plan != null) {
-                try {
-                    CompressPlanManager.savePlan(plan)
-                } catch (_: Exception) {}
-            }
+            try {
+                CompressPlanManager.savePlan(plan)
+            } catch (_: Exception) {}
             appendTaskLog("压缩任务出错: ${e.message}")
             notifyError(e)
             Result.failure(e)

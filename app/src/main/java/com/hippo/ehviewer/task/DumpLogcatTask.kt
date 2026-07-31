@@ -33,6 +33,9 @@ class DumpLogcatTask(
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.EXPORT
 
+    /** DumpLogcat 导出到日志目录，不与下载类任务互斥 */
+    override fun getMutexGroup(): String? = null
+
     override suspend fun execute(): Result<Unit> {
         return try {
             updateState(TaskState.RUNNING)
@@ -40,7 +43,7 @@ class DumpLogcatTask(
             appendTaskLog("开始导出logcat日志")
             delay(200)
 
-            val dir = AppConfig.getExternalLogcatDir()
+            val dir = AppConfig.getExternalLogcatExportDir()
             if (dir == null) {
                 val error = Exception("无法获取日志目录")
                 appendTaskLog("导出失败: 无法获取日志目录")

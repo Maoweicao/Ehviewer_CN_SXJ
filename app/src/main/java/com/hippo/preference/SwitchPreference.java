@@ -86,8 +86,18 @@ public class SwitchPreference extends TwoStatePreference {
         TypedArray a = context.obtainStyledAttributes(attrs, R.styleable.SwitchPreference, defStyleAttr, defStyleRes);
         setSummaryOn(a.getString(R.styleable.SwitchPreference_summaryOn));
         setSummaryOff(a.getString(R.styleable.SwitchPreference_summaryOff));
-        setSwitchTextOn(a.getString(R.styleable.SwitchPreference_switchTextOn));
-        setSwitchTextOff(a.getString(R.styleable.SwitchPreference_switchTextOff));
+        CharSequence onText = a.getString(R.styleable.SwitchPreference_switchTextOn);
+        CharSequence offText = a.getString(R.styleable.SwitchPreference_switchTextOff);
+        if (onText != null) {
+            setSwitchTextOn(onText);
+        } else {
+            mSwitchOn = "";
+        }
+        if (offText != null) {
+            setSwitchTextOff(offText);
+        } else {
+            mSwitchOff = "";
+        }
         setDisableDependentsState(a.getBoolean(R.styleable.SwitchPreference_disableDependentsState, false));
         a.recycle();
     }
@@ -102,14 +112,14 @@ public class SwitchPreference extends TwoStatePreference {
             if (checkableView instanceof SwitchCompat) {
                 final SwitchCompat switchView = (SwitchCompat) checkableView;
                 switchView.setOnCheckedChangeListener(null);
+                if (mSwitchOn != null) switchView.setTextOn(mSwitchOn);
+                if (mSwitchOff != null) switchView.setTextOff(mSwitchOff);
             }
 
             ((Checkable) checkableView).setChecked(isChecked());
 
             if (checkableView instanceof SwitchCompat) {
                 final SwitchCompat switchView = (SwitchCompat) checkableView;
-                switchView.setTextOn(mSwitchOn);
-                switchView.setTextOff(mSwitchOff);
                 switchView.setOnCheckedChangeListener(mListener);
             }
         }

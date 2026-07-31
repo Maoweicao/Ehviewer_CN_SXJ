@@ -384,9 +384,21 @@
             android:theme="@style/AppTheme.Toolbar" />
 
         <activity
-            android:name="com.hippo.ehviewer.ui.scheduled.ScheduledTaskActivity"
+            android:name="com.hippo.ehviewer.ui.automation.AutomationActivity"
             android:configChanges="screenSize|uiMode"
-            android:label="@string/scheduled_task_title"
+            android:label="@string/automation_title"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.automation.WizardActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/automation_add"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.automation.AutomationLogActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/scheduled_task_log_title"
             android:theme="@style/AppTheme.Toolbar" />
 
         <activity
@@ -405,6 +417,18 @@
             android:foregroundServiceType="dataSync|specialUse"
             android:label="@string/download_service_label" />
 
+        <receiver
+            android:name=".download.DownloadNotificationReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".download.SystemDownloadCompleteReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="com.hippo.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -414,6 +438,12 @@
                 android:name="com.hippo.content.FILE_PROVIDER_PATHS"
                 android:resource="@xml/filepaths" />
         </provider>
+
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            tools:node="replace" />
     </application>
 
 </manifest>

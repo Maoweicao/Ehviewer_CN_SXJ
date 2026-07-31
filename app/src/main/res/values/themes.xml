@@ -22,6 +22,7 @@
         <item name="colorPrimary">@color/colorPrimary</item>
 
         <item name="popupWindowStyle">@color/popupWindow_background_light</item>
+        <item name="android:colorBackground">@color/white</item>
         <item name="android:navigationBarColor">@color/white</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:windowLightNavigationBar">true</item>
@@ -66,6 +67,14 @@
         <item name="limits_shape_color">@color/shape_color_limits</item>
         <item name="home_shadow">@color/home_shadow_color</item>
 
+        <item name="topListPalette1">#E3F2FD</item>
+        <item name="topListPalette2">#FFF3E0</item>
+        <item name="topListPalette3">#E8F5E9</item>
+        <item name="topListPalette4">#FCE4EC</item>
+        <item name="topListPalette5">#F3E5F5</item>
+        <item name="topListPalette6">#FFFDE7</item>
+        <item name="topListPalette7">#E0F7FA</item>
+
         <item name="iconColor">@color/icon_color</item>
         <item name="alertDialogTheme">@style/AlertDialogTheme.Light</item>
     </style>
@@ -80,7 +89,7 @@
         <item name="windowNoTitle">true</item>
     </style>
 
-    <style name="AppTheme.NoActionBar.Translucent" parent="AppTheme">
+    <style name="AppTheme.NoActionBar.Translucent" parent="AppTheme.NoActionBar">
 
     </style>
 
@@ -95,13 +104,13 @@
         <item name="actionBarStyle">@style/ActionBarStyle</item>
 
         <item name="popupWindowStyle">@color/popupWindow_background_dark</item>
+        <item name="android:colorBackground">@color/grey_850</item>
         <item name="android:navigationBarColor">@color/grey_850</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="buttonStyle">@style/ThemeChangeButtonStyleDark</item>
 
         <item name="android:windowBackground">@color/grey_850</item>
-        <item name="android:colorBackground">@color/grey_850</item>
         <item name="colorBackgroundFloating">@color/grey_850</item>
 
         <item name="colorEdgeEffect">@color/grey_500</item>
@@ -138,6 +147,14 @@
         <item name="limits_shape_color">@color/shape_color_limits_dart</item>
         <item name="home_shadow">@color/home_shadow_color_dark</item>
 
+        <item name="topListPalette1">#1E3A5F</item>
+        <item name="topListPalette2">#5C3A1E</item>
+        <item name="topListPalette3">#1E3A2A</item>
+        <item name="topListPalette4">#5C2A3A</item>
+        <item name="topListPalette5">#3A2A5C</item>
+        <item name="topListPalette6">#5C502A</item>
+        <item name="topListPalette7">#1E3A3A</item>
+
         <item name="iconColor">@color/icon_color_dark</item>
         <item name="alertDialogTheme">@style/AlertDialogTheme.Dark</item>
     </style>
@@ -162,13 +179,13 @@
         <item name="actionBarStyle">@style/ActionBarStyle</item>
 
         <item name="popupWindowStyle">@color/popupWindow_background_black</item>
+        <item name="android:colorBackground">@android:color/black</item>
         <item name="android:navigationBarColor">@android:color/black</item>
         <item name="android:windowDrawsSystemBarBackgrounds">true</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="buttonStyle">@style/ThemeChangeButtonStyleBlack</item>
 
         <item name="android:windowBackground">@android:color/black</item>
-        <item name="android:colorBackground">@android:color/black</item>
         <item name="colorBackgroundFloating">@android:color/black</item>
         <item name="android:textColorPrimary">@color/primary_text_material_black</item>
         <item name="colorEdgeEffect">@color/grey_500</item>
@@ -203,6 +220,14 @@
         <item name="limitCountBgColor">@color/colorLimitCountBgBlack</item>
         <item name="limits_shape_color">@color/shape_color_limits_black</item>
         <item name="home_shadow">@color/home_shadow_color_black</item>
+
+        <item name="topListPalette1">#162640</item>
+        <item name="topListPalette2">#402915</item>
+        <item name="topListPalette3">#152E1E</item>
+        <item name="topListPalette4">#40182A</item>
+        <item name="topListPalette5">#2A1840</item>
+        <item name="topListPalette6">#403A18</item>
+        <item name="topListPalette7">#152E30</item>
 
         <item name="iconColor">@color/icon_color_black</item>
         <item name="alertDialogTheme">@style/AlertDialogTheme.Black</item>
@@ -257,9 +282,6 @@
     <style name="AppTheme.Settings.Black" parent="AppTheme.Black" />
 
     <style name="SplashTheme" parent="BaseTheme">
-        ==========
-        启动页属性
-        ==========
         <item name="android:windowBackground">@color/trans</item>
         <item name="windowNoTitle">true</item>
         <item name="android:windowFullscreen">true</item>
@@ -270,17 +292,23 @@
     <!-- ============ -->
     <style name="AlertDialogTheme.Light" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
         <item name="android:windowBackground">@color/white</item>
+        <item name="android:colorBackground">@color/white</item>
         <item name="colorBackgroundFloating">@color/white</item>
+        <item name="android:windowBackgroundFallback">@color/white</item>
     </style>
 
     <style name="AlertDialogTheme.Dark" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
         <item name="android:windowBackground">@color/grey_850</item>
+        <item name="android:colorBackground">@color/grey_850</item>
         <item name="colorBackgroundFloating">@color/grey_850</item>
+        <item name="android:windowBackgroundFallback">@color/grey_850</item>
     </style>
 
     <style name="AlertDialogTheme.Black" parent="ThemeOverlay.MaterialComponents.Dialog.Alert">
         <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:colorBackground">@android:color/black</item>
         <item name="colorBackgroundFloating">@android:color/black</item>
+        <item name="android:windowBackgroundFallback">@android:color/black</item>
     </style>
 
     <!-- ============ -->

@@ -36,6 +36,9 @@ class ExportDatabaseTask(
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.EXPORT
 
+    /** 导出数据库到 backup 目录，不与下载类任务互斥 */
+    override fun getMutexGroup(): String? = null
+
     override suspend fun execute(): Result<Unit> {
         return try {
             updateState(TaskState.RUNNING)

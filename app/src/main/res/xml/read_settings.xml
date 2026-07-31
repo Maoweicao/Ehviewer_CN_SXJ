@@ -17,164 +17,179 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-<!--    <com.hippo.preference.ListPreference-->
-<!--        android:defaultValue="0"-->
-<!--        android:key="screen_rotation"-->
-<!--        android:summary="%s"-->
-<!--        android:title="@string/settings_read_picture_decoding_method"-->
-<!--        app:allowDividerAbove="true"-->
-<!--        app:entries="@array/picture_decoding_method"-->
-<!--        app:entryValues="@array/picture_decoding_method_values" />-->
+    <PreferenceCategory
+        android:key="category_reading_display"
+        android:title="@string/settings_category_reading_display"
+        android:summary="@string/settings_category_reading_display_summary"
+        app:allowDividerAbove="false">
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="screen_rotation"
-        android:summary="%s"
-        android:title="@string/settings_read_screen_rotation"
-        app:allowDividerAbove="true"
-        app:entries="@array/screen_rotation_entries"
-        app:entryValues="@array/screen_rotation_entry_values" />
+<!--        <com.hippo.preference.ListPreference-->
+<!--            android:defaultValue="0"-->
+<!--            android:key="screen_rotation"-->
+<!--            android:summary="%s"-->
+<!--            android:title="@string/settings_read_picture_decoding_method"-->
+<!--            app:allowDividerAbove="true"-->
+<!--            app:entries="@array/picture_decoding_method"-->
+<!--            app:entryValues="@array/picture_decoding_method_values" />-->
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="1"
-        android:key="reading_direction"
-        android:summary="%s"
-        android:title="@string/settings_read_reading_direction"
-        app:allowDividerAbove="true"
-        app:entries="@array/reading_direction_entries"
-        app:entryValues="@array/reading_direction_entry_values" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="screen_rotation"
+            android:summary="%s"
+            android:title="@string/settings_read_screen_rotation"
+            app:entries="@array/screen_rotation_entries"
+            app:entryValues="@array/screen_rotation_entry_values" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="3"
-        android:key="page_scaling"
-        android:summary="%s"
-        android:title="@string/settings_read_page_scaling"
-        app:allowDividerAbove="true"
-        app:entries="@array/page_scaling_entries"
-        app:entryValues="@array/page_scaling_entry_values" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="1"
+            android:key="reading_direction"
+            android:summary="%s"
+            android:title="@string/settings_read_reading_direction"
+            app:entries="@array/reading_direction_entries"
+            app:entryValues="@array/reading_direction_entry_values" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="1"
-        android:key="start_position"
-        android:summary="%s"
-        android:title="@string/settings_read_start_position"
-        app:allowDividerAbove="true"
-        app:entries="@array/start_position_entries"
-        app:entryValues="@array/start_position_values" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="3"
+            android:key="page_scaling"
+            android:summary="%s"
+            android:title="@string/settings_read_page_scaling"
+            app:entries="@array/page_scaling_entries"
+            app:entryValues="@array/page_scaling_entry_values" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="5"
-        android:key="fast_transfer_time"
-        android:title="@string/settings_read_fast_transfer_time"
-        app:allowDividerAbove="true"
-        app:minValue="1"
-        app:maxValue="10"
-        app:stepSize="1"
-        app:scale="0.1"
-        app:precision="1"
-        app:unit="秒"
-        app:showValue="true" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="1"
+            android:key="start_position"
+            android:summary="%s"
+            android:title="@string/settings_read_start_position"
+            app:entries="@array/start_position_entries"
+            app:entryValues="@array/start_position_values" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="40"
-        android:key="static_transfer_time"
-        android:title="@string/settings_read_static_transfer_time"
-        app:allowDividerAbove="true"
-        app:minValue="10"
-        app:maxValue="1200"
-        app:stepSize="5"
-        app:scale="0.1"
-        app:precision="1"
-        app:unit="秒"
-        app:showValue="true" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="5"
+            android:key="fast_transfer_time"
+            android:title="@string/settings_read_fast_transfer_time"
+            app:minValue="1"
+            app:maxValue="10"
+            app:stepSize="1"
+            app:scale="0.1"
+            app:precision="1"
+            app:unit="秒"
+            app:showValue="true" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="80"
-        android:key="animated_transfer_time"
-        android:title="@string/settings_read_animated_transfer_time"
-        app:allowDividerAbove="true"
-        app:minValue="10"
-        app:maxValue="1200"
-        app:stepSize="5"
-        app:scale="0.1"
-        app:precision="1"
-        app:unit="秒"
-        app:showValue="true" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="40"
+            android:key="static_transfer_time"
+            android:title="@string/settings_read_static_transfer_time"
+            app:minValue="10"
+            app:maxValue="1200"
+            app:stepSize="5"
+            app:scale="0.1"
+            app:precision="1"
+            app:unit="秒"
+            app:showValue="true" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="wait_for_animation"
-        android:title="@string/settings_read_wait_for_animation" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="80"
+            android:key="animated_transfer_time"
+            android:title="@string/settings_read_animated_transfer_time"
+            app:minValue="10"
+            app:maxValue="1200"
+            app:stepSize="5"
+            app:scale="0.1"
+            app:precision="1"
+            app:unit="秒"
+            app:showValue="true" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="gallery_show_transfer_countdown"
-        android:title="@string/settings_read_show_transfer_countdown" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="wait_for_animation"
+            android:title="@string/settings_read_wait_for_animation" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="gallery_disable_click_page"
-        android:title="@string/settings_read_disable_click_page" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="gallery_show_transfer_countdown"
+            android:title="@string/settings_read_show_transfer_countdown" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="gallery_disable_gesture_page"
-        android:title="@string/settings_read_disable_gesture_page" />
+    </PreferenceCategory>
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="keep_screen_on"
-        android:title="@string/settings_read_keep_screen_on" />
+    <PreferenceCategory
+        android:key="category_reading_gesture"
+        android:title="@string/settings_category_reading_gesture"
+        android:summary="@string/settings_category_reading_gesture_summary">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="gallery_show_clock"
-        android:title="@string/settings_read_show_clock" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="gallery_disable_click_page"
+            android:title="@string/settings_read_disable_click_page" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="gallery_show_progress"
-        android:title="@string/settings_read_show_progress" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="gallery_disable_gesture_page"
+            android:title="@string/settings_read_disable_gesture_page" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="gallery_show_battery"
-        android:title="@string/settings_read_show_battery" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="keep_screen_on"
+            android:title="@string/settings_read_keep_screen_on" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="gallery_show_page_interval"
-        android:title="@string/settings_read_show_page_interval" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="gallery_show_clock"
+            android:title="@string/settings_read_show_clock" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="volume_page"
-        android:title="@string/settings_read_volume_page" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="gallery_show_progress"
+            android:title="@string/settings_read_show_progress" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="reverse_volume_page"
-        android:title="@string/settings_read_reverse_volume_page" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="gallery_show_battery"
+            android:title="@string/settings_read_show_battery" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="reading_fullscreen"
-        android:title="@string/settings_read_reading_fullscreen" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="gallery_show_page_interval"
+            android:title="@string/settings_read_show_page_interval" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="custom_screen_lightness"
-        android:title="@string/settings_read_custom_screen_lightness" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="volume_page"
+            android:title="@string/settings_read_volume_page" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="50"
-        android:dependency="custom_screen_lightness"
-        android:key="screen_lightness"
-        android:title="@string/settings_read_screen_lightness"
-        app:minValue="0"
-        app:maxValue="200"
-        app:stepSize="5"
-        app:unit="%"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="reverse_volume_page"
+            android:title="@string/settings_read_reverse_volume_page" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="reading_fullscreen"
+            android:title="@string/settings_read_reading_fullscreen" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_reading_brightness"
+        android:title="@string/settings_category_reading_brightness"
+        android:summary="@string/settings_category_reading_brightness_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="custom_screen_lightness"
+            android:title="@string/settings_read_custom_screen_lightness" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="50"
+            android:dependency="custom_screen_lightness"
+            android:key="screen_lightness"
+            android:title="@string/settings_read_screen_lightness"
+            app:minValue="0"
+            app:maxValue="200"
+            app:stepSize="5"
+            app:unit="%"
+            app:showValue="true" />
+
+    </PreferenceCategory>
 
 </PreferenceScreen>

@@ -42,6 +42,16 @@ tags:
     description: 设备信息
   - name: Debug
     description: 调试工具
+  - name: Tasks
+    description: 统一任务管理
+  - name: Favorites
+    description: 本地收藏
+  - name: Downloads
+    description: 下载管理
+  - name: Connect
+    description: 设备连接管理
+  - name: Relay
+    description: 接力下载
 
 components:
   securitySchemes:
@@ -559,6 +569,195 @@ components:
           description: JPEG 质量 (1-100)
           example: 80
 
+    UnifiedTask:
+      type: object
+      properties:
+        taskId:
+          type: string
+          example: "compress-uuid-xxx"
+        type:
+          type: string
+          enum: [push, compress, relay]
+        subType:
+          type: string
+          example: "downloads"
+        status:
+          type: string
+          enum: [pending, accepted, rejected, in_progress, transferring, completed, failed, cancelled]
+        sourceDevice:
+          type: string
+          example: "Pixel 7"
+        progress:
+          type: number
+          format: float
+          example: 66.7
+        total:
+          type: integer
+          example: 3
+        completed:
+          type: integer
+          example: 2
+        createdTime:
+          type: integer
+          format: int64
+        updatedTime:
+          type: integer
+          format: int64
+        completedTime:
+          type: integer
+          format: int64
+          nullable: true
+        splitSizeMB:
+          type: integer
+          example: 1024
+        outputFiles:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              path:
+                type: string
+              size:
+                type: integer
+              sizeFormatted:
+                type: string
+
+    DownloadItem:
+      type: object
+      properties:
+        gid:
+          type: integer
+        token:
+          type: string
+        title:
+          type: string
+        titleJpn:
+          type: string
+        thumb:
+          type: string
+        category:
+          type: integer
+        posted:
+          type: string
+        uploader:
+          type: string
+        rating:
+          type: number
+        language:
+          type: string
+        pages:
+          type: integer
+        state:
+          type: integer
+          description: "-1未下载/0无/1等待/2下载中/3已完成/4失败/5更新/6新建"
+        stateName:
+          type: string
+        label:
+          type: string
+        time:
+          type: integer
+        createdTime:
+          type: integer
+        createdDate:
+          type: string
+        finished:
+          type: integer
+        total:
+          type: integer
+        downloaded:
+          type: integer
+        speed:
+          type: integer
+        speedFormatted:
+          type: string
+        remaining:
+          type: integer
+        progress:
+          type: number
+        legacy:
+          type: integer
+        fileSize:
+          type: integer
+        simpleTags:
+          type: array
+          items:
+            type: string
+
+    PeerDevice:
+      type: object
+      properties:
+        deviceId:
+          type: string
+        deviceName:
+          type: string
+        deviceType:
+          type: string
+        remoteIp:
+          type: string
+        port:
+          type: integer
+        connectedAt:
+          type: integer
+        lastSeen:
+          type: integer
+
+    RelayTask:
+      type: object
+      properties:
+        taskId:
+          type: string
+        gid:
+          type: integer
+        title:
+          type: string
+        titleJpn:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, downloading, completed, returned, rejected, cancelled, failed]
+        direction:
+          type: string
+          enum: [incoming, outgoing]
+        sourceDevice:
+          type: string
+        targetDevice:
+          type: string
+        priority:
+          type: string
+        autoReturn:
+          type: boolean
+        finished:
+          type: integer
+        total:
+          type: integer
+        speed:
+          type: integer
+        speedFormatted:
+          type: string
+        downloadedSize:
+          type: integer
+        downloadedSizeFormatted:
+          type: string
+        totalSize:
+          type: integer
+        totalSizeFormatted:
+          type: string
+        progress:
+          type: number
+        createdTime:
+          type: integer
+        updatedTime:
+          type: integer
+        completedTime:
+          type: integer
+          nullable: true
+        createdDate:
+          type: string
+        updatedDate:
+          type: string
+
 security:
   - BearerAuth: []
   - QueryToken: []
@@ -708,11 +907,186 @@ paths:
               schema:
                 $ref: "#/components/schemas/GalleryDetail"
         "404":
-          description: 画廊不存在
+          description: 任务不存在
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+
+  # ==================== Integrity Check ====================
+  /api/v1/folders/{folder}/files/{filename}/hash:
+    get:
+      tags: [Files]
+      summary: 获取单个文件哈希
+      description: 计算指定文件的哈希值
+      operationId: getFileHash
+      parameters:
+        - name: folder
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: algorithm
+          in: query
+          description: 哈希算法
+          schema:
+            type: string
+            enum: [md5, sha1, sha256]
+            default: md5
+      responses:
+        "200":
+          description: 文件哈希信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  filename:
+                    type: string
+                  path:
+                    type: string
+                  size:
+                    type: integer
+                  sizeFormatted:
+                    type: string
+                  hash:
+                    type: string
+                  algorithm:
+                    type: string
+                  lastModified:
+                    type: integer
+
+  /api/v1/folders/downloads/files/{gid}/integrity:
+    get:
+      tags: [Files]
+      summary: 获取画廊完整性信息
+      description: 获取已下载画廊中所有文件的哈希信息
+      operationId: getGalleryIntegrity
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: algorithm
+          in: query
+          schema:
+            type: string
+            enum: [md5, sha1, sha256]
+            default: md5
+      responses:
+        "200":
+          description: 画廊完整性信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gid:
+                    type: integer
+                  title:
+                    type: string
+                  folderName:
+                    type: string
+                  totalFiles:
+                    type: integer
+                  totalSize:
+                    type: integer
+                  totalSizeFormatted:
+                    type: string
+                  algorithm:
+                    type: string
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        size:
+                          type: integer
+                        sizeFormatted:
+                          type: string
+                        hash:
+                          type: string
+
+  /api/v1/folders/downloads/files/{gid}/verify:
+    post:
+      tags: [Files]
+      summary: 校验本地文件完整性
+      description: 上传本地文件哈希列表，服务端比对返回差异
+      operationId: verifyGallery
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                algorithm:
+                  type: string
+                  enum: [md5, sha1, sha256]
+                  default: md5
+                files:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      filename:
+                        type: string
+                      size:
+                        type: integer
+                      hash:
+                        type: string
+      responses:
+        "200":
+          description: 校验结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gid:
+                    type: integer
+                  totalFiles:
+                    type: integer
+                  verifiedFiles:
+                    type: integer
+                  match:
+                    type: integer
+                  mismatch:
+                    type: integer
+                  missing:
+                    type: integer
+                  details:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        filename:
+                          type: string
+                        status:
+                          type: string
+                          enum: [match, mismatch, extra]
+                        remoteHash:
+                          type: string
+                        localHash:
+                          type: string
+                  missingFiles:
+                    type: array
+                    items:
+                      type: string
 
     delete:
       tags: [Galleries]
@@ -1332,3 +1706,701 @@ paths:
             text/html:
               schema:
                 type: string
+
+  # ==================== Unified Tasks ====================
+  /api/v1/tasks:
+    get:
+      tags: [Tasks]
+      summary: 获取所有任务
+      description: 统一获取推送任务和压缩任务列表，支持按类型和状态筛选
+      operationId: getAllTasks
+      parameters:
+        - name: type
+          in: query
+          description: 任务类型筛选
+          schema:
+            type: string
+            enum: [all, push, compress]
+            default: all
+        - name: status
+          in: query
+          description: 状态筛选
+          schema:
+            type: string
+            enum: [all, pending, in_progress, completed, failed, cancelled]
+            default: all
+      responses:
+        "200":
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UnifiedTask"
+                  total:
+                    type: integer
+
+  /api/v1/tasks/{taskId}:
+    get:
+      tags: [Tasks]
+      summary: 获取任务详情
+      operationId: getTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnifiedTask"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Tasks]
+      summary: 取消/删除任务
+      description: 进行中的任务将被取消，已完成的任务将被移除
+      operationId: deleteTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ==================== Favorites ====================
+  /api/v1/favorites:
+    get:
+      tags: [Favorites]
+      summary: 获取收藏列表
+      description: 获取本地收藏列表，若已下载则合并下载信息
+      operationId: getFavorites
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 30
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 收藏列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryListResponse"
+
+    query:
+      tags: [Favorites]
+      summary: QUERY 方法查询收藏
+      operationId: queryFavorites
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                filter:
+                  type: object
+      responses:
+        "200":
+          description: 收藏列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryListResponse"
+
+  # ==================== Downloads ====================
+  /api/v1/downloads:
+    get:
+      tags: [Downloads]
+      summary: 获取下载任务列表
+      operationId: getDownloads
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            default: all
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 30
+        - name: label
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 下载任务列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  limit:
+                    type: integer
+                  downloads:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DownloadItem"
+    post:
+      tags: [Downloads]
+      summary: 创建下载任务
+      operationId: createDownload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gid:
+                  type: integer
+                token:
+                  type: string
+                title:
+                  type: string
+                pages:
+                  type: integer
+                label:
+                  type: string
+                startImmediately:
+                  type: boolean
+                  default: false
+      responses:
+        "200":
+          description: 下载已添加
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "409":
+          description: 下载已存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/downloads/batch/start:
+    post:
+      tags: [Downloads]
+      summary: 批量开始下载
+      operationId: batchStartDownloads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "200":
+          description: 批量操作完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/downloads/batch/pause:
+    post:
+      tags: [Downloads]
+      summary: 批量暂停下载
+      operationId: batchPauseDownloads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "200":
+          description: 批量操作完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/downloads/batch:
+    delete:
+      tags: [Downloads]
+      summary: 批量删除下载任务
+      operationId: batchDeleteDownloads
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gids:
+                  type: array
+                  items:
+                    type: integer
+      responses:
+        "200":
+          description: 批量删除完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/downloads/{gid}:
+    get:
+      tags: [Downloads]
+      summary: 获取下载任务详情
+      operationId: getDownloadDetail
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 下载任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DownloadItem"
+        "404":
+          description: 下载不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Downloads]
+      summary: 删除下载任务
+      operationId: deleteDownload
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 删除成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/downloads/{gid}/start:
+    post:
+      tags: [Downloads]
+      summary: 开始/恢复下载
+      operationId: startDownload
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 下载已开始
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/downloads/{gid}/pause:
+    post:
+      tags: [Downloads]
+      summary: 暂停下载
+      operationId: pauseDownload
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: 下载已暂停
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # ==================== Connect ====================
+  /api/v1/connect:
+    post:
+      tags: [Connect]
+      summary: 注册设备连接
+      operationId: connectDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deviceId:
+                  type: string
+                deviceName:
+                  type: string
+                deviceType:
+                  type: string
+                  enum: [android, ios, pc, web]
+                port:
+                  type: integer
+      responses:
+        "200":
+          description: 连接成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  deviceId:
+                    type: string
+                  serverTime:
+                    type: integer
+    delete:
+      tags: [Connect]
+      summary: 注销设备连接
+      operationId: disconnectDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                deviceId:
+                  type: string
+      responses:
+        "200":
+          description: 断开成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/connect/peers:
+    get:
+      tags: [Connect]
+      summary: 获取已连接设备列表
+      operationId: getPeers
+      responses:
+        "200":
+          description: 设备列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  peers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PeerDevice"
+                  total:
+                    type: integer
+
+  # ==================== Relay ====================
+  /api/v1/relay/create:
+    post:
+      tags: [Relay]
+      summary: 创建接力任务
+      operationId: createRelayTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gid:
+                  type: integer
+                token:
+                  type: string
+                title:
+                  type: string
+                pages:
+                  type: integer
+                sourceDevice:
+                  type: string
+                targetDevice:
+                  type: string
+                priority:
+                  type: string
+                  enum: [low, normal, high]
+                  default: normal
+                autoReturn:
+                  type: boolean
+                  default: true
+      responses:
+        "200":
+          description: 接力任务已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  gid:
+                    type: integer
+                  status:
+                    type: string
+
+  /api/v1/relay/batch:
+    post:
+      tags: [Relay]
+      summary: 批量创建接力任务
+      operationId: batchCreateRelayTasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                gids:
+                  type: array
+                  items:
+                    type: integer
+                sourceDevice:
+                  type: string
+                priority:
+                  type: string
+      responses:
+        "200":
+          description: 批量创建完成
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  tasks:
+                    type: array
+                  total:
+                    type: integer
+
+  /api/v1/relay/tasks:
+    get:
+      tags: [Relay]
+      summary: 获取接力任务列表
+      operationId: getRelayTasks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            default: all
+        - name: direction
+          in: query
+          schema:
+            type: string
+            default: all
+      responses:
+        "200":
+          description: 接力任务列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tasks:
+                    type: array
+                  total:
+                    type: integer
+
+  /api/v1/relay/{taskId}/status:
+    get:
+      tags: [Relay]
+      summary: 获取接力任务状态
+      operationId: getRelayTaskStatus
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelayTask"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/relay/{taskId}/accept:
+    post:
+      tags: [Relay]
+      summary: 接受接力任务
+      operationId: acceptRelayTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务已接受
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/relay/{taskId}/reject:
+    post:
+      tags: [Relay]
+      summary: 拒绝接力任务
+      operationId: rejectRelayTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务已拒绝
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/relay/{taskId}/cancel:
+    post:
+      tags: [Relay]
+      summary: 取消接力任务
+      operationId: cancelRelayTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务已取消
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /api/v1/relay/{taskId}/download:
+    get:
+      tags: [Relay]
+      summary: 下载接力任务完成的文件
+      operationId: downloadRelayFile
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ZIP 文件
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: 任务状态不允许下载
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/relay/{taskId}:
+    delete:
+      tags: [Relay]
+      summary: 删除接力任务
+      operationId: deleteRelayTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务已删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"

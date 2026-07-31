@@ -52,7 +52,7 @@ class StartRangeDownloadTask(context: Context, private val gidList: LongList) : 
             for (i in 0 until gidList.size()) {
                 val gid = gidList.get(i)
                 val info = downloadManager.getDownloadInfo(gid)
-                if (info != null && (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED || info.state == DownloadInfo.STATE_FINISH || info.state == DownloadInfo.STATE_WAIT)) {
+                if (info != null && (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED || info.state == DownloadInfo.STATE_FINISH || info.state == DownloadInfo.STATE_WAIT || info.state == DownloadInfo.STATE_RELAY_DOWNLOAD)) {
                     validGidList.add(gid)
                 }
                 

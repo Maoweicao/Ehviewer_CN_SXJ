@@ -36,11 +36,20 @@ android {
         targetSdkVersion 30
         versionCode 111
         versionName "2.0.2.2"
-        vectorDrawables.useSupportLibrary = true
         buildConfigField 'String', 'BUILD_TIME', "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\""
         resourceConfigurations += ['zh', 'zh-rCN', 'zh-rHK', 'zh-rTW', 'es', 'ja', 'ko', 'fr', 'de', 'th']
         testOptions.unitTests.includeAndroidResources = true
-        multiDexEnabled true
+        testOptions.unitTests.all {
+            jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED',
+                    '--add-opens=java.base/java.lang.reflect=ALL-UNNAMED',
+                    '--add-opens=java.base/java.io=ALL-UNNAMED',
+                    '--add-opens=java.base/java.net=ALL-UNNAMED',
+                    '--add-opens=java.base/java.util=ALL-UNNAMED',
+                    '--add-opens=java.base/java.util.concurrent=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.security.x509=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.security.util=ALL-UNNAMED',
+                    '--add-opens=java.base/sun.nio.ch=ALL-UNNAMED'
+        }
         ndk {
             moduleName "native-lib"
             abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
@@ -94,6 +103,9 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+        compileOptions {
+            encoding = 'UTF-8'
+        }
         // 允许 Java 8+ 核心库 API 进行 desugaring，兼容旧 Android 版本
         coreLibraryDesugaringEnabled true
     }
@@ -158,6 +170,9 @@ dependencies {
     // Kotlin Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3'
+
+    // WorkManager - Android 14+ user-initiated data transfer jobs
+    implementation 'androidx.work:work-runtime-ktx:2.9.1'
     
 //    implementation 'com.android.support:recyclerview-v7:25.0.1'
 
@@ -169,7 +184,7 @@ dependencies {
     implementation 'com.github.ybq:Android-SpinKit:1.4.0'
     implementation 'com.alibaba:fastjson:1.2.83'
 
-    implementation 'com.android.support:multidex:1.0.3'
+
     /**
      * 原始依赖
      */
@@ -227,6 +242,10 @@ dependencies {
 
     // SlidingPaneLayout - 支持平滑滑动面板
     implementation 'androidx.slidingpanelayout:slidingpanelayout:1.2.0'
+
+    // Lifecycle: 用于 ProcessLifecycleOwner，自动化任务的 APP_FOREGROUND/BACKGROUND 触发器
+    implementation 'androidx.lifecycle:lifecycle-process:2.8.7'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.7'
     
     // WindowManager API - 提供大屏幕和折叠屏设备更好的适配
     implementation 'androidx.window:window:1.2.0'

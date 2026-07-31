@@ -49,6 +49,7 @@ public class DownloadListInfosExecutor {
     ExecutorService service = Executors.newSingleThreadExecutor();
     Handler handler = new Handler(Looper.getMainLooper());
 
+    private volatile boolean mCancelled = false;
     private DownloadSearchCallback mDownloadSearchCallback;
 
     @Nullable
@@ -76,22 +77,38 @@ public class DownloadListInfosExecutor {
         mDownloadSearchCallback = downloadSearchCallback;
     }
 
+    public void cancel() {
+        mCancelled = true;
+        handler.removeCallbacksAndMessages(null);
+    }
+
+    public void shutdown() {
+        cancel();
+        service.shutdownNow();
+    }
+
     public void executeSearching() {
+        mCancelled = false;
         service.execute(() -> {
+            if (mCancelled) return;
             resultList = searchingInBackground();
 
             handler.post(() -> {
-                if (mDownloadSearchCallback == null) {
+                if (mCancelled || mDownloadSearchCallback == null) {
                     return;
                 }
-                mDownloadSearchCallback.onDownloadSearchSuccess(resultList);
+                if (!mCancelled) {
+                    mDownloadSearchCallback.onDownloadSearchSuccess(resultList);
+                }
             });
         });
     }
 
     @SuppressLint("NonConstantResourceId")
     public void executeFilterAndSort(int id) {
+        mCancelled = false;
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             switch (id) {
 
@@ -109,6 +126,9 @@ public class DownloadListInfosExecutor {
                     break;
                 case R.id.failed:
                     resultList = filterDownloadState(safeList, DownloadInfo.STATE_FAILED);
+                    break;
+                case R.id.relay_download:
+                    resultList = filterDownloadState(safeList, DownloadInfo.STATE_RELAY_DOWNLOAD);
                     break;
                 case R.id.sort_by_gallery_id_asc:
                 case R.id.sort_by_gallery_id_desc:
@@ -144,10 +164,12 @@ public class DownloadListInfosExecutor {
             }
 
             handler.post(() -> {
-                if (mDownloadSearchCallback == null) {
+                if (mCancelled || mDownloadSearchCallback == null) {
                     return;
                 }
-                mDownloadSearchCallback.onDownloadSearchSuccess(resultList);
+                if (!mCancelled) {
+                    mDownloadSearchCallback.onDownloadSearchSuccess(resultList);
+                }
             });
         });
     }
@@ -158,6 +180,7 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用状态过滤
             List<DownloadInfo> filteredList = safeList;
@@ -178,6 +201,9 @@ public class DownloadListInfosExecutor {
                         break;
                     case R.id.failed:
                         filteredList = filterDownloadState(safeList, DownloadInfo.STATE_FAILED);
+                        break;
+                    case R.id.relay_download:
+                        filteredList = filterDownloadState(safeList, DownloadInfo.STATE_RELAY_DOWNLOAD);
                         break;
                     default:
                         filteredList = safeList;
@@ -213,6 +239,7 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort(多选分类): 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
             List<DownloadInfo> filteredList = safeList;
@@ -240,6 +267,9 @@ public class DownloadListInfosExecutor {
                         break;
                     case R.id.failed:
                         filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FAILED);
+                        break;
+                    case R.id.relay_download:
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_RELAY_DOWNLOAD);
                         break;
                     default:
                         break;
@@ -274,6 +304,7 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort(3参数): 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
             List<DownloadInfo> filteredList = safeList;
@@ -301,6 +332,9 @@ public class DownloadListInfosExecutor {
                         break;
                     case R.id.failed:
                         filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_FAILED);
+                        break;
+                    case R.id.relay_download:
+                        filteredList = filterDownloadState(filteredList, DownloadInfo.STATE_RELAY_DOWNLOAD);
                         break;
                     default:
                         break;
@@ -363,6 +397,7 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeFilterAndSort: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             List<DownloadInfo> filteredList = safeList;
             if (categoryIds != null && !categoryIds.contains(EhUtils.ALL_CATEGORY)) {
@@ -371,7 +406,7 @@ public class DownloadListInfosExecutor {
                 Log.d("DownloadListInfos", "executeFilterAndSort: 分类过滤完成，列表大小=" + filteredList.size());
             }
 
-            if (statusIds != null && !statusIds.isEmpty() && statusIds.size() < 5) {
+            if (statusIds != null && !statusIds.isEmpty()) {
                 Log.d("DownloadListInfos", "executeFilterAndSort: 应用状态过滤, statusIds=" + statusIds);
                 filteredList = filterByStates(statusIds, filteredList);
                 Log.d("DownloadListInfos", "executeFilterAndSort: 状态过滤完成，列表大小=" + filteredList.size());
@@ -493,7 +528,7 @@ public class DownloadListInfosExecutor {
             sourceName = String.valueOf(info.gid);
         }
 
-        String normalized = sourceName.replaceFirst("^\\\\d+-", "")
+        String normalized = sourceName.replaceFirst("^\\d+-", "")
                 .replace("🔄", "")
                 .trim()
                 .toLowerCase();
@@ -579,15 +614,17 @@ public class DownloadListInfosExecutor {
         sourceList.toArray(arr);
 
         // 如果是按文件大小排序，先计算所有文件大小
+        Map<DownloadInfo, Long> computedSizes = new java.util.HashMap<>();
         if (type == R.id.sort_by_file_size_asc || type == R.id.sort_by_file_size_desc) {
             Map<Long, Long> sizeMap = loadGallerySizeMap(Arrays.asList(arr));
             for (DownloadInfo info : arr) {
-                long dbSize = sizeMap.getOrDefault(info.gid, -1L);
-                if (dbSize >= 0) {
-                    info.fileSize = dbSize;
-                } else if (info.fileSize < 0) {
-                    info.fileSize = calculateDownloadDirSize(info);
+                long size = sizeMap.getOrDefault(info.gid, -1L);
+                if (size < 0 && info.fileSize >= 0) {
+                    size = info.fileSize;
+                } else if (size < 0) {
+                    size = calculateDownloadDirSize(info);
                 }
+                computedSizes.put(info, size);
             }
         }
 
@@ -602,7 +639,7 @@ public class DownloadListInfosExecutor {
             //进行合并，对数组大小为 i 的数组进行两两合并
             while (right < n) {
                 // 合并函数和递归式的合并函数一样
-                merge(arr, left, mid, right, type);
+                merge(arr, left, mid, right, type, computedSizes);
                 left = right + 1;
                 mid = left + i - 1;
                 right = mid + i;
@@ -610,7 +647,7 @@ public class DownloadListInfosExecutor {
             // 还有一些被遗漏的数组没合并，千万别忘了
             // 因为不可能每个字数组的大小都刚好为 i
             if (left < n && mid < n) {
-                merge(arr, left, mid, n - 1, type);
+                merge(arr, left, mid, n - 1, type, computedSizes);
             }
         }
         
@@ -621,7 +658,7 @@ public class DownloadListInfosExecutor {
     // 合并函数，把两个有序的数组合并起来
     // arr[left..mif]表示一个数组，arr[mid+1 .. right]表示一个数组
     @SuppressLint("NonConstantResourceId")
-    private static void merge(DownloadInfo[] arr, int left, int mid, int right, int sortType) {
+    private static void merge(DownloadInfo[] arr, int left, int mid, int right, int sortType, java.util.Map<DownloadInfo, Long> sizeMap) {
         //先用一个临时数组把他们合并汇总起来
         DownloadInfo[] a = new DownloadInfo[right - left + 1];
         int i = left;
@@ -711,34 +748,38 @@ public class DownloadListInfosExecutor {
                     }
                     break;
                 }
-                case R.id.sort_by_file_size_asc:
-                    // 未计算的文件大小(-1)排在最后
-                    if (arr[i].fileSize < 0 && arr[j].fileSize < 0) {
+                case R.id.sort_by_file_size_asc: {
+                    long sizeI = sizeMap != null ? sizeMap.getOrDefault(arr[i], -1L) : arr[i].fileSize;
+                    long sizeJ = sizeMap != null ? sizeMap.getOrDefault(arr[j], -1L) : arr[j].fileSize;
+                    if (sizeI < 0 && sizeJ < 0) {
                         a[k++] = arr[i++];
-                    } else if (arr[i].fileSize < 0) {
+                    } else if (sizeI < 0) {
                         a[k++] = arr[j++];
-                    } else if (arr[j].fileSize < 0) {
+                    } else if (sizeJ < 0) {
                         a[k++] = arr[i++];
-                    } else if (arr[i].fileSize < arr[j].fileSize) {
+                    } else if (sizeI < sizeJ) {
                         a[k++] = arr[i++];
                     } else {
                         a[k++] = arr[j++];
                     }
                     break;
-                case R.id.sort_by_file_size_desc:
-                    // 未计算的文件大小(-1)排在最后
-                    if (arr[i].fileSize < 0 && arr[j].fileSize < 0) {
+                }
+                case R.id.sort_by_file_size_desc: {
+                    long sizeI = sizeMap != null ? sizeMap.getOrDefault(arr[i], -1L) : arr[i].fileSize;
+                    long sizeJ = sizeMap != null ? sizeMap.getOrDefault(arr[j], -1L) : arr[j].fileSize;
+                    if (sizeI < 0 && sizeJ < 0) {
                         a[k++] = arr[i++];
-                    } else if (arr[i].fileSize < 0) {
+                    } else if (sizeI < 0) {
                         a[k++] = arr[j++];
-                    } else if (arr[j].fileSize < 0) {
+                    } else if (sizeJ < 0) {
                         a[k++] = arr[i++];
-                    } else if (arr[i].fileSize > arr[j].fileSize) {
+                    } else if (sizeI > sizeJ) {
                         a[k++] = arr[i++];
                     } else {
                         a[k++] = arr[j++];
                     }
                     break;
+                }
             }
 
         }
@@ -818,6 +859,7 @@ public class DownloadListInfosExecutor {
         Log.d("DownloadListInfos", "executeAdvancedSearch: 输入列表大小=" + (mList != null ? mList.size() : 0));
         
         service.execute(() -> {
+            if (mCancelled) return;
             List<DownloadInfo> safeList = new ArrayList<>(mList != null ? mList : new ArrayList<>());
             // 先应用分类过滤
             List<DownloadInfo> filteredList = safeList;
@@ -902,7 +944,7 @@ public class DownloadListInfosExecutor {
             return false;
         }
 
-        String[] searchTags = mSearchKey.split("  ");
+        String[] searchTags = mSearchKey.split("\\s+");
 
         boolean result = true;
         for (String searchTag : searchTags) {

@@ -18,6 +18,8 @@
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item android:state_activated="true" android:color="@color/content_activated_light"/>
-    <item android:color="@color/content_light"/>
+    <!-- Lifted one step brighter than content_light so reactive cards stand out
+         from the screen background. -->
+    <item android:color="@color/white"/>
 
 </selector>

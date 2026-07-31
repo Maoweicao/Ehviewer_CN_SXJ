@@ -26,7 +26,7 @@ class DeleteFilesTask(
             val manager = LocalGalleryManager.getInstance(context)
             for (file in files) {
                 if (file == null) continue
-                if (manager != null && file.exists() && file.getUri() != null) {
+                if (file.exists()) {
                     val info = com.hippo.ehviewer.client.data.LocalGalleryInfo(file.getUri().getPath())
                     manager.deleteGallery(info)
                 } else if (file.exists()) {

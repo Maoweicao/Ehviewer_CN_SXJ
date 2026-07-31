@@ -84,6 +84,50 @@
     <string name="downloads">Downloads</string>
     <string name="news">News</string>
     <string name="settings">Settings</string>
+    <string name="settings_search_hint">Search settings…</string>
+    <string name="settings_search_no_results">No matches for \"%1$s\"</string>
+    <string name="settings_category_account">Account &amp; site</string>
+    <string name="settings_category_account_summary">Sign-in status, EHentai site selection and identity cookies</string>
+    <string name="settings_category_appearance">Appearance</string>
+    <string name="settings_category_appearance_summary">Theme, launcher page and overall look and feel</string>
+    <string name="settings_category_gallery_list">Gallery list</string>
+    <string name="settings_category_gallery_list_summary">List mode, thumbnail and metadata display in the gallery list</string>
+    <string name="settings_category_gallery_detail">Gallery detail</string>
+    <string name="settings_category_gallery_detail_summary">Page count, rating, comments and other details shown on the gallery page</string>
+    <string name="settings_category_filter">Filtering &amp; blocking</string>
+    <string name="settings_category_filter_summary">Block galleries, tags, comments and excluded languages</string>
+    <string name="settings_category_reading_display">Reading display</string>
+    <string name="settings_category_reading_display_summary">Orientation, scaling, direction and reading UI overlays</string>
+    <string name="settings_category_reading_gesture">Reading gesture</string>
+    <string name="settings_category_reading_gesture_summary">Touch, gesture, volume keys and full-screen reading gestures</string>
+    <string name="settings_category_reading_brightness">Reading brightness</string>
+    <string name="settings_category_reading_brightness_summary">Custom screen lightness when reading</string>
+    <string name="settings_category_download_basic">Download basics</string>
+    <string name="settings_category_download_basic_summary">Download location, scan and preloading</string>
+    <string name="settings_category_download_speed">Speed &amp; threads</string>
+    <string name="settings_category_download_speed_summary">Multi-thread download, timeout and minimum speed</string>
+    <string name="settings_category_download_queue">Queue &amp; order</string>
+    <string name="settings_category_download_queue_summary">Queue order, category priority and sync while reading</string>
+    <string name="settings_category_download_maintenance">Maintenance</string>
+    <string name="settings_category_download_maintenance_summary">Restore, merge, clean and verify download data</string>
+    <string name="settings_category_local">Local gallery</string>
+    <string name="settings_category_local_summary">Scan, cache and management of local galleries</string>
+    <string name="settings_category_diagnostics">Diagnostics &amp; logs</string>
+    <string name="settings_category_diagnostics_summary">Performance monitor, ANR detection, traffic capture and logs</string>
+    <string name="settings_category_cache">Cache &amp; storage</string>
+    <string name="settings_category_cache_summary">Memory cache, download path cache and database</string>
+    <string name="settings_category_network">Network</string>
+    <string name="settings_category_network_summary">Proxy, hosts, VPN awareness, DNS and language</string>
+    <string name="settings_category_download_prefetch">Download &amp; prefetch</string>
+    <string name="settings_category_download_prefetch_summary">Prefetch pages, inherit pages and download behaviour</string>
+    <string name="settings_category_data_transfer">Data transfer &amp; tasks</string>
+    <string name="settings_category_data_transfer_summary">WiFi migration, background and scheduled tasks, transfer service</string>
+    <string name="settings_category_app_info">Application info</string>
+    <string name="settings_category_app_info_summary">About, version, declaration and open source license</string>
+    <string name="settings_category_security">Security &amp; privacy</string>
+    <string name="settings_category_security_summary">Pattern protection, secure flag and analytics</string>
+    <string name="settings_category_help">Help</string>
+    <string name="settings_category_help_summary">Search help document</string>
     <string name="stub" translatable="false">Stub</string>
     <string name="username">Username</string>
     <string name="password">Password</string>
@@ -147,6 +191,7 @@
     <string name="error_cant_find_activity">Can\'t find the application</string>
     <string name="error_cannot_parse_the_url">Can\'t parse the url</string>
     <string name="error_not_folder_path">Not folder path</string>
+    <string name="error_spider_not_started">Gallery failed to load</string>
     <string name="error_no_provider">No provider</string>
     <string name="error_decoding_failed">Decoding failed</string>
     <string name="error_not_found">Not found</string>
@@ -235,6 +280,19 @@
     <string name="search_specify_tag">Specify tag</string>
     <string name="search_enable_advance">Enable advance options</string>
     <string name="search_tip">Normal search: Simply search.\n\nSubscription search: Search in subscriptions.\n\nSpecify uploader: Search for galleries uploaded by the specified uploader. All other options will be ignored.\n\nSpecify tag: Search for galleries that contain the specified tag. Only one tag accepted. Other options will be ignored.</string>
+    <string name="search_keyword_editor">Advanced keyword editor</string>
+    <string name="search_keyword_input_hint">Add a keyword</string>
+    <string name="search_keyword_add">Add</string>
+    <string name="search_keyword_relation_hint">Groups are visual only. Keywords are joined with AND; prefix excluded terms with -.</string>
+    <string name="search_keyword_empty">No keywords. Add one above.</string>
+    <string name="search_keyword_edit">Edit keyword</string>
+    <string name="search_keyword_change_group">Change keyword group</string>
+    <string name="search_keyword_toggle_relation">Toggle keyword relation</string>
+    <string name="search_keyword_group_separator">Group %1$d  (%2$s with previous group)  •  tap to toggle</string>
+    <string name="search_keyword_and">AND</string>
+    <string name="search_keyword_not">NOT</string>
+    <string name="search_expand_suggestions">Expand search suggestions</string>
+    <string name="search_collapse_suggestions">Collapse search suggestions</string>
     <string name="search_sname">Search Gallery</string>
     <string name="search_stags">Search Gallery Tags</string>
     <string name="search_sdesc">Search Gallery Description</string>
@@ -419,6 +477,25 @@
     <string name="download_state_failed">Failed</string>
     <string name="download_state_failed_2">%1$d incomplete</string>
     <string name="download_state_finish">Done</string>
+    <string name="download_state_relay_download">Relay Download</string>
+    <string name="relay_download">Relay Download</string>
+    <string name="relay_cancel_download">Cancel Relay Download</string>
+    <string name="relay_send_to_device">Relay to Device…</string>
+    <string name="relay_confirm_relay">Confirm Relay</string>
+    <string name="relay_confirm_message">Delegate \u201c%1$s\u201d to %2$s for download?</string>
+    <string name="relay_device_select">Select Target Device</string>
+    <string name="relay_task_created">Relay task created</string>
+    <string name="relay_no_connected_devices">No connected devices. Please connect to a device first.</string>
+    <string name="relay_incoming">Incoming</string>
+    <string name="relay_outgoing">Outgoing</string>
+    <string name="relay_no_tasks">No relay tasks</string>
+    <string name="relay_accept">Accept</string>
+    <string name="relay_reject">Reject</string>
+    <string name="relay_cancel">Cancel</string>
+    <string name="relay_retrieve_file">Retrieve File</string>
+    <string name="relay_delete_task">Delete Task</string>
+    <string name="relay_push_back">Push Back</string>
+    <string name="relay_clear_completed">Clear completed</string>
     <string name="stat_509_alert_title">509 Alert</string>
     <string name="stat_509_alert_text">Image limit has been reached. Please stop download and have a relax.</string>
     <string name="stat_download_done_title">Download Finished</string>
@@ -600,6 +677,35 @@
     <string name="settings_eh_show_tag_translations_summary">Show tag translations instead of the original text (It takes time to download the data file)</string>
     <string name="settings_eh_tag_translations_source">Placeholder</string>
     <string name="settings_eh_tag_translations_source_url">https://placeholder</string>
+    <string name="settings_eh_tag_database">Tag database management</string>
+    <string name="settings_eh_tag_database_summary">Check status, re-download and verify the integrity of the tag translation database</string>
+    <string name="tag_database_status_loaded">Loaded (%1$d tags)</string>
+    <string name="tag_database_status_not_loaded">Not loaded</string>
+    <string name="tag_database_status_no_metadata">No metadata available for this locale</string>
+    <string name="tag_database_data_file">Data file</string>
+    <string name="tag_database_data_file_exists">Cached on disk</string>
+    <string name="tag_database_data_file_missing">No local cache</string>
+    <string name="tag_database_data_file_size">Size: %1$s</string>
+    <string name="tag_database_data_file_modified">Last modified: %1$s</string>
+    <string name="tag_database_sha1_expected">Expected SHA-1</string>
+    <string name="tag_database_sha1_expected_format">%1$s</string>
+    <string name="tag_database_sha1_expected_missing">Not yet downloaded</string>
+    <string name="tag_database_sha1_computed">Computed SHA-1</string>
+    <string name="tag_database_sha1_computed_missing">Data file missing — cannot compute</string>
+    <string name="tag_database_source_url">Source URL</string>
+    <string name="tag_database_integrity_ok">Integrity verified</string>
+    <string name="tag_database_integrity_mismatch">SHA-1 mismatch — local cache is corrupt or out of date</string>
+    <string name="tag_database_integrity_pending">Run integrity check to verify</string>
+    <string name="tag_database_integrity_incomplete">Cannot verify — missing sha1 or data file</string>
+    <string name="tag_database_action_check">Verify integrity</string>
+    <string name="tag_database_action_redownload">Re-download</string>
+    <string name="tag_database_action_clear">Delete local cache</string>
+    <string name="tag_database_action_check_done_ok">Integrity verified</string>
+    <string name="tag_database_action_check_done_mismatch">Integrity check failed</string>
+    <string name="tag_database_action_redownload_started">Re-download scheduled</string>
+    <string name="tag_database_action_clear_done">Local cache cleared</string>
+    <string name="tag_database_action_redownload_hint">A fresh copy will be downloaded in the background.</string>
+    <string name="tag_database_action_clear_hint">The current in-memory copy will be discarded and the cache files will be deleted.</string>
     <string name="settings_eh_filter">Block gallery</string>
     <string name="settings_eh_filter_summary">Block gallery by title, uploader and tags</string>
     <string name="settings_eh_cellular_network_warning">Cellular network warning</string>
@@ -698,6 +804,22 @@
     <string name="settings_download_download_list_pagination">Pagination List</string>
     <string name="settings_download_download_list_pagination_summary">The paging function will only take effect when the list length is greater than 500</string>
     <string name="settings_download_download_origin_image_summary">It is dangerous! You may get 509 error</string>
+    <string name="settings_download_use_system_download_manager">Use System Download Service</string>
+    <string name="settings_download_use_system_download_manager_summary">Delegate image downloads to Android\'s system DownloadManager (com.android.providers.downloads). Runs as a system process so it survives aggressive OEM background throttling. Does not apply to galleries that download original images, which fall back to the built-in engine.</string>
+    <string name="settings_download_use_system_download_manager_unavailable">System DownloadManager is not available on this device. This feature is disabled.</string>
+    <string name="settings_download_check_system_service">Check system download service</string>
+    <string name="settings_download_check_system_service_summary">Tap to test whether the Android system DownloadManager is working correctly on your device</string>
+    <string name="settings_download_check_result_title">System Download Service Check</string>
+    <string name="settings_download_check_result_available">◎ System DownloadManager is available</string>
+    <string name="settings_download_check_result_unavailable">◎ System DownloadManager is NOT available</string>
+    <string name="settings_download_check_result_detail">Provider: %1$s\nService: %2$s\nQuery test: %3$s</string>
+    <string name="settings_download_check_result_passed">PASS</string>
+    <string name="settings_download_check_result_failed">FAIL</string>
+    <string name="settings_download_private_mode">Private download mode</string>
+    <string name="settings_download_private_mode_summary">When using System Download Service, automatically remove system download records 3 minutes after completion. Image files are only deleted when the download location is inside Ehviewer\'s owned directory; files in public Downloads or user-selected SAF locations are kept. Also changes the backend behaviour for new downloads: this toggle only affects the new downloads started after it\'s enabled.</string>
+    <string name="settings_download_private_mode_location_warning_title">Download location not compatible</string>
+    <string name="settings_download_private_mode_location_warning_message">The current download location is in a public or user-selected directory. Private mode can only clear system download records — image files cannot be deleted from this location. To enable full deletion, change the download location to an Ehviewer-owned directory first (Settings → Download → Download location).</string>
+    <string name="go_to_download_location">Open settings</string>
     <string name="settings_download_download_order_by_asc">Download order by asc</string>
     <string name="settings_download_download_order_by_asc_summary">Download in sequence when downloading all galleries</string>
     <string name="settings_download_sync_while_reading">Sync download while reading</string>
@@ -761,6 +883,8 @@
     <string name="settings_advanced_download_prefetch_pages_concurrency_summary">Max simultaneous network requests for fetching page counts</string>
     <string name="settings_advanced_download_inherit_pages">Inherit page count from source</string>
     <string name="settings_advanced_download_inherit_pages_summary">Copy page count from gallery detail/list when adding to downloads</string>
+    <string name="settings_advanced_download_always_complete">Always complete downloads</string>
+    <string name="settings_advanced_download_always_complete_summary">When a download finishes, if incomplete tasks remain, automatically stop and restart all downloads until complete</string>
     <string name="category_priority_dialog_title">Sort gallery types by priority</string>
     <string name="category_priority_dialog_drag_hint">Long press and drag to reorder. Topmost = highest priority.</string>
     <string name="settings_advanced">Advanced</string>
@@ -1040,6 +1164,19 @@
     <string name="past_year_top_list">Past Year TopList</string>
     <string name="past_month_top_list">Past Month TopList</string>
     <string name="yesterday_top_list">Yesterday TopList</string>
+    <string name="top_list_top5_title">Today\'s Top 5 Galleries</string>
+    <string name="top_list_search_hint">Search galleries…</string>
+    <string name="top_list_view_all">View All</string>
+    <string name="top_list_top5_loading_failed">Failed to load trending galleries</string>
+    <string name="top_list_top5_loading">Loading trending galleries…</string>
+    <string name="top_list_rank_prefix">#%1$d</string>
+    <string name="top_list_tab_yesterday">Yesterday</string>
+    <string name="top_list_tab_past_month">Past Month</string>
+    <string name="top_list_tab_past_year">Past Year</string>
+    <string name="top_list_tab_all_time">All Time</string>
+    <string name="top_list_empty">No data available</string>
+    <string name="top_list_retry">Tap to retry</string>
+    <string name="top_list_load_failed">Failed to load toplist data</string>
     <string name="change_background_title">Are you sure you want to change the background?</string>
     <string name="change_background_message">The background modification is limited to this software and cannot be synchronized to E-hentai or other similar software.</string>
     <string name="change_avatar_title">Are you sure you want to change your avatar?</string>
@@ -1345,6 +1482,8 @@
     <string name="background_task_clear_all">Force stop all tasks</string>
     <string name="background_task_cleared_all">All tasks have been stopped and cleared</string>
     <string name="background_task_unique_running">A background task is already running</string>
+    <string name="task_clear">Clear</string>
+    <string name="task_cleared_from_completed">Removed from completed list</string>
     <string name="no_description">No description</string>
     <string name="task_progress_label">Progress</string>
     <string name="task_status_label">Status</string>
@@ -1371,6 +1510,8 @@
     <string name="task_progress_detail_label">Progress detail</string>
     <string name="task_log_label">Task log</string>
     <string name="task_log_empty">No log entries yet</string>
+    <string name="task_log_truncated">%1$d earlier log entries hidden (export to view all)</string>
+    <string name="task_badge_unique">互斥</string>
     <string name="task_log_save_to">Log saved to %1$s</string>
     <string name="task_log_file_missing">Log file unavailable</string>
     <string name="settings_advanced_background_tasks">Background Tasks</string>
@@ -1943,8 +2084,8 @@
     <string name="capture_stop_save">Stop and Save</string>
 
     <!-- Scheduled Tasks -->
-    <string name="settings_advanced_scheduled_tasks">Scheduled Tasks</string>
-    <string name="settings_advanced_scheduled_tasks_summary">Manage and configure scheduled background tasks</string>
+    <string name="settings_advanced_scheduled_tasks">Automation</string>
+    <string name="settings_advanced_scheduled_tasks_summary">Create rules to run tasks on time or on events</string>
 
     <string name="scheduled_task_title">Scheduled Tasks</string>
     <string name="scheduled_task_add">Add Scheduled Task</string>
@@ -2093,6 +2234,128 @@
     <string name="scheduled_task_next_execution">Next execution: %1$s</string>
     <string name="scheduled_task_retry_count">Retry count: %1$d</string>
     <string name="scheduled_task_group">Group: %1$s</string>
+
+    <!-- Automation Tasks -->
+    <string name="automation_title">Automation</string>
+    <string name="automation_settings_title">Automation</string>
+    <string name="automation_settings_summary">Create rules to run tasks on time or on events</string>
+    <string name="automation_empty_title">No automation rules yet</string>
+    <string name="automation_empty_hint">Tap + to create your first automation rule</string>
+    <string name="automation_filter_all">All</string>
+    <string name="automation_filter_schedule">Time</string>
+    <string name="automation_filter_event">Event</string>
+    <string name="automation_filter_manual">Manual</string>
+    <string name="automation_add">New automation</string>
+    <string name="automation_edit">Edit automation</string>
+    <string name="automation_delete">Delete</string>
+    <string name="automation_delete_confirm">Delete this automation rule?</string>
+    <string name="automation_run_now">Run now</string>
+    <string name="automation_enabled">Enabled</string>
+    <string name="automation_disabled">Disabled</string>
+    <string name="automation_trigger_when">WHEN</string>
+    <string name="automation_trigger_if">IF</string>
+    <string name="automation_trigger_then">THEN</string>
+    <string name="automation_actions_count">%1$d action(s)</string>
+
+    <!-- Wizard -->
+    <string name="automation_wizard_step1_title">Choose a trigger</string>
+    <string name="automation_wizard_step2_title">Conditions (optional)</string>
+    <string name="automation_wizard_step3_title">Actions</string>
+    <string name="automation_wizard_prev">Back</string>
+    <string name="automation_wizard_next">Next</string>
+    <string name="automation_wizard_save">Save</string>
+    <string name="automation_trigger_type_schedule">Time trigger</string>
+    <string name="automation_trigger_type_event">Event trigger</string>
+    <string name="automation_trigger_type_manual">Manual only</string>
+    <string name="automation_trigger_pick_event">Pick an event…</string>
+
+    <!-- Conditions -->
+    <string name="automation_condition_wifi">Only on WiFi</string>
+    <string name="automation_condition_no_metered">Skip on metered networks</string>
+    <string name="automation_condition_charging">Only while charging</string>
+    <string name="automation_condition_screen_off">Only with screen off</string>
+    <string name="automation_condition_min_battery">Minimum battery: %1$d%%</string>
+    <string name="automation_condition_time_window">Time window: %1$s - %2$s</string>
+    <string name="automation_condition_weekday">Days: %1$s</string>
+
+    <!-- Execution mode -->
+    <string name="automation_execution_sequential">Run actions in sequence</string>
+    <string name="automation_execution_parallel">Run actions in parallel</string>
+
+    <!-- Event trigger names -->
+    <string name="automation_event_download_finished">A download finishes</string>
+    <string name="automation_event_download_finished_desc">Trigger when a single gallery download reaches the FINISH state</string>
+    <string name="automation_event_all_downloads_completed">All downloads done</string>
+    <string name="automation_event_all_downloads_completed_desc">Trigger when the download queue is empty</string>
+    <string name="automation_event_download_failed">A download fails</string>
+    <string name="automation_event_download_failed_desc">Trigger when a gallery download enters the FAILED state</string>
+    <string name="automation_event_download_added">A gallery is added to download</string>
+    <string name="automation_event_download_added_desc">Trigger when a new gallery is queued</string>
+
+    <string name="automation_event_network_available">Network available</string>
+    <string name="automation_event_network_available_desc">Trigger when connectivity is restored from offline</string>
+    <string name="automation_event_network_lost">Network lost</string>
+    <string name="automation_event_network_lost_desc">Trigger when the device goes fully offline</string>
+    <string name="automation_event_wifi_connected">WiFi connected</string>
+    <string name="automation_event_wifi_connected_desc">Trigger when the device joins a WiFi network</string>
+
+    <string name="automation_event_charging_started">Charging started</string>
+    <string name="automation_event_charging_started_desc">Trigger when the device starts charging</string>
+    <string name="automation_event_charging_stopped">Charging stopped</string>
+    <string name="automation_event_charging_stopped_desc">Trigger when the device stops charging</string>
+
+    <string name="automation_event_app_foreground">App enters foreground</string>
+    <string name="automation_event_app_foreground_desc">Trigger when the app is brought to foreground</string>
+    <string name="automation_event_app_background">App enters background</string>
+    <string name="automation_event_app_background_desc">Trigger when the app goes to background</string>
+
+    <string name="automation_event_favorite_added">Favorite added</string>
+    <string name="automation_event_favorite_added_desc">Trigger when a gallery is added to favorites</string>
+    <string name="automation_event_favorite_removed">Favorite removed</string>
+    <string name="automation_event_favorite_removed_desc">Trigger when a gallery is removed from favorites</string>
+    <string name="automation_event_history_added">History recorded</string>
+    <string name="automation_event_history_added_desc">Trigger when a new entry is added to history</string>
+    <string name="automation_event_local_gallery_added">Local gallery added</string>
+    <string name="automation_event_local_gallery_added_desc">Trigger when a new local gallery is scanned</string>
+
+    <string name="automation_event_file_created">File created</string>
+    <string name="automation_event_file_created_desc">Trigger when a file is created in the watched directory</string>
+    <string name="automation_event_file_deleted">File deleted</string>
+    <string name="automation_event_file_deleted_desc">Trigger when a file is deleted in the watched directory</string>
+    <string name="automation_event_custom_intent">Custom intent received</string>
+    <string name="automation_event_custom_intent_desc">Trigger when an external app broadcasts a matching intent</string>
+
+    <!-- Schedule trigger labels -->
+    <string name="automation_schedule_daily">Every day at %1$s</string>
+    <string name="automation_schedule_weekdays">On workdays at %1$s</string>
+    <string name="automation_schedule_weekends">On weekends at %1$s</string>
+    <string name="automation_schedule_holidays">On holidays at %1$s</string>
+    <string name="automation_schedule_cron">Cron: %1$s</string>
+    <string name="automation_schedule_once">Once at %1$s</string>
+    <string name="automation_schedule_manual">Manual only</string>
+
+    <!-- States -->
+    <string name="automation_state_pending">Pending</string>
+    <string name="automation_state_waiting_condition">Waiting for trigger</string>
+    <string name="automation_state_waiting_time">Waiting for schedule</string>
+    <string name="automation_state_running">Running</string>
+    <string name="automation_state_completed">Completed</string>
+    <string name="automation_state_failed">Failed</string>
+    <string name="automation_state_cancelled">Cancelled</string>
+    <string name="automation_state_paused">Paused</string>
+    <string name="automation_state_disabled">Disabled</string>
+
+    <!-- Filter chips by category -->
+    <string name="automation_category_download">Downloads</string>
+    <string name="automation_category_network">Network</string>
+    <string name="automation_category_device">Device</string>
+    <string name="automation_category_lifecycle">App lifecycle</string>
+    <string name="automation_category_data">Data changes</string>
+    <string name="automation_category_file">Files</string>
+    <string name="automation_category_extension">Extensions</string>
+
+    <!-- Cooldown -->
+    <string name="automation_cooldown">Cooldown: %1$s</string>
 
     <!-- Select Time -->
     <string name="select_date">Select Date</string>

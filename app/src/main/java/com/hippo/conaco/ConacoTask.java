@@ -260,12 +260,19 @@ public class ConacoTask<V> {
                 if (unikery != null && unikery.getTaskId() == mId) {
                     boolean getValue = false;
                     if ((value == null || !(getValue = unikery.onGetValue(value, Conaco.SOURCE_DISK))) && mUseNetwork) {
+                        // Remove corrupted entry from disk cache so re-download can succeed
+                        if (value == null && mKey != null && mUseDiskCache) {
+                            mCache.removeFromDisk(mKey);
+                        }
                         unikery.onMiss(Conaco.SOURCE_DISK);
                         unikery.onRequest();
                         mNetworkLoadTask = new NetworkLoadTask();
                         mNetworkLoadTask.executeOnExecutor(mNetworkExecutor);
                         return;
                     } else if (!getValue) {
+                        if (value == null && mKey != null && mUseDiskCache) {
+                            mCache.removeFromDisk(mKey);
+                        }
                         unikery.onMiss(Conaco.SOURCE_DISK);
                         unikery.onFailure();
                     }

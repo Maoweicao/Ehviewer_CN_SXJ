@@ -69,20 +69,32 @@ public class ExportDataPreference extends Preference {
   }
 
   private void exportDatabase(Context context) {
-    com.hippo.ehviewer.task.ExportDataTask task = new com.hippo.ehviewer.task.ExportDataTask(context);
-    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
-    Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+    try {
+      com.hippo.ehviewer.task.ExportDataTask task = new com.hippo.ehviewer.task.ExportDataTask(context);
+      BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+      Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+    } catch (IllegalStateException e) {
+      Toast.makeText(context, "Service not ready, please try again later", Toast.LENGTH_SHORT).show();
+    }
   }
 
   private void exportDownloadList(Context context) {
-    com.hippo.ehviewer.task.ExportDownloadItemsTask task = new com.hippo.ehviewer.task.ExportDownloadItemsTask(context);
-    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
-    Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+    try {
+      com.hippo.ehviewer.task.ExportDownloadItemsTask task = new com.hippo.ehviewer.task.ExportDownloadItemsTask(context);
+      BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+      Toast.makeText(context, R.string.settings_advanced_export_data_started, Toast.LENGTH_SHORT).show();
+    } catch (IllegalStateException e) {
+      Toast.makeText(context, "Service not ready, please try again later", Toast.LENGTH_SHORT).show();
+    }
   }
 
   private void exportLegacyDataList(Context context) {
-    com.hippo.ehviewer.task.ExportLegacyDataTask task = new com.hippo.ehviewer.task.ExportLegacyDataTask(context);
-    BackgroundTaskManager.getInstance().submitBackgroundTask(task);
-    Toast.makeText(context, R.string.settings_advanced_export_legacy_started, Toast.LENGTH_SHORT).show();
+    try {
+      com.hippo.ehviewer.task.ExportLegacyDataTask task = new com.hippo.ehviewer.task.ExportLegacyDataTask(context);
+      BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+      Toast.makeText(context, R.string.settings_advanced_export_legacy_started, Toast.LENGTH_SHORT).show();
+    } catch (IllegalStateException e) {
+      Toast.makeText(context, "Service not ready, please try again later", Toast.LENGTH_SHORT).show();
+    }
   }
 }

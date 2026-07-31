@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/automation_trigger_if"
+        android:textAllCaps="true"
+        android:textColor="?attr/colorPrimary"
+        android:textStyle="bold" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="@string/settings_advanced_scheduled_tasks"
+        android:textColor="?android:attr/textColorSecondary" />
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:hint="@string/automation_filter_all">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/et_name"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:inputType="text" />
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/sw_wifi"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="@string/automation_condition_wifi" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/sw_no_metered"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/automation_condition_no_metered" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/sw_charging"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/automation_condition_charging" />
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/sw_screen_off"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/automation_condition_screen_off" />
+
+</LinearLayout>

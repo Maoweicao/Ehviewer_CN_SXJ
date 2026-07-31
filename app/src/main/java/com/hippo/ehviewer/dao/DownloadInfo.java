@@ -38,6 +38,7 @@ public class DownloadInfo extends GalleryInfo {
 	public static final int STATE_FAILED = 4;
 	public static final int STATE_UPDATE = 5;
 	public static final int GOTO_NEW = 6;
+	public static final int STATE_RELAY_DOWNLOAD = 7;
 	public long speed;
 	public long remaining;
 	public int finished;

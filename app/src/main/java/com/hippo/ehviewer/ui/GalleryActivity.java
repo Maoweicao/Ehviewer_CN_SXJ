@@ -24,6 +24,7 @@ import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.PictureInPictureParams;
+import android.app.RemoteAction;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -36,6 +37,7 @@ import android.graphics.Typeface;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.RectF;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -56,6 +58,7 @@ import android.view.Window;
 import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.webkit.MimeTypeMap;
+import android.webkit.WebView;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.FrameLayout;
@@ -218,6 +221,14 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
     private TranslateOverlayView mTranslateOverlay;
     private final ExecutorService mTranslateExecutor = Executors.newSingleThreadExecutor();
     private int mTranslatePendingIndex = -1;
+
+    @Nullable
+    private FrameLayout mWebViewFallbackContainer;
+    @Nullable
+    private WebViewImageFallback mWebViewImageFallback;
+    @Nullable
+    private Runnable mPendingFallbackRunnable;
+    private final Handler mFallbackHandler = new Handler(Looper.getMainLooper());
 
     private ObjectAnimator mSeekBarPanelAnimator;
     private ObjectAnimator mAutoTransferAnimator;
@@ -657,6 +668,13 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             mTranslateOverlay.setVisible(Settings.getAiTranslateEnabled() && Settings.getLabEnabled());
         }
 
+        // WebView fallback for image display
+        mWebViewFallbackContainer = (FrameLayout) ViewUtils.$$(this, R.id.webview_fallback_container);
+        WebView webView = (WebView) ViewUtils.$$(this, R.id.webview_fallback);
+        if (mWebViewFallbackContainer != null && webView != null) {
+            mWebViewImageFallback = new WebViewImageFallback(mWebViewFallbackContainer, webView, () -> kotlin.Unit.INSTANCE);
+        }
+
         mSize = mGalleryProvider.size();
         mCurrentIndex = startPage;
         if (mGalleryView != null) {
@@ -787,6 +805,17 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             mTranslateExecutor.shutdownNow();
         }
         mTranslateOverlay = null;
+
+        // Clean up WebView fallback
+        if (mPendingFallbackRunnable != null) {
+            mFallbackHandler.removeCallbacks(mPendingFallbackRunnable);
+            mPendingFallbackRunnable = null;
+        }
+        if (mWebViewImageFallback != null) {
+            mWebViewImageFallback.destroy();
+            mWebViewImageFallback = null;
+        }
+        mWebViewFallbackContainer = null;
 
         // Clean up countdown, animation waiting, and loading states
         mCountdownHandler.removeCallbacks(mCountdownRunnable);
@@ -1566,6 +1595,15 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         task.setData(NotifyTask.KEY_CURRENT_INDEX, index);
         SimpleHandler.getInstance().post(task);
         
+        // Hide WebView fallback when navigating to a new page
+        if (mPendingFallbackRunnable != null) {
+            mFallbackHandler.removeCallbacks(mPendingFallbackRunnable);
+            mPendingFallbackRunnable = null;
+        }
+        if (mWebViewImageFallback != null && mWebViewImageFallback.isShowing()) {
+            mWebViewImageFallback.hide();
+        }
+        
         // Update play button visibility when page changes
         updateAutoTransferVisibility();
     }
@@ -2330,8 +2368,88 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         }
 
         private void onTapErrorText(int index) {
+            // Hide WebView fallback when retrying
+            if (mPendingFallbackRunnable != null) {
+                mFallbackHandler.removeCallbacks(mPendingFallbackRunnable);
+                mPendingFallbackRunnable = null;
+            }
+            if (mWebViewImageFallback != null) {
+                mWebViewImageFallback.hide();
+            }
+            
+            // Show error dialog with details and export log option
             if (mGalleryProvider != null) {
-                mGalleryProvider.forceRequest(index);
+                String errorMsg;
+                if (index < 0) {
+                    // Full-screen error overlay
+                    errorMsg = mGalleryProvider.getError();
+                } else {
+                    // Per-page error
+                    errorMsg = mGalleryProvider.getPageError(index);
+                }
+                showErrorDialog(index, errorMsg);
+            }
+        }
+
+        private void showErrorDialog(int index, String errorMsg) {
+            String message = (errorMsg != null && !errorMsg.isEmpty()) ? errorMsg : "未知错误";
+            String title = index < 0 ? "图库加载失败" : "页面加载失败";
+            boolean isFullError = index < 0;
+            
+            AlertDialog.Builder builder = new AlertDialog.Builder(GalleryActivity.this)
+                .setTitle(title)
+                .setMessage(message)
+                .setNeutralButton("导出日志", (dialog, which) -> {
+                    exportErrorLog(index, errorMsg);
+                })
+                .setNegativeButton("取消", null);
+            
+            if (isFullError) {
+                builder.setPositiveButton("重新加载", (dialog, which) -> {
+                    recreate();
+                });
+            } else {
+                builder.setPositiveButton("重试", (dialog, which) -> {
+                    if (mGalleryProvider != null) {
+                        mGalleryProvider.clearPageError(index);
+                        mGalleryProvider.forceRequest(index);
+                    }
+                });
+            }
+            
+            builder.show();
+        }
+
+        private void exportErrorLog(int index, String errorMsg) {
+            try {
+                StringBuilder log = new StringBuilder();
+                log.append("=== 图库浏览错误日志 ===\n");
+                log.append("时间: ").append(new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new java.util.Date())).append("\n");
+                if (index >= 0) {
+                    log.append("页面索引: ").append(index).append("\n");
+                } else {
+                    log.append("错误类型: 图库加载失败(全屏错误)\n");
+                }
+                log.append("错误信息: ").append(errorMsg != null ? errorMsg : "未知错误").append("\n");
+                
+                if (mGalleryProvider != null && mGalleryProvider.getGalleryInfo() != null) {
+                    log.append("图库GID: ").append(mGalleryProvider.getGalleryInfo().gid).append("\n");
+                    log.append("图库标题: ").append(mGalleryProvider.getGalleryInfo().title).append("\n");
+                }
+                
+                log.append("\n=== 设备信息 ===\n");
+                log.append("设备: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL).append("\n");
+                log.append("Android版本: ").append(android.os.Build.VERSION.RELEASE).append("\n");
+                log.append("SDK版本: ").append(android.os.Build.VERSION.SDK_INT).append("\n");
+                
+                // Copy to clipboard
+                android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                android.content.ClipData clip = android.content.ClipData.newPlainText("EhViewer错误日志", log.toString());
+                clipboard.setPrimaryClip(clip);
+                
+                Toast.makeText(GalleryActivity.this, "错误日志已复制到剪贴板", Toast.LENGTH_LONG).show();
+            } catch (Exception e) {
+                Toast.makeText(GalleryActivity.this, "导出日志失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
         }
 
@@ -2541,6 +2659,23 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
             android.util.Log.d(TAG, "[ImageLoad] " + getImageLogInfo(index, null) + " error=" + error);
             // Show play button if loading is complete and slider is visible
             updateAutoTransferVisibility();
+
+            // Try WebView fallback if image file exists on disk
+            if (mWebViewImageFallback != null && mGalleryProvider != null) {
+                String imagePath = mGalleryProvider.getImagePath(index);
+                if (imagePath != null && new File(imagePath).exists()) {
+                    if (mPendingFallbackRunnable != null) {
+                        mFallbackHandler.removeCallbacks(mPendingFallbackRunnable);
+                    }
+                    mPendingFallbackRunnable = () -> {
+                        if (mGalleryView != null && mGalleryView.getCurrentIndex() == index
+                                && mWebViewImageFallback != null) {
+                            mWebViewImageFallback.showImage(imagePath);
+                        }
+                    };
+                    mFallbackHandler.post(mPendingFallbackRunnable);
+                }
+            }
         }
 
         private String getImageLogInfo(int index, com.hippo.lib.glview.image.ImageWrapper image) {
@@ -2690,25 +2825,31 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         android.app.PendingIntent prevPi = android.app.PendingIntent.getBroadcast(this, 0,
                 new Intent(PIP_ACTION_PREV).setPackage(getPackageName()),
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-        actions.add(new android.app.RemoteAction(
-                android.graphics.drawable.Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
-                getString(R.string.pip_prev), getString(R.string.pip_prev), prevPi));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            actions.add(new RemoteAction(
+                    Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
+                    getString(R.string.pip_prev), getString(R.string.pip_prev), prevPi));
+        }
 
         // Next page
         android.app.PendingIntent nextPi = android.app.PendingIntent.getBroadcast(this, 1,
                 new Intent(PIP_ACTION_NEXT).setPackage(getPackageName()),
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-        actions.add(new android.app.RemoteAction(
-                android.graphics.drawable.Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
-                getString(R.string.pip_next), getString(R.string.pip_next), nextPi));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            actions.add(new RemoteAction(
+                    Icon.createWithResource(this, R.drawable.v_arrow_left_dark_x24),
+                    getString(R.string.pip_next), getString(R.string.pip_next), nextPi));
+        }
 
         // Play/Pause
         android.app.PendingIntent playPi = android.app.PendingIntent.getBroadcast(this, 2,
                 new Intent(PIP_ACTION_PLAY).setPackage(getPackageName()),
                 android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-        actions.add(new android.app.RemoteAction(
-                android.graphics.drawable.Icon.createWithResource(this, autoTransferring ? R.drawable.v_pause_x24 : R.drawable.v_play_x24),
-                getString(R.string.pip_enter), "Play/Pause", playPi));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            actions.add(new RemoteAction(
+                    Icon.createWithResource(this, autoTransferring ? R.drawable.v_pause_x24 : R.drawable.v_play_x24),
+                    getString(R.string.pip_enter), "Play/Pause", playPi));
+        }
 
         // Restore
         android.app.PendingIntent restorePi = android.app.PendingIntent.getBroadcast(this, 3,

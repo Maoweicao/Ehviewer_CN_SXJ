@@ -27,6 +27,7 @@ import androidx.annotation.NonNull;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.Hosts;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.network.NetworkSecurityManager;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -151,7 +152,7 @@ public class EhHosts implements Dns {
                 return inetAddresses;
             }
         }
-        if (Settings.getDoH()) {
+        if (NetworkSecurityManager.INSTANCE.isDoHEnabled()) {
             inetAddresses = dnsOverHttps.lookup(hostname);
             if (!inetAddresses.isEmpty()) {
                 Collections.shuffle(inetAddresses, new Random(System.currentTimeMillis()));

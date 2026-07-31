@@ -84,6 +84,7 @@ public class GalleryCacheManager {
     private static final String KEY_TG_LIST = "tgList";
     private static final String KEY_IS_DELETED = "isDeleted";
     private static final String KEY_CACHE_TIME = "cacheTime";
+    private static final String KEY_THUMB_BASE64_TYPE = "thumbBase64Type";
     
     private static GalleryCacheManager sInstance;
     private final Context mContext;
@@ -158,6 +159,16 @@ public class GalleryCacheManager {
             return false;
         }
         
+        return saveGalleryCacheToDir(galleryDetail, downloadDir);
+    }
+    
+    /**
+     * 将画廊详细信息保存到指定目录的缓存
+     * @param galleryDetail 画廊详细信息
+     * @param downloadDir 目标下载目录
+     * @return 是否保存成功
+     */
+    public boolean saveGalleryCacheToDir(@NonNull GalleryDetail galleryDetail, @NonNull UniFile downloadDir) {
         try {
             JSONObject jsonObject = convertGalleryDetailToJson(galleryDetail);
             if (jsonObject == null) {
@@ -167,6 +178,12 @@ public class GalleryCacheManager {
             
             // 添加缓存时间戳
             jsonObject.put(KEY_CACHE_TIME, System.currentTimeMillis());
+            
+            // 删除旧文件
+            UniFile existingFile = downloadDir.findFile(GALLERY_CACHE_FILENAME);
+            if (existingFile != null) {
+                existingFile.delete();
+            }
             
             UniFile cacheFile = downloadDir.createFile(GALLERY_CACHE_FILENAME);
             if (cacheFile == null) {
@@ -211,6 +228,87 @@ public class GalleryCacheManager {
     }
     
     /**
+     * 检查画廊缓存是否存在且包含有效的标签数据
+     * @param gid 画廊ID
+     * @return 是否有有效标签
+     */
+    public boolean hasValidTags(long gid) {
+        GalleryDetail cache = readGalleryCache(gid);
+        return cache != null
+            && cache.tags != null
+            && cache.tags.length > 0;
+    }
+    
+    /**
+     * 检查画廊缓存是否存在且包含有效的缩略图Base64数据
+     * @param gid 画廊ID
+     * @return 是否有有效缩略图Base64
+     */
+    public boolean hasValidThumbBase64(long gid) {
+        try {
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(new GalleryInfo() {{
+                this.gid = gid;
+            }});
+            if (downloadDir == null || !downloadDir.isDirectory()) {
+                return false;
+            }
+            UniFile cacheFile = downloadDir.findFile(GALLERY_CACHE_FILENAME);
+            if (cacheFile == null) {
+                return false;
+            }
+            String jsonContent = readTextFile(cacheFile);
+            if (jsonContent == null || jsonContent.isEmpty()) {
+                return false;
+            }
+            JSONObject jsonObject = JSON.parseObject(jsonContent);
+            if (jsonObject == null) {
+                return false;
+            }
+            String thumbBase64 = jsonObject.getString(KEY_THUMB_BASE64);
+            return thumbBase64 != null && !thumbBase64.isEmpty();
+        } catch (Exception e) {
+            return false;
+        }
+    }
+    
+    /**
+     * 从URL下载缩略图并存入磁盘缓存
+     * @param gid 画廊ID
+     * @param thumbUrl 缩略图URL
+     * @return 下载的图片字节数组，失败返回null
+     */
+    @Nullable
+    public byte[] downloadThumbnail(long gid, String thumbUrl) {
+        if (thumbUrl == null || thumbUrl.isEmpty()) {
+            return null;
+        }
+        try {
+            okhttp3.OkHttpClient client = EhApplication.getOkHttpClient(mContext);
+            okhttp3.Request request = new okhttp3.Request.Builder()
+                .url(thumbUrl)
+                .addHeader("Referer", com.hippo.ehviewer.client.EhUrl.getReferer())
+                .build();
+            okhttp3.Response response = client.newCall(request).execute();
+            if (response.isSuccessful() && response.body() != null) {
+                byte[] bytes = response.body().bytes();
+                // 存入磁盘缓存
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap != null) {
+                    BeerBelly beerBelly = EhApplication.getConaco(mContext).getBeerBelly();
+                    beerBelly.putToDisk(EhCacheKeyFactory.getThumbKey(gid), bitmap);
+                    Log.d(TAG, "缩略图下载并缓存成功: GID " + gid);
+                }
+                return bytes;
+            } else {
+                Log.w(TAG, "缩略图下载失败: GID " + gid + ", code=" + response.code());
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "下载缩略图异常: GID " + gid, e);
+        }
+        return null;
+    }
+    
+    /**
      * 将缩略图转换为Base64编码的PNG格式
      * @param gid 画廊ID
      * @return Base64编码的缩略图，转换失败则返回null
@@ -231,6 +329,66 @@ public class GalleryCacheManager {
             return null;
         } catch (Exception e) {
             Log.e(TAG, "转换缩略图为Base64失败: GID " + gid, e);
+            return null;
+        }
+    }
+
+    /**
+     * 从下载目录读取画廊首图并转换为Base64
+     * @param gid 画廊ID
+     * @return Base64编码的首图，失败返回null
+     */
+    @Nullable
+    public String convertFirstPageToBase64(long gid) {
+        try {
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(new GalleryInfo() {{
+                this.gid = gid;
+            }});
+            if (downloadDir == null || !downloadDir.isDirectory()) {
+                return null;
+            }
+            // 查找第一张图片 (00000001.xxx)
+            UniFile firstImage = SpiderDen.findImageFile(downloadDir, 0);
+            if (firstImage == null) {
+                Log.d(TAG, "下载目录中无首图: GID " + gid);
+                return null;
+            }
+            InputStream is = firstImage.openInputStream();
+            if (is == null) {
+                return null;
+            }
+            try {
+                byte[] bytes = IOUtils.getAllByte(is);
+                if (bytes == null || bytes.length == 0) {
+                    return null;
+                }
+                // 缩放为缩略图尺寸以减小体积
+                Bitmap bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+                if (bitmap == null) {
+                    return null;
+                }
+                int maxSize = 300;
+                int w = bitmap.getWidth();
+                int h = bitmap.getHeight();
+                if (w > maxSize || h > maxSize) {
+                    float scale = Math.min((float) maxSize / w, (float) maxSize / h);
+                    Bitmap scaled = Bitmap.createScaledBitmap(bitmap,
+                            (int) (w * scale), (int) (h * scale), true);
+                    if (scaled != bitmap) {
+                        bitmap.recycle();
+                        bitmap = scaled;
+                    }
+                }
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, baos);
+                bitmap.recycle();
+                Log.d(TAG, "从首图生成thumbBase64成功: GID " + gid);
+                return Base64.encodeToString(baos.toByteArray(), Base64.NO_WRAP);
+            } finally {
+                IOUtils.closeQuietly(is);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "从首图生成thumbBase64失败: GID " + gid, e);
             return null;
         }
     }
@@ -266,10 +424,36 @@ public class GalleryCacheManager {
             jsonObject.put(KEY_PARENT, galleryDetail.parent);
             jsonObject.put(KEY_VISIBLE, galleryDetail.visible);
             
-            // 转换缩略图为Base64
-            String thumbBase64 = convertThumbToBase64(galleryDetail.gid);
+            // 确保 thumb 始终存储原始 URL
+            jsonObject.put(KEY_THUMB, galleryDetail.thumb);
+            
+            // 转换缩略图为Base64（带来源标记）
+            // 优先级：磁盘缓存 > URL下载 > 首图提取
+            String thumbBase64 = null;
+            String thumbBase64Type = null;
+            // 1. 尝试从磁盘缓存获取
+            thumbBase64 = convertThumbToBase64(galleryDetail.gid);
+            if (thumbBase64 != null) {
+                thumbBase64Type = "cache";
+            }
+            // 2. 磁盘缓存中没有，尝试从URL下载
+            if (thumbBase64 == null && galleryDetail.thumb != null && !galleryDetail.thumb.isEmpty()) {
+                byte[] thumbBytes = downloadThumbnail(galleryDetail.gid, galleryDetail.thumb);
+                if (thumbBytes != null) {
+                    thumbBase64 = Base64.encodeToString(thumbBytes, Base64.NO_WRAP);
+                    thumbBase64Type = "thumb";
+                }
+            }
+            // 3. URL下载失败，尝试从下载目录首图提取
+            if (thumbBase64 == null) {
+                thumbBase64 = convertFirstPageToBase64(galleryDetail.gid);
+                if (thumbBase64 != null) {
+                    thumbBase64Type = "firstpage";
+                }
+            }
             if (thumbBase64 != null) {
                 jsonObject.put(KEY_THUMB_BASE64, thumbBase64);
+                jsonObject.put(KEY_THUMB_BASE64_TYPE, thumbBase64Type);
             }
             
             // 转换标签
@@ -325,10 +509,8 @@ public class GalleryCacheManager {
             galleryDetail.parent = jsonObject.getString(KEY_PARENT);
             galleryDetail.visible = jsonObject.getString(KEY_VISIBLE);
             
-            // 优先使用Base64缩略图
-            if (jsonObject.containsKey(KEY_THUMB_BASE64)) {
-                galleryDetail.thumb = jsonObject.getString(KEY_THUMB_BASE64);
-            }
+            // thumb 字段保留原始 URL，thumbBase64 仅用于离线显示
+            // 不再用 thumbBase64 覆盖 thumb URL
             
             // 解析标签
             if (jsonObject.containsKey(KEY_TAGS)) {

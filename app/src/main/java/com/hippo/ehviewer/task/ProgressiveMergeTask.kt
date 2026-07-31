@@ -115,6 +115,7 @@ class ProgressiveMergeTask @JvmOverloads constructor(
             updateProgress(10, "Merging content...")
 
             val targetMeta = parseEhviewerMeta(targetDir)
+            val mergedHashes = targetMeta?.hashes?.toMutableSet()
             for (source in sourceFolders) {
                 ensureNotCancelled()
                 step++
@@ -122,10 +123,10 @@ class ProgressiveMergeTask @JvmOverloads constructor(
                 updateProgress(pct, "Merging: ${source.name}")
                 Log.i(TAG, "Merging source: ${source.name} (gid=${source.gid}) -> target gid=$targetGid")
 
-                if (targetMeta != null) {
+                if (targetMeta != null && mergedHashes != null) {
                     val sourceMeta = parseEhviewerMeta(source.dir)
                     if (sourceMeta != null) {
-                        mergeByHash(targetDir, targetMeta, source.dir, sourceMeta)
+                        mergeByHash(targetDir, mergedHashes, source.dir, sourceMeta)
                     } else {
                         mergeByMd5(targetDir, source.dir)
                     }
@@ -187,19 +188,18 @@ class ProgressiveMergeTask @JvmOverloads constructor(
 
     private fun mergeByHash(
         targetDir: com.hippo.unifile.UniFile,
-        targetMeta: EhviewerMeta,
+        mergedHashes: MutableSet<String>,
         sourceDir: com.hippo.unifile.UniFile,
         sourceMeta: EhviewerMeta
     ) {
-        val targetHashes = targetMeta.hashes.toMutableSet()
-        var maxIndex = targetMeta.files.keys.maxOrNull() ?: -1
+        var maxIndex = getMaxEhviewerIndex(targetDir)
         var currentIndex = maxIndex + 1
 
         val hashToFile = buildHashToFileMap(sourceDir, sourceMeta)
         val newEntries = mutableListOf<Pair<Int, String>>()
 
         for ((hashVal, sourceFile) in hashToFile) {
-            if (targetHashes.contains(hashVal)) continue
+            if (mergedHashes.contains(hashVal)) continue
 
             val ext = extensionOf(sourceFile.name)
             val newName = String.format(Locale.US, "%08d%s", currentIndex + 1, ext)
@@ -209,7 +209,7 @@ class ProgressiveMergeTask @JvmOverloads constructor(
                 continue
             }
             newEntries.add(currentIndex to hashVal)
-            targetHashes.add(hashVal)
+            mergedHashes.add(hashVal)
             currentIndex++
             copiedCount++
         }
@@ -217,6 +217,29 @@ class ProgressiveMergeTask @JvmOverloads constructor(
         if (newEntries.isNotEmpty()) {
             appendToEhviewer(targetDir, newEntries)
         }
+    }
+
+    private fun getMaxEhviewerIndex(targetDir: com.hippo.unifile.UniFile): Int {
+        val file = targetDir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return -1
+        var maxIdx = -1
+        var reader: BufferedReader? = null
+        try {
+            reader = java.io.BufferedReader(java.io.InputStreamReader(file.openInputStream(), StandardCharsets.UTF_8))
+            var lineCount = 0
+            while (true) {
+                val line = reader.readLine() ?: break
+                lineCount++
+                if (lineCount <= 8) continue
+                val sepIdx = line.indexOf(' ')
+                if (sepIdx <= 0) continue
+                val idx = line.substring(0, sepIdx).toIntOrNull() ?: continue
+                if (idx > maxIdx) maxIdx = idx
+            }
+        } catch (_: Exception) {
+        } finally {
+            closeQuietly(reader)
+        }
+        return maxIdx
     }
 
     private fun mergeByMd5(targetDir: com.hippo.unifile.UniFile, sourceDir: com.hippo.unifile.UniFile) {

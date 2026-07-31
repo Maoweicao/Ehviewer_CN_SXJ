@@ -26,6 +26,7 @@ object HashCodeUtils {
      * <pre>`args[0].hashCode()*31^(n-1) + args[1].hashCode()*31^(n-2) + ... + args[n-1].hashCode() `</pre>
      * Returns 0 if `args == null`.
      */
+    @Suppress("SENSELESS_COMPARISON")
     @JvmStatic
     fun hashCode(vararg args: Any?): Int {
         if (args == null) {

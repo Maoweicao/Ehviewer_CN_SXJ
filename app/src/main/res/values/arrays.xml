@@ -217,12 +217,14 @@
         <item>@string/download_queue_secondary_none</item>
         <item>@string/download_queue_secondary_fewest_first</item>
         <item>@string/download_queue_secondary_most_first</item>
+        <item>@string/download_queue_secondary_category_priority</item>
     </string-array>
 
     <string-array name="download_queue_secondary_order_entry_values" translatable="false">
         <item>0</item>
         <item>1</item>
         <item>2</item>
+        <item>3</item>
     </string-array>
 
     <string-array name="preload_image_entries" translatable="false">
@@ -717,6 +719,28 @@
         <item>none</item>
         <item>password</item>
         <item>token</item>
+    </string-array>
+
+    <!-- Diagnostic Timeout Options -->
+    <string-array name="timeout_options" translatable="false">
+        <item>15</item>
+        <item>30</item>
+        <item>60</item>
+        <item>90</item>
+        <item>120</item>
+    </string-array>
+
+    <!-- VPN Aware Mode Options -->
+    <string-array name="vpn_aware_mode_entries">
+        <item>@string/vpn_mode_auto_disable</item>
+        <item>@string/vpn_mode_prompt</item>
+        <item>@string/vpn_mode_ignore</item>
+    </string-array>
+
+    <string-array name="vpn_aware_mode_entry_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
     </string-array>
 
 </resources>

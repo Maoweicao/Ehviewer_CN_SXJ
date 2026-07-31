@@ -63,6 +63,10 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
     private var mDownloadedDelay: NotificationDelay? = null
     private var m509Delay: NotificationDelay? = null
 
+    // Last key of the foreground download notification actually pushed; used to
+    // skip redundant startForeground binder calls when nothing visible changed.
+    private var mLastDownloadingKey: String? = null
+
     // WakeLock 用于防止CPU被限制（针对后台下载优化）
     private var mWakeLock: PowerManager.WakeLock? = null
     
@@ -141,7 +145,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         NetworkStateManager.addListener(this)
         
         mDownloadManager = EhApplication.getDownloadManager(applicationContext)
-        mDownloadManager!!.setDownloadListener(this)
+        mDownloadManager!!.addDownloadListener(this)
 
         // 如果启动时已经有任务，立即提升为前台以防被系统回收
         if (mDownloadManager != null && mDownloadManager!!.hasActiveDownload()) {
@@ -168,10 +172,8 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
 
         mNotifyManager = null
         if (mDownloadManager != null) {
-            // 只在没有活跃下载时才清除监听器
-            // 否则 START_STICKY 重启后需要重新设置监听
             if (!mDownloadManager!!.hasActiveDownload()) {
-                mDownloadManager!!.setDownloadListener(null)
+                mDownloadManager!!.removeDownloadListener(this)
                 mDownloadManager = null
             }
         }
@@ -190,26 +192,11 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        // 用户从最近任务移除应用时，主动停止下载并关闭前台服务，避免服务残留。
-        try {
-            mDownloadManager?.stopAllDownload()
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to stop downloads on task removed", e)
-            NetworkLogger.logError("Failed to stop downloads on task removed", e)
+        // Removing the activity from recents is not a user request to stop downloads.
+        // Keep this foreground service and its locks while the queue remains active.
+        if (mDownloadManager?.hasActiveDownload() != true) {
+            checkStopSelf()
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
-        } else {
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-        }
-
-        stopLockRefresh()
-        releaseWakeLock()
-        releaseWifiLock()
-        NetworkStateManager.removeListener(this)
-        stopSelf()
         super.onTaskRemoved(rootIntent)
     }
 
@@ -237,8 +224,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             mDownloadManager = EhApplication.getDownloadManager(applicationContext)
         }
         if (mDownloadManager != null && mDownloadManager!!.hasActiveDownload()) {
-            // 确保监听器已注册（Service 重启后可能丢失）
-            mDownloadManager!!.setDownloadListener(this)
+            mDownloadManager!!.addDownloadListener(this)
             ensureDownloadingBuilder()
             mDownloadingDelay!!.startForeground()
         }
@@ -266,6 +252,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         when (action) {
             ACTION_CLEAR -> clear()
             ACTION_DELETE_RANGE -> {
+                @Suppress("DEPRECATION")
                 val gidList = intent!!.getParcelableExtra<LongList>(KEY_GID_LIST)
                 if (gidList != null && mDownloadManager != null) {
                     mDownloadManager!!.deleteRangeDownload(gidList)
@@ -284,6 +271,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             }
 
             ACTION_STOP_RANGE -> {
+                @Suppress("DEPRECATION")
                 val gidListS = intent!!.getParcelableExtra<LongList>(KEY_GID_LIST)
                 if (gidListS != null && mDownloadManager != null) {
                     mDownloadManager!!.stopRangeDownload(gidListS)
@@ -306,6 +294,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             }
 
             ACTION_START_RANGE -> {
+                @Suppress("DEPRECATION")
                 val gidListSR = intent!!.getParcelableExtra<LongList>(KEY_GID_LIST)
                 if (gidListSR != null && mDownloadManager != null) {
                     mDownloadManager!!.startRangeDownload(gidListSR)
@@ -313,6 +302,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             }
 
             ACTION_START -> {
+                @Suppress("DEPRECATION")
                 val gi = intent!!.getParcelableExtra<GalleryInfo>(KEY_GALLERY_INFO)
                 val label = intent.getStringExtra(KEY_LABEL)
                 if (gi != null && mDownloadManager != null) {
@@ -335,7 +325,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
 
         val stopAllIntent = Intent(this, DownloadService::class.java)
         stopAllIntent.setAction(ACTION_STOP_ALL)
-        val piStopAll = PendingIntent.getService(this, 0, stopAllIntent, 0)
+        val piStopAll = PendingIntent.getService(this, 0, stopAllIntent, PendingIntent.FLAG_IMMUTABLE)
 
         mDownloadingBuilder = NotificationCompat.Builder(applicationContext, CHANNEL_ID!!)
             .setSmallIcon(android.R.drawable.stat_sys_download)
@@ -362,7 +352,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
 
         val clearIntent = Intent(this, DownloadService::class.java)
         clearIntent.setAction(ACTION_CLEAR)
-        val piClear = PendingIntent.getService(this, 0, clearIntent, 0)
+        val piClear = PendingIntent.getService(this, 0, clearIntent, PendingIntent.FLAG_IMMUTABLE)
 
         val bundle = Bundle()
         bundle.putString("action", "clear_download_service")
@@ -372,7 +362,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         activityIntent.putExtra(StageActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService, 0,
-            activityIntent, PendingIntent.FLAG_UPDATE_CURRENT
+            activityIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         mDownloadedBuilder = NotificationCompat.Builder(applicationContext, CHANNEL_ID!!)
@@ -397,7 +387,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         m509dBuilder = NotificationCompat.Builder(applicationContext, CHANNEL_ID!!)
             .setSmallIcon(R.drawable.ic_stat_alert)
             .setLargeIcon(BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher))
-            .setContentText(getString(R.string.stat_509_alert_title))
+            .setContentTitle(getString(R.string.stat_509_alert_title))
             .setContentText(getString(R.string.stat_509_alert_text))
             .setAutoCancel(true)
             .setOngoing(false)
@@ -441,7 +431,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         activityIntent.putExtra(StageActivity.KEY_SCENE_ARGS, bundle)
         val piActivity = PendingIntent.getActivity(
             this@DownloadService, 0,
-            activityIntent, PendingIntent.FLAG_UPDATE_CURRENT
+            activityIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         mDownloadingBuilder!!.setContentTitle(EhUtils.getSuitableTitle(info))
@@ -450,6 +440,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             .setProgress(0, 0, true)
             .setContentIntent(piActivity)
 
+        mLastDownloadingKey = null
         mDownloadingDelay!!.startForeground()
     }
 
@@ -474,9 +465,19 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         } else {
             getString(R.string.download_speed_text, text)
         }
+        val contentInfo =
+            if (info.total == -1 || info.finished == -1) null else info.finished.toString() + "/" + info.total
+        // Skip the binder call entirely when nothing visible changed (e.g. a
+        // stalled download keeps reporting the same 0 B/s state every tick)
+        val key = "${info.gid}|$text|$contentInfo"
+        if (key == mLastDownloadingKey) {
+            return
+        }
+        mLastDownloadingKey = key
+
         mDownloadingBuilder!!.setContentTitle(EhUtils.getSuitableTitle(info))
             .setContentText(text)
-            .setContentInfo(if (info.total == -1 || info.finished == -1) null else info.finished.toString() + "/" + info.total)
+            .setContentInfo(contentInfo)
             .setProgress(info.total, info.finished, false)
 
         mDownloadingDelay!!.startForeground()
@@ -691,13 +692,8 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
                 Log.d(TAG, "WakeLock released for refresh")
             }
             
-            if (MiuiOptimizationHelper.needsAggressiveOptimization() ||
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // 使用 acquire() 不加超时，由 refresh 机制保证不会永久持有
-                mWakeLock!!.acquire()
-                Log.i(TAG, "WakeLock acquired (no timeout, refreshed periodically)")
-                NetworkLogger.logBackground("WakeLock acquired (aggressive mode)")
-            }
+            mWakeLock!!.acquire()
+            Log.i(TAG, "WakeLock acquired (no timeout, refreshed periodically)")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to acquire WakeLock", e)
         }
@@ -733,6 +729,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             if (wifiManager != null) {
                 mWifiLock = wifiManager.createWifiLock(
+                    @Suppress("DEPRECATION")
                     WifiManager.WIFI_MODE_FULL_HIGH_PERF,
                     "EhViewer:DownloadWifiLock"
                 ).apply {
@@ -754,9 +751,12 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         
         try {
             if (mWifiLock == null) {
-                initWifiLock()  // 如果未初始化，尝试重新初始化
+                initWifiLock()
             }
-            if (mWifiLock != null && !mWifiLock!!.isHeld) {
+            if (mWifiLock != null) {
+                if (mWifiLock!!.isHeld) {
+                    mWifiLock!!.release()
+                }
                 mWifiLock!!.acquire()
                 Log.i(TAG, "WifiLock acquired")
                 NetworkLogger.logBackground("WifiLock acquired (WIFI_MODE_FULL_HIGH_PERF)")
@@ -910,7 +910,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             if (mPosted) {
                 mOps = OPS_NOTIFY
             } else {
-                val now = SystemClock.currentThreadTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 if (now - mLastTime > DELAY) {
                     // Wait long enough, do it now
                     try {
@@ -932,7 +932,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             if (mPosted) {
                 mOps = OPS_CANCEL
             } else {
-                val now = SystemClock.currentThreadTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 if (now - mLastTime > DELAY) {
                     // Wait long enough, do it now
                     mNotifyManager!!.cancel(mId)
@@ -949,7 +949,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             if (mPosted) {
                 mOps = OPS_START_FOREGROUND
             } else {
-                val now = SystemClock.currentThreadTimeMillis()
+                val now = SystemClock.elapsedRealtime()
                 if (now - mLastTime > DELAY) {
                     // Wait long enough, do it now
                     if (mService != null) {
@@ -1004,7 +1004,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             private const val OPS_CANCEL = 1
             private const val OPS_START_FOREGROUND = 2
 
-            private const val DELAY: Long = 1000 // 1s
+            private const val DELAY: Long = 2000 // 2s
         }
     }
 
@@ -1062,38 +1062,84 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
 
         @JvmStatic
         fun ensureRunning(context: Context) {
-            startServiceCompat(context, Intent(context, DownloadService::class.java))
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val dm = EhApplication.getDownloadManager(context)
+                if (dm.hasActiveDownload()) {
+                    DownloadWorker.enqueue(context)
+                }
+            } else {
+                startServiceCompat(context, Intent(context, DownloadService::class.java))
+            }
         }
 
         @JvmStatic
         fun startDownload(context: Context, galleryInfo: GalleryInfo, label: String?) {
-            val intent = Intent(context, DownloadService::class.java)
-                .setAction(ACTION_START)
-                .putExtra(KEY_GALLERY_INFO, galleryInfo)
-                .putExtra(KEY_LABEL, label)
-            startServiceCompat(context, intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val dm = EhApplication.getDownloadManager(context)
+                dm.startDownload(galleryInfo, label)
+                DownloadWorker.enqueue(context)
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(KEY_GALLERY_INFO, galleryInfo)
+                    .putExtra(KEY_LABEL, label)
+                startServiceCompat(context, intent)
+            } else {
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START)
+                    .putExtra(KEY_GALLERY_INFO, galleryInfo)
+                    .putExtra(KEY_LABEL, label)
+                startServiceCompat(context, intent)
+            }
         }
 
         @JvmStatic
         fun startRangeDownload(context: Context, gidList: LongList) {
-            val intent = Intent(context, DownloadService::class.java)
-                .setAction(ACTION_START_RANGE)
-                .putExtra(KEY_GID_LIST, gidList)
-            startServiceCompat(context, intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val dm = EhApplication.getDownloadManager(context)
+                dm.startRangeDownload(gidList)
+                DownloadWorker.enqueue(context)
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START_RANGE)
+                    .putExtra(KEY_GID_LIST, gidList)
+                startServiceCompat(context, intent)
+            } else {
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START_RANGE)
+                    .putExtra(KEY_GID_LIST, gidList)
+                startServiceCompat(context, intent)
+            }
         }
 
         @JvmStatic
         fun startAllDownloads(context: Context) {
-            val intent = Intent(context, DownloadService::class.java)
-                .setAction(ACTION_START_ALL)
-            startServiceCompat(context, intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val dm = EhApplication.getDownloadManager(context)
+                dm.startAllDownload()
+                DownloadWorker.enqueue(context)
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START_ALL)
+                startServiceCompat(context, intent)
+            } else {
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_START_ALL)
+                startServiceCompat(context, intent)
+            }
         }
 
         @JvmStatic
         fun stopAllDownloads(context: Context) {
-            val intent = Intent(context, DownloadService::class.java)
-                .setAction(ACTION_STOP_ALL)
-            startServiceCompat(context, intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                val dm = EhApplication.getDownloadManager(context)
+                dm.stopAllDownload()
+                DownloadWorker.cancel(context)
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_STOP_ALL)
+                startServiceCompat(context, intent)
+            } else {
+                val intent = Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_STOP_ALL)
+                startServiceCompat(context, intent)
+            }
         }
 
         fun clear() {

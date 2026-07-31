@@ -842,16 +842,16 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
 
         val sorted = group.folders.toMutableList()
         sorted.sortWith { a, b ->
-            val aHasEh = a.ehMeta != null
-            val bHasEh = b.ehMeta != null
-            if (aHasEh != bHasEh) {
-                return@sortWith if (aHasEh) -1 else 1
-            }
             if (a.modifiedAt != b.modifiedAt) {
                 return@sortWith if (a.modifiedAt > b.modifiedAt) -1 else 1
             }
             if (a.fileCount != b.fileCount) {
                 return@sortWith b.fileCount.compareTo(a.fileCount)
+            }
+            val aHasEh = a.ehMeta != null
+            val bHasEh = b.ehMeta != null
+            if (aHasEh != bHasEh) {
+                return@sortWith if (aHasEh) -1 else 1
             }
             val aid = a.id ?: -1
             val bid = b.id ?: -1
@@ -1177,49 +1177,13 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
     }
 
     private fun parseEhviewerMeta(dir: UniFile): EhviewerMeta? {
-        val file = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
-        if (file == null || !file.exists() || !file.isFile) {
-            return null
-        }
-
-        var inputStream: InputStream? = null
-        var reader: BufferedReader? = null
-        return try {
-            val meta = EhviewerMeta()
-            inputStream = file.openInputStream()
-            reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8))
-            val lines = mutableListOf<String>()
-            while (true) {
-                val line = reader.readLine() ?: break
-                lines.add(line)
-            }
-            if (lines.size < 3) {
-                return null
-            }
-
-            meta.gid = safeTrim(lines[1])
-            meta.token = safeTrim(lines[2])
-            for (i in 3 until lines.size) {
-                val raw = lines[i] ?: continue
-                val parts = raw.trim().split(Regex("\\s+"))
-                if (parts.size < 2) {
-                    continue
-                }
-                try {
-                    val idx = parts[0].toInt()
-                    val hash = parts[1]
-                    meta.files[idx] = hash
-                    meta.hashes.add(hash)
-                } catch (_: NumberFormatException) {
-                }
-            }
-            meta
-        } catch (_: IOException) {
-            null
-        } finally {
-            closeQuietly(reader)
-            closeQuietly(inputStream)
-        }
+        val parsed = EhviewerMetaParser.parse(dir) ?: return null
+        val meta = EhviewerMeta()
+        meta.gid = parsed.gid.toString()
+        meta.token = parsed.token
+        meta.files.putAll(parsed.indexToHash)
+        meta.hashes.addAll(parsed.hashes)
+        return meta
     }
 
     private fun countFiles(dir: UniFile?): Int {

@@ -52,6 +52,7 @@ public class EhFragment extends BasePreferenceFragmentCompat
         Preference manualThumbResolution = findPreference(Settings.KEY_MANUAL_THUMB_RESOLUTION);
         Preference customThumbResolution = findPreference(Settings.KEY_CUSTOM_THUMB_RESOLUTION);
         Preference tagTranslationsSource = findPreference("tag_translations_source");
+        Preference tagDatabaseManagement = findPreference("tag_database_management");
 
         // System theme display
         Preference systemTheme = findPreference("system_theme");
@@ -76,6 +77,7 @@ public class EhFragment extends BasePreferenceFragmentCompat
 
         if (!EhTagDatabase.isPossible(getActivity())) {
             getPreferenceScreen().removePreference(showTagTranslations);
+            getPreferenceScreen().removePreference(tagDatabaseManagement);
             getPreferenceScreen().removePreference(tagTranslationsSource);
         }
     }

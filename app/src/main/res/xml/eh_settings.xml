@@ -17,227 +17,254 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <com.hippo.ehviewer.preference.SignOutPreference
-        android:key="sign_out"
-        android:summary="@string/settings_eh_sign_out_summary"
-        android:title="@string/settings_eh_sign_out"
-        app:allowDividerAbove="true" />
+    <PreferenceCategory
+        android:key="category_eh_account"
+        android:title="@string/settings_category_account"
+        android:summary="@string/settings_category_account_summary"
+        app:allowDividerAbove="false">
 
-    <com.hippo.ehviewer.preference.IdentityCookiePreference
-        android:key="identity_cookie"
-        android:summary="@string/settings_eh_identity_cookies_summary"
-        android:title="@string/settings_eh_identity_cookies"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.SignOutPreference
+            android:key="sign_out"
+            android:summary="@string/settings_eh_sign_out_summary"
+            android:title="@string/settings_eh_sign_out" />
 
-<!--    <com.hippo.preference.SwitchPreference-->
-<!--        android:defaultValue="false"-->
-<!--        android:key="lock_cookie_igneous"-->
-<!--        android:summary="@string/settings_eh_lock_cookies_igneous_summary"-->
-<!--        android:title="@string/settings_eh_lock_cookies_igneous" />-->
+        <com.hippo.ehviewer.preference.IdentityCookiePreference
+            android:key="identity_cookie"
+            android:summary="@string/settings_eh_identity_cookies_summary"
+            android:title="@string/settings_eh_identity_cookies" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="1"
-        android:key="gallery_site"
-        android:summary="%s"
-        android:title="@string/settings_eh_gallery_site"
-        app:allowDividerAbove="true"
-        app:entries="@array/gallery_site_entries"
-        app:entryValues="@array/gallery_site_entry_values" />
+<!--        <com.hippo.preference.SwitchPreference-->
+<!--            android:defaultValue="false"-->
+<!--            android:key="lock_cookie_igneous"-->
+<!--            android:summary="@string/settings_eh_lock_cookies_igneous_summary"-->
+<!--            android:title="@string/settings_eh_lock_cookies_igneous" />-->
 
-    <com.hippo.ehviewer.preference.SignInRequiredActivityPreference
-        android:key="u_config"
-        android:summary="@string/settings_u_config_summary"
-        android:title="@string/settings_u_config"
-        app:activity="com.hippo.ehviewer.ui.UConfigActivity"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="1"
+            android:key="gallery_site"
+            android:summary="%s"
+            android:title="@string/settings_eh_gallery_site"
+            app:entries="@array/gallery_site_entries"
+            app:entryValues="@array/gallery_site_entry_values" />
 
-    <com.hippo.ehviewer.preference.SignInRequiredActivityPreference
-        android:key="my_tags"
-        android:summary="@string/settings_my_tags_summary"
-        android:title="@string/settings_my_tags"
-        app:activity="com.hippo.ehviewer.ui.MyTagsActivity"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.SignInRequiredActivityPreference
+            android:key="u_config"
+            android:summary="@string/settings_u_config_summary"
+            android:title="@string/settings_u_config"
+            app:activity="com.hippo.ehviewer.ui.UConfigActivity" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="theme"
-        android:summary="%s"
-        android:title="@string/settings_eh_theme"
-        app:allowDividerAbove="true"
-        app:entries="@array/theme_entries"
-        app:entryValues="@array/theme_entry_values" />
+        <com.hippo.ehviewer.preference.SignInRequiredActivityPreference
+            android:key="my_tags"
+            android:summary="@string/settings_my_tags_summary"
+            android:title="@string/settings_my_tags"
+            app:activity="com.hippo.ehviewer.ui.MyTagsActivity" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="theme_auto_switch"
-        android:title="@string/settings_eh_theme_auto_switch" />
+    </PreferenceCategory>
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="apply_nav_bar_theme_color"
-        android:title="@string/settings_eh_apply_nav_bar_theme_color" />
+    <PreferenceCategory
+        android:key="category_eh_appearance"
+        android:title="@string/settings_category_appearance"
+        android:summary="@string/settings_category_appearance_summary">
 
-    <Preference
-        android:key="system_theme"
-        android:title="@string/settings_eh_system_theme"
-        android:summary="未知" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="theme"
+            android:summary="%s"
+            android:title="@string/settings_eh_theme"
+            app:entries="@array/theme_entries"
+            app:entryValues="@array/theme_entry_values" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="launch_page"
-        android:summary="%s"
-        android:title="@string/settings_eh_launch_page"
-        app:allowDividerAbove="true"
-        app:entries="@array/launch_page_entries"
-        app:entryValues="@array/launch_page_entry_values" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="theme_auto_switch"
+            android:title="@string/settings_eh_theme_auto_switch" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="list_mode"
-        android:summary="%s"
-        android:title="@string/settings_eh_list_mode"
-        app:allowDividerAbove="true"
-        app:entries="@array/list_mode_entries"
-        app:entryValues="@array/list_mode_entry_values" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="apply_nav_bar_theme_color"
+            android:title="@string/settings_eh_apply_nav_bar_theme_color" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_read_progress"
-        android:summary="@string/settings_eh_list_show_read_progress_summary"
-        android:title="@string/settings_eh_list_show_read_progress" />
+        <Preference
+            android:key="system_theme"
+            android:title="@string/settings_eh_system_theme"
+            android:summary="未知" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="detail_size"
-        android:summary="%s"
-        android:title="@string/settings_eh_detail_size"
-        app:allowDividerAbove="true"
-        app:entries="@array/detail_size_entries"
-        app:entryValues="@array/detail_size_entry_values" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="launch_page"
+            android:summary="%s"
+            android:title="@string/settings_eh_launch_page"
+            app:entries="@array/launch_page_entries"
+            app:entryValues="@array/launch_page_entry_values" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="1"
-        android:key="thumb_size"
-        android:summary="%s"
-        android:title="@string/settings_eh_thumb_size"
-        app:allowDividerAbove="true"
-        app:entries="@array/thumb_size_entries"
-        app:entryValues="@array/thumb_size_entry_values" />
+    </PreferenceCategory>
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="100"
-        android:key="history_info_size"
-        android:summary="%s"
-        android:title="@string/settings_eh_history_size"
-        app:allowDividerAbove="true"
-        app:entries="@array/history_info_size_entries"
-        app:entryValues="@array/history_info_size_entry_values" />
+    <PreferenceCategory
+        android:key="category_eh_gallery_list"
+        android:title="@string/settings_category_gallery_list"
+        android:summary="@string/settings_category_gallery_list_summary">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="manual_thumb_resolution"
-        android:title="@string/settings_eh_manual_thumb_resolution"
-        android:summary="@string/settings_eh_manual_thumb_resolution_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="list_mode"
+            android:summary="%s"
+            android:title="@string/settings_eh_list_mode"
+            app:entries="@array/list_mode_entries"
+            app:entryValues="@array/list_mode_entry_values" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:key="custom_thumb_resolution"
-        android:title="@string/settings_eh_custom_thumb_resolution"
-        android:dependency="manual_thumb_resolution"
-        app:minValue="250"
-        app:maxValue="350"
-        app:stepSize="100"
-        app:unit="px"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_read_progress"
+            android:summary="@string/settings_eh_list_show_read_progress_summary"
+            android:title="@string/settings_eh_list_show_read_progress" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="fix_thumb_url"
-        android:title="@string/settings_eh_fix_thumb_url" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="detail_size"
+            android:summary="%s"
+            android:title="@string/settings_eh_detail_size"
+            app:entries="@array/detail_size_entries"
+            app:entryValues="@array/detail_size_entry_values" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="show_jpn_title"
-        android:summary="@string/settings_eh_show_jpn_title_summary"
-        android:title="@string/settings_eh_show_jpn_title" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="1"
+            android:key="thumb_size"
+            android:summary="%s"
+            android:title="@string/settings_eh_thumb_size"
+            app:entries="@array/thumb_size_entries"
+            app:entryValues="@array/thumb_size_entry_values" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="show_gallery_pages"
-        android:summary="@string/settings_eh_show_gallery_pages_summary"
-        android:title="@string/settings_eh_show_gallery_pages" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="100"
+            android:key="history_info_size"
+            android:summary="%s"
+            android:title="@string/settings_eh_history_size"
+            app:entries="@array/history_info_size_entries"
+            app:entryValues="@array/history_info_size_entry_values" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="gallery_show_loading_speed"
-        android:summary="@string/settings_eh_show_gallery_loading_speed_summary"
-        android:title="@string/settings_eh_show_gallery_loading_speed" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="manual_thumb_resolution"
+            android:title="@string/settings_eh_manual_thumb_resolution"
+            android:summary="@string/settings_eh_manual_thumb_resolution_summary" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_tag_translations"
-        android:summary="@string/settings_eh_show_tag_translations_summary"
-        android:title="@string/settings_eh_show_tag_translations" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:key="custom_thumb_resolution"
+            android:title="@string/settings_eh_custom_thumb_resolution"
+            android:dependency="manual_thumb_resolution"
+            app:minValue="250"
+            app:maxValue="350"
+            app:stepSize="100"
+            app:unit="px"
+            app:showValue="true" />
 
-    <com.hippo.preference.UrlPreference
-        android:key="tag_translations_source"
-        android:title="@string/settings_eh_tag_translations_source"
-        app:allowDividerAbove="true"
-        app:url="@string/settings_eh_tag_translations_source_url" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="fix_thumb_url"
+            android:title="@string/settings_eh_fix_thumb_url" />
 
-    <com.hippo.preference.ActivityPreference
-        android:key="filter"
-        android:summary="@string/settings_eh_filter_summary"
-        android:title="@string/settings_eh_filter"
-        app:activity="com.hippo.ehviewer.ui.FilterActivity"
-        app:allowDividerAbove="true" />
+    </PreferenceCategory>
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_gallery_comment"
-        android:title="@string/settings_eh_show_gallery_comment" />
+    <PreferenceCategory
+        android:key="category_eh_gallery_detail"
+        android:title="@string/settings_category_gallery_detail"
+        android:summary="@string/settings_category_gallery_detail_summary">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="enable_comment_rating_filter"
-        android:title="@string/settings_eh_enable_comment_rating_filter"
-        android:summary="@string/settings_eh_enable_comment_rating_filter_summary" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="show_jpn_title"
+            android:summary="@string/settings_eh_show_jpn_title_summary"
+            android:title="@string/settings_eh_show_jpn_title" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:key="comment_rating_threshold"
-        android:title="@string/settings_eh_comment_rating_threshold"
-        android:dependency="enable_comment_rating_filter"
-        app:minValue="-100"
-        app:maxValue="100"
-        app:stepSize="10"
-        app:unit="分"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="show_gallery_pages"
+            android:summary="@string/settings_eh_show_gallery_pages_summary"
+            android:title="@string/settings_eh_show_gallery_pages" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_gallery_rating"
-        android:title="@string/settings_eh_show_gallery_rating" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="gallery_show_loading_speed"
+            android:summary="@string/settings_eh_show_gallery_loading_speed_summary"
+            android:title="@string/settings_eh_show_gallery_loading_speed" />
 
-    <com.hippo.preference.ActivityPreference
-        android:key="blickList"
-        android:summary="@string/settings_eh_blacklist_summary"
-        android:title="@string/settings_eh_blacklist"
-        app:activity="com.hippo.ehviewer.ui.BlackListActivity"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_tag_translations"
+            android:summary="@string/settings_eh_show_tag_translations_summary"
+            android:title="@string/settings_eh_show_tag_translations" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_eh_events"
-        android:title="@string/settings_eh_show_eh_event" />
+        <Preference
+            android:key="tag_database_management"
+            android:summary="@string/settings_eh_tag_database_summary"
+            android:title="@string/settings_eh_tag_database"
+            app:fragment="com.hippo.ehviewer.ui.fragment.TagDatabaseFragment" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="show_eh_limits"
-        android:title="@string/settings_eh_show_eh_limits" />
+        <com.hippo.preference.UrlPreference
+            android:key="tag_translations_source"
+            android:title="@string/settings_eh_tag_translations_source"
+            app:url="@string/settings_eh_tag_translations_source_url" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="cellular_network_warning"
-        android:title="@string/settings_eh_cellular_network_warning" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_gallery_comment"
+            android:title="@string/settings_eh_show_gallery_comment" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="enable_comment_rating_filter"
+            android:title="@string/settings_eh_enable_comment_rating_filter"
+            android:summary="@string/settings_eh_enable_comment_rating_filter_summary" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:key="comment_rating_threshold"
+            android:title="@string/settings_eh_comment_rating_threshold"
+            android:dependency="enable_comment_rating_filter"
+            app:minValue="-100"
+            app:maxValue="100"
+            app:stepSize="10"
+            app:unit="分"
+            app:showValue="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_gallery_rating"
+            android:title="@string/settings_eh_show_gallery_rating" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_eh_events"
+            android:title="@string/settings_eh_show_eh_event" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="show_eh_limits"
+            android:title="@string/settings_eh_show_eh_limits" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="cellular_network_warning"
+            android:title="@string/settings_eh_cellular_network_warning" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_eh_filter"
+        android:title="@string/settings_category_filter"
+        android:summary="@string/settings_category_filter_summary">
+
+        <com.hippo.preference.ActivityPreference
+            android:key="filter"
+            android:summary="@string/settings_eh_filter_summary"
+            android:title="@string/settings_eh_filter"
+            app:activity="com.hippo.ehviewer.ui.FilterActivity" />
+
+        <com.hippo.preference.ActivityPreference
+            android:key="blickList"
+            android:summary="@string/settings_eh_blacklist_summary"
+            android:title="@string/settings_eh_blacklist"
+            app:activity="com.hippo.ehviewer.ui.BlackListActivity" />
+
+    </PreferenceCategory>
 
 </PreferenceScreen>

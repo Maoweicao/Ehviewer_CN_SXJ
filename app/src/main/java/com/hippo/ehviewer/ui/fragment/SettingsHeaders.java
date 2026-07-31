@@ -41,6 +41,7 @@ public class SettingsHeaders extends PreferenceFragmentCompat{
             activity = (SettingsActivity)getActivity();
         }
         if (activity!=null){
+            activity.clearSearch();
             if (activity.getSupportActionBar()!=null){
                 activity.getSupportActionBar().setTitle(preference.getTitle());
             }else {

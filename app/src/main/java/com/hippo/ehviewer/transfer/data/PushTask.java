@@ -34,12 +34,14 @@ public class PushTask {
     public static final String TYPE_BOOKMARKS = "bookmarks";
     public static final String TYPE_DOWNLOADS = "downloads";
     public static final String TYPE_FAVORITES = "favorites";
+    public static final String TYPE_EXPORT_DB = "export_db";
+    public static final String TYPE_EXPORT_CSV = "export_csv";
 
     public static final String MODE_ALL = "all";
     public static final String MODE_SELECTED = "selected";
 
     private String taskId;
-    private String type;           // bookmarks/downloads/favorites
+    private String type;           // bookmarks/downloads/favorites/export_db/export_csv
     private String mode;           // all/selected
     private List<Long> items;      // mode=selected时的GID列表
     private int totalCount;        // 总数据条数
@@ -52,6 +54,14 @@ public class PushTask {
     // 传输进度
     private int transferredCount;  // 已传输数量
     private int lastOffset;        // 断点续传偏移量
+
+    // 文件传输相关
+    private String fileName;       // 文件名（export_db/export_csv）
+    private long fileSize;         // 文件大小
+    private int totalChunks;       // 总块数
+    private int receivedChunks;    // 已接收块数
+    private long receivedBytes;    // 已接收字节数
+    private String tempFilePath;   // 临时文件路径
 
     public PushTask() {
         this.taskId = UUID.randomUUID().toString();
@@ -167,6 +177,61 @@ public class PushTask {
         this.lastOffset = lastOffset;
     }
 
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName;
+    }
+
+    public long getFileSize() {
+        return fileSize;
+    }
+
+    public void setFileSize(long fileSize) {
+        this.fileSize = fileSize;
+    }
+
+    public int getTotalChunks() {
+        return totalChunks;
+    }
+
+    public void setTotalChunks(int totalChunks) {
+        this.totalChunks = totalChunks;
+    }
+
+    public int getReceivedChunks() {
+        return receivedChunks;
+    }
+
+    public void setReceivedChunks(int receivedChunks) {
+        this.receivedChunks = receivedChunks;
+    }
+
+    public long getReceivedBytes() {
+        return receivedBytes;
+    }
+
+    public void setReceivedBytes(long receivedBytes) {
+        this.receivedBytes = receivedBytes;
+    }
+
+    public String getTempFilePath() {
+        return tempFilePath;
+    }
+
+    public void setTempFilePath(String tempFilePath) {
+        this.tempFilePath = tempFilePath;
+    }
+
+    /**
+     * 检查是否为文件传输类型
+     */
+    public boolean isFileTransfer() {
+        return TYPE_EXPORT_DB.equals(type) || TYPE_EXPORT_CSV.equals(type);
+    }
+
     /**
      * 获取进度百分比
      */
@@ -186,6 +251,10 @@ public class PushTask {
                 return "下载";
             case TYPE_FAVORITES:
                 return "收藏";
+            case TYPE_EXPORT_DB:
+                return "数据库导出";
+            case TYPE_EXPORT_CSV:
+                return "CSV导出";
             default:
                 return type;
         }

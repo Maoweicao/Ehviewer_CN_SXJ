@@ -26,6 +26,20 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
 
+    <FrameLayout
+        android:id="@+id/webview_fallback_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#FF000000"
+        android:visibility="gone">
+
+        <WebView
+            android:id="@+id/webview_fallback"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
+
     <com.hippo.ehviewer.lab.translate.TranslateOverlayView
         android:id="@+id/translate_overlay"
         android:layout_width="match_parent"

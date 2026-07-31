@@ -19,22 +19,29 @@ package com.hippo.ehviewer.transfer.api;
 import android.content.Context;
 import android.util.Log;
 
+import com.alibaba.fastjson.JSONObject;
 import com.hippo.beerbelly.SimpleDiskCache;
-import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.gallery.GalleryProvider2;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.lib.image.Image;
 import com.hippo.streampipe.InputStreamPipe;
 import com.hippo.unifile.UniFile;
 
+import java.io.FileInputStream;
 import java.io.InputStream;
+import java.security.MessageDigest;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -45,36 +52,52 @@ import fi.iki.elonen.NanoHTTPD;
  * 图片API处理器
  */
 public class PageApiHandler extends BaseApiHandler {
-    
+
     private static final String TAG = "PageApiHandler";
-    
+
     // 代理下载超时时间（秒）
     private static final int PROXY_DOWNLOAD_TIMEOUT = 30;
-    
+
     public PageApiHandler(Context context, AuthManager authManager) {
         super(context, authManager);
     }
-    
+
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("GET", uri);
-        
+
         // 移除查询参数进行匹配
         String path = uri.split("\\?")[0];
-        
+
         // /api/v1/galleries/{gid}/pages - 页面列表
         if (path.matches("/api/v1/galleries/\\d+/pages")) {
             long gid = RequestParser.extractGid(path);
             return handlePageList(session, gid);
         }
-        
+
         // /api/v1/galleries/{gid}/pages/{page} - 获取图片
         if (path.matches("/api/v1/galleries/\\d+/pages/\\d+")) {
             long gid = RequestParser.extractGid(path);
             int page = RequestParser.extractPage(path);
             return handleGetPage(session, gid, page);
         }
-        
+
+        return ResponseBuilder.notFound("Endpoint");
+    }
+
+    @Override
+    public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
+        logRequest("POST", uri);
+
+        String path = uri.split("\\?")[0];
+
+        // /api/v1/galleries/{gid}/pages/{page}/upload - 上传页面图片
+        if (path.matches("/api/v1/galleries/\\d+/pages/\\d+/upload")) {
+            long gid = RequestParser.extractGid(path);
+            int page = RequestParser.extractPage(path);
+            return handleUploadPage(session, gid, page);
+        }
+
         return ResponseBuilder.notFound("Endpoint");
     }
     
@@ -150,6 +173,14 @@ public class PageApiHandler extends BaseApiHandler {
             
             Log.d(TAG, "Final page count: " + totalPages + " for gid=" + gid);
             
+            // Check cache
+            String cacheKey = ResponseCache.buildKey("pages", String.valueOf(gid));
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for page list: gid=" + gid);
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             StringBuilder sb = new StringBuilder();
             sb.append("{\"gid\":").append(gid);
             sb.append(",\"pages\":").append(totalPages);
@@ -188,7 +219,12 @@ public class PageApiHandler extends BaseApiHandler {
             
             sb.append("]}");
             
-            return ResponseBuilder.jsonSuccess(sb.toString());
+            String responseJson = sb.toString();
+            
+            // Store in cache
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+            
+            return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
             Log.e(TAG, "Error getting page list", e);
@@ -424,7 +460,7 @@ public class PageApiHandler extends BaseApiHandler {
         if (filename == null) {
             return "image/jpeg";
         }
-        
+
         String lower = filename.toLowerCase();
         if (lower.endsWith(".png")) {
             return "image/png";
@@ -435,5 +471,354 @@ public class PageApiHandler extends BaseApiHandler {
         } else {
             return "image/jpeg";
         }
+    }
+
+    // ==================== 上传页面图片 ====================
+
+    /**
+     * 处理上传页面图片请求
+     *
+     * 流程：
+     * 1. 检查总开关 Settings.isRemotePageUploadEnabled()
+     * 2. 校验 gid
+     * 3. 解析 multipart/form-data：file, extension, hash, algorithm
+     * 4. 若 DownloadInfo 不存在 → 自动创建（state=NONE）
+     * 5. 计算目标文件名 = %08d.<ext>
+     * 6. 检查目标文件是否已存在
+     *    - 已存在 + 带 hash → 计算本地 hash 比对：
+     *      · 一致 → 返回 skipped:true 不写入
+     *      · 不一致 → 覆盖写入并返回 overwritten:true
+     *    - 已存在 + 未带 hash → 直接覆盖
+     *    - 不存在 → 直接写入
+     * 7. 更新 DownloadInfo.finished 与监听器
+     * 8. 返回结果
+     */
+    private NanoHTTPD.Response handleUploadPage(NanoHTTPD.IHTTPSession session, long gid, int page) {
+        try {
+            // 1. 总开关
+            if (!Settings.isRemotePageUploadEnabled()) {
+                return ResponseBuilder.forbidden("Remote page upload is disabled");
+            }
+
+            // 2. 校验
+            if (gid <= 0) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid gid");
+            }
+            if (page <= 0) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid page");
+            }
+            int pageIndex = page - 1;
+
+            // 3. 解析 multipart body
+            Map<String, String> files = new HashMap<>();
+            session.parseBody(files);
+
+            String tmpFilePath = files.get("file");
+            if (tmpFilePath == null) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Missing file");
+            }
+
+            java.io.File tmpFile = new java.io.File(tmpFilePath);
+            if (!tmpFile.exists()) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "File not received");
+            }
+            long fileSize = tmpFile.length();
+
+            // 可选参数
+            String extension = files.get("extension");
+            if (extension == null || extension.isEmpty()) {
+                // 从 Content-Type 或文件名推断
+                extension = inferExtensionFromContentType(session, tmpFile.getName());
+            }
+            extension = sanitizeExtension(extension);
+
+            String providedHash = files.get("hash");
+            String algorithm = files.get("algorithm");
+            if (algorithm == null || algorithm.isEmpty()) {
+                algorithm = "md5";
+            }
+            String normalizedAlgorithm = normalizeAlgorithm(algorithm);
+            if (normalizedAlgorithm == null) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                        "Unsupported hash algorithm: " + algorithm);
+            }
+
+            // 4. 获取/创建 DownloadInfo
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            boolean autoCreated = false;
+            if (info == null) {
+                GalleryInfo galleryInfo = buildGalleryInfoFromForm(files, gid);
+                if (galleryInfo == null) {
+                    tmpFile.delete();
+                    return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                            "Gallery not found and missing GalleryInfo for auto-creation");
+                }
+                downloadManager.addDownload(galleryInfo, null, DownloadInfo.STATE_NONE);
+                info = downloadManager.getDownloadInfo(gid);
+                autoCreated = true;
+                Log.i(TAG, "Auto-created DownloadInfo for uploaded page: gid=" + gid);
+            }
+
+            // 5. 获取下载目录
+            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+            if (downloadDir == null || !downloadDir.isDirectory()) {
+                if (downloadDir == null) {
+                    downloadDir = SpiderDen.getGalleryDownloadDir(info);
+                }
+                if (downloadDir == null) {
+                    tmpFile.delete();
+                    return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                            "Failed to resolve download directory");
+                }
+                if (!downloadDir.ensureDir()) {
+                    tmpFile.delete();
+                    return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                            "Failed to create download directory");
+                }
+            }
+
+            // 6. 计算目标文件名
+            String filename = SpiderDen.generateImageFilename(pageIndex, "." + extension);
+
+            // 7. 覆盖校验
+            UniFile existing = downloadDir.findFile(filename);
+            boolean existed = (existing != null);
+            boolean skipped = false;
+            boolean overwritten = false;
+            String oldHash = null;
+
+            if (existed && providedHash != null && !providedHash.isEmpty()) {
+                oldHash = computeFileHash(existing, normalizedAlgorithm);
+                if (oldHash != null && oldHash.equalsIgnoreCase(providedHash)) {
+                    // 哈希一致 → 跳过
+                    tmpFile.delete();
+                    skipped = true;
+                    Log.i(TAG, "Upload skipped (hash matches): gid=" + gid + ", page=" + page);
+                }
+            }
+
+            long writtenSize = fileSize;
+            String newHash = null;
+
+            if (!skipped) {
+                // 写入新文件
+                UniFile targetFile = downloadDir.createFile(filename);
+                if (targetFile == null) {
+                    tmpFile.delete();
+                    return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                            "Failed to create target file: " + filename);
+                }
+
+                try (InputStream is = new FileInputStream(tmpFile);
+                     java.io.OutputStream os = targetFile.openOutputStream()) {
+                    byte[] buf = new byte[8192];
+                    int len;
+                    while ((len = is.read(buf)) > 0) {
+                        os.write(buf, 0, len);
+                    }
+                } catch (Exception e) {
+                    tmpFile.delete();
+                    Log.e(TAG, "Failed to write uploaded page", e);
+                    return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                            "Write failed: " + e.getMessage());
+                }
+                tmpFile.delete();
+
+                writtenSize = targetFile.length();
+                overwritten = existed;
+
+                // 计算新文件 hash（无论是否提供 providedHash 都计算一次，便于返回）
+                newHash = computeFileHash(targetFile, normalizedAlgorithm);
+
+                // 更新下载计数
+                downloadManager.markPageDownloaded(gid, pageIndex, info);
+
+                // 触发画廊列表缓存失效（状态/页数可能改变）
+                ResponseCache.getInstance().invalidateGalleries();
+
+                Log.i(TAG, "Page uploaded: gid=" + gid + ", page=" + page
+                        + ", file=" + filename + ", size=" + writtenSize
+                        + ", existed=" + existed + ", overwritten=" + overwritten);
+            }
+
+            // 8. 构建响应
+            info = downloadManager.getDownloadInfo(gid);
+            int downloadedPages = info != null ? info.finished : 0;
+            int totalPages = info != null ? Math.max(info.pages, info.total) : 0;
+            float progress = totalPages > 0 ? (float) downloadedPages / totalPages * 100 : 0;
+            String stateName = info != null ? getStateName(info.state) : "unknown";
+
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("existed", existed);
+            response.put("skipped", skipped);
+            response.put("overwritten", overwritten);
+            response.put("autoCreated", autoCreated);
+            response.put("gid", gid);
+            response.put("page", page);
+            response.put("filename", filename);
+            response.put("size", writtenSize);
+            response.put("sizeFormatted", formatSize(writtenSize));
+            response.put("downloadedPages", downloadedPages);
+            response.put("total", totalPages);
+            response.put("progress", String.format(Locale.US, "%.1f", progress));
+            response.put("state", info != null ? info.state : -1);
+            response.put("stateName", stateName);
+            response.put("hash", newHash);
+            response.put("algorithm", algorithm);
+            if (skipped) {
+                response.put("message", "File already exists with the same hash");
+            } else if (overwritten) {
+                response.put("message", "File overwritten");
+                response.put("oldHash", oldHash);
+            } else {
+                response.put("message", "File written");
+            }
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            Log.e(TAG, "Error handling page upload", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 从 multipart 字段构建 GalleryInfo（仅当 DownloadInfo 不存在时使用）
+     */
+    private GalleryInfo buildGalleryInfoFromForm(Map<String, String> form, long gid) {
+        // 至少需要 title 才能创建有意义的信息
+        String title = form.get("title");
+        if (title == null || title.isEmpty()) {
+            return null;
+        }
+        GalleryInfo info = new GalleryInfo();
+        info.gid = gid;
+        info.token = form.get("token");
+        info.title = title;
+        info.titleJpn = form.get("titleJpn");
+        info.thumb = form.get("thumb");
+        try {
+            info.category = Integer.parseInt(form.getOrDefault("category", "0"));
+        } catch (NumberFormatException ignored) {
+            info.category = 0;
+        }
+        info.posted = form.get("posted");
+        info.uploader = form.get("uploader");
+        try {
+            info.rating = Float.parseFloat(form.getOrDefault("rating", "0"));
+        } catch (NumberFormatException ignored) {
+            info.rating = 0;
+        }
+        try {
+            info.pages = Integer.parseInt(form.getOrDefault("pages", "0"));
+        } catch (NumberFormatException ignored) {
+            info.pages = 0;
+        }
+        return info;
+    }
+
+    /**
+     * 从 Content-Type 或文件名推断扩展名
+     */
+    private String inferExtensionFromContentType(NanoHTTPD.IHTTPSession session, String filename) {
+        String ct = session.getHeaders().get("content-type");
+        if (ct != null) {
+            ct = ct.toLowerCase();
+            if (ct.contains("png")) return "png";
+            if (ct.contains("gif")) return "gif";
+            if (ct.contains("webp")) return "webp";
+            if (ct.contains("jpeg") || ct.contains("jpg")) return "jpg";
+        }
+        if (filename != null) {
+            String lower = filename.toLowerCase();
+            int dot = lower.lastIndexOf('.');
+            if (dot >= 0 && dot < lower.length() - 1) {
+                return lower.substring(dot + 1);
+            }
+        }
+        return "jpg";
+    }
+
+    /**
+     * 规范化扩展名：去点、转小写、校验有效性
+     */
+    private String sanitizeExtension(String ext) {
+        if (ext == null || ext.isEmpty()) return "jpg";
+        String lower = ext.toLowerCase().trim();
+        if (lower.startsWith(".")) lower = lower.substring(1);
+        for (String supported : GalleryProvider2.SUPPORT_IMAGE_EXTENSIONS) {
+            if (supported.substring(1).equals(lower)) {
+                return lower;
+            }
+        }
+        return "jpg";
+    }
+
+    /**
+     * 规范化哈希算法名称
+     */
+    private String normalizeAlgorithm(String algorithm) {
+        if (algorithm == null) return "MD5";
+        String upper = algorithm.toUpperCase().replace("-", "");
+        switch (upper) {
+            case "MD5": return "MD5";
+            case "SHA1": return "SHA-1";
+            case "SHA256": return "SHA-256";
+            default: return null;
+        }
+    }
+
+    /**
+     * 计算文件哈希
+     */
+    private String computeFileHash(UniFile file, String algorithm) {
+        if (file == null) return null;
+        try {
+            MessageDigest digest = MessageDigest.getInstance(algorithm);
+            try (InputStream is = file.openInputStream()) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = is.read(buf)) > 0) {
+                    digest.update(buf, 0, len);
+                }
+            }
+            byte[] hashBytes = digest.digest();
+            StringBuilder sb = new StringBuilder(hashBytes.length * 2);
+            for (byte b : hashBytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to compute hash", e);
+            return null;
+        }
+    }
+
+    /**
+     * 获取状态名称
+     */
+    private String getStateName(int state) {
+        switch (state) {
+            case DownloadInfo.STATE_NONE: return "none";
+            case DownloadInfo.STATE_WAIT: return "wait";
+            case DownloadInfo.STATE_DOWNLOAD: return "downloading";
+            case DownloadInfo.STATE_FINISH: return "finished";
+            case DownloadInfo.STATE_FAILED: return "failed";
+            case DownloadInfo.STATE_UPDATE: return "update";
+            case DownloadInfo.STATE_RELAY_DOWNLOAD: return "relay_download";
+            default: return "unknown";
+        }
+    }
+
+    /**
+     * 格式化字节大小
+     */
+    private String formatSize(long bytes) {
+        if (bytes <= 0) return "0 B";
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format(Locale.US, "%.1f KB", bytes / 1024.0);
+        if (bytes < 1024L * 1024 * 1024) return String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024));
+        return String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024 * 1024));
     }
 }

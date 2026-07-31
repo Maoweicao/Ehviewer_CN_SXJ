@@ -45,7 +45,11 @@ import com.hippo.lib.yorozuya.Utilities;
 import java.io.File;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public final class SpiderDen {
 
@@ -61,6 +65,13 @@ public final class SpiderDen {
 
     @Nullable
     private static SimpleDiskCache sCache;
+
+    /**
+     * Process-lifetime negative cache for {@link #findDownloadDirname}: gids whose
+     * on-disk folder scan already ran once in this process and found nothing.
+     * Prevents repeated full-directory scans of the download root.
+     */
+    private static final Set<Long> sDirScanMissed = ConcurrentHashMap.newKeySet();
 
     public static void initialize(Context context) {
         sCache = new SimpleDiskCache(new File(context.getCacheDir(), "image"),
@@ -101,8 +112,22 @@ public final class SpiderDen {
             return null;
         }
 
+        long gid = galleryInfo.gid;
+
+        // The full-directory scan below already ran once in this process and
+        // found no matching folder; do not rescan on every lookup.
+        if (sDirScanMissed.contains(gid)) {
+            return null;
+        }
+
+        // Only galleries in the download list may have an on-disk folder;
+        // skip the expensive full-directory scan for anything else.
+        if (EhDB.getDownloadInfo(gid) == null) {
+            return null;
+        }
+
         try {
-            UniFile[] files = parentDir.listFiles(new StartWithFilenameFilter(galleryInfo.gid + "-"));
+            UniFile[] files = parentDir.listFiles(new StartWithFilenameFilter(gid + "-"));
             if (null != files) {
                 // Get max-length-name dir
                 int maxLength = -1;
@@ -123,6 +148,11 @@ public final class SpiderDen {
         } catch (Exception e) {
             // Failed to list files, maybe storage is unavailable or permission lost
             android.util.Log.w("SpiderDen", "Failed to list files in download directory", e);
+        }
+        if (null == dirname) {
+            sDirScanMissed.add(gid);
+        } else {
+            sDirScanMissed.remove(gid);
         }
         return dirname;
     }
@@ -363,6 +393,51 @@ public final class SpiderDen {
         } else {
             return false;
         }
+    }
+
+    /**
+     * Check if all pages [0, totalPages) already exist in the download directory.
+     * Uses a single {@code listFiles()} call to avoid per-page SAF IPC overhead.
+     *
+     * @param totalPages total number of pages expected
+     * @return true if every page file exists on disk
+     */
+    public boolean allPagesExistFast(int totalPages) {
+        UniFile dir = getDownloadDir();
+        if (dir == null) {
+            return false;
+        }
+        UniFile[] files;
+        try {
+            files = dir.listFiles();
+        } catch (OutOfMemoryError e) {
+            // Too many files in directory, fall back to per-page check
+            return false;
+        }
+        if (files == null || files.length < totalPages) {
+            return false;
+        }
+        Set<String> filenames = new HashSet<>(files.length * 2);
+        for (UniFile f : files) {
+            String name = f.getName();
+            if (name != null) {
+                filenames.add(name);
+            }
+        }
+        Set<String> extensions = new HashSet<>(Arrays.asList(GalleryProvider2.SUPPORT_IMAGE_EXTENSIONS));
+        for (int i = 0; i < totalPages; i++) {
+            boolean found = false;
+            for (String ext : extensions) {
+                if (filenames.contains(generateImageFilename(i, ext))) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private boolean removeFromCache(int index) {

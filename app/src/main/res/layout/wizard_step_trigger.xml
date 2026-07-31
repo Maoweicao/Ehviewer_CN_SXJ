@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/automation_trigger_when"
+        android:textAllCaps="true"
+        android:textColor="?attr/colorPrimary"
+        android:textStyle="bold" />
+
+    <RadioGroup
+        android:id="@+id/trigger_type_group"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical">
+
+        <RadioButton
+            android:id="@+id/rb_schedule"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/automation_trigger_type_schedule" />
+
+        <RadioButton
+            android:id="@+id/rb_event"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/automation_trigger_type_event" />
+
+        <RadioButton
+            android:id="@+id/rb_manual"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/automation_trigger_type_manual" />
+    </RadioGroup>
+
+    <LinearLayout
+        android:id="@+id/schedule_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:background="?attr/selectableItemBackground">
+
+        <RadioGroup
+            android:id="@+id/repeat_group"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <RadioButton
+                android:id="@+id/rb_repeat_once"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/automation_schedule_once" />
+
+            <RadioButton
+                android:id="@+id/rb_repeat_daily"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/automation_filter_schedule" />
+
+            <RadioButton
+                android:id="@+id/rb_repeat_weekdays"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/automation_schedule_weekdays" />
+
+            <RadioButton
+                android:id="@+id/rb_repeat_weekends"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/automation_schedule_weekends" />
+
+            <RadioButton
+                android:id="@+id/rb_repeat_holidays"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/automation_schedule_holidays" />
+        </RadioGroup>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/event_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/automation_trigger_pick_event"
+            android:textColor="?android:attr/textColorSecondary" />
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/event_chips"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            app:singleSelection="true" />
+    </LinearLayout>
+
+</LinearLayout>

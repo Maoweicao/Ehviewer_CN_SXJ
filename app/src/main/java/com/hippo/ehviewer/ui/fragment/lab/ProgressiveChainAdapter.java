@@ -47,7 +47,28 @@ public class ProgressiveChainAdapter extends RecyclerView.Adapter<ProgressiveCha
         }
         expandedMap.clear();
         selectedTargetIndex.clear();
+        for (ProgressiveScanTask.ProgressiveChain chain : chains) {
+            selectedTargetIndex.put(chain.getId(), getDefaultTargetIndex(chain));
+        }
         notifyDataSetChanged();
+    }
+
+    private int getDefaultTargetIndex(ProgressiveScanTask.ProgressiveChain chain) {
+        List<ProgressiveScanTask.FolderInfo> folders = chain.getFolders();
+        if (folders.isEmpty()) return 0;
+        int bestIdx = 0;
+        long bestTime = folders.get(0).getModifiedAt();
+        int bestHash = folders.get(0).getHashCount();
+        for (int i = 1; i < folders.size(); i++) {
+            ProgressiveScanTask.FolderInfo f = folders.get(i);
+            if (f.getModifiedAt() > bestTime
+                    || (f.getModifiedAt() == bestTime && f.getHashCount() > bestHash)) {
+                bestIdx = i;
+                bestTime = f.getModifiedAt();
+                bestHash = f.getHashCount();
+            }
+        }
+        return bestIdx;
     }
 
     @NonNull

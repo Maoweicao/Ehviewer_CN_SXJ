@@ -48,6 +48,18 @@ interface BackgroundTask {
     fun isUniqueTask(): Boolean = getTaskType() != TaskType.DOWNLOAD
 
     /**
+     * 互斥分组键。同组内的 unique 任务串行互斥（前一任务完成后下一任务自动接续），
+     * 不同组之间独立并行。
+     *
+     * 返回 null 表示不参与分组互斥，可以和其他任意任务并行。
+     *
+     * 典型示例：下载类任务（清理无效下载、校验完整性、修复画廊信息等）
+     * 都返回同一个下载目录路径作为分组键，彼此互斥排队；
+     * 导出日志的任务返回 null，不受下载类任务阻塞。
+     */
+    fun getMutexGroup(): String? = null
+
+    /**
      * 任务是否支持暂停
      */
     fun isPausable(): Boolean = false

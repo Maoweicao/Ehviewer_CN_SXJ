@@ -6,19 +6,28 @@ import android.net.NetworkInfo;
 import android.util.Log;
 
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URI;
-import java.net.URLConnection;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-/**
- * 网络连通性诊断工具类
- */
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
+
 public class NetworkDiagnosticTool {
 
     private static final String TAG = "NetworkDiagnostic";
+    private static final int DEFAULT_TIMEOUT_SECONDS = 60;
 
     public static class SiteInfo {
         public String domain;
@@ -32,32 +41,17 @@ public class NetworkDiagnosticTool {
             this.isAccessible = false;
             this.responseTime = -1;
         }
-
-        @Override
-        public String toString() {
-            return "SiteInfo{" +
-                    "domain='" + domain + '\'' +
-                    ", resolvedIP='" + resolvedIP + '\'' +
-                    ", isAccessible=" + isAccessible +
-                    ", responseTime=" + responseTime + "ms" +
-                    ", error='" + error + '\'' +
-                    '}';
-        }
     }
 
     public static class NetworkInfo {
         public String currentIP;
-        public String networkType;  // "WiFi", "Mobile", "Unknown"
+        public String networkType;
         public boolean isConnected;
     }
 
-    /**
-     * 获取当前网络信息
-     */
     public static NetworkInfo getNetworkInfo(Context context) {
         NetworkInfo info = new NetworkInfo();
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
-
         if (cm != null) {
             android.net.NetworkInfo activeNetwork = cm.getActiveNetworkInfo();
             if (activeNetwork != null && activeNetwork.isConnectedOrConnecting()) {
@@ -75,32 +69,23 @@ public class NetworkDiagnosticTool {
                 info.networkType = "Unknown";
             }
         }
-
-        // 获取本地IP（简化方式）
         try {
             info.currentIP = getLocalIP();
         } catch (Exception e) {
             info.currentIP = "N/A";
         }
-
         return info;
     }
 
-    /**
-     * 获取本地IP地址
-     */
     private static String getLocalIP() {
         try {
             java.util.Enumeration<java.net.NetworkInterface> interfaces =
                 java.net.NetworkInterface.getNetworkInterfaces();
-
             while (interfaces.hasMoreElements()) {
                 java.net.NetworkInterface ni = interfaces.nextElement();
                 java.util.Enumeration<InetAddress> addresses = ni.getInetAddresses();
-                
                 while (addresses.hasMoreElements()) {
                     InetAddress addr = addresses.nextElement();
-                    // 忽略回环地址和IPv6
                     if (!addr.isLoopbackAddress() && addr instanceof java.net.Inet4Address) {
                         return addr.getHostAddress();
                     }
@@ -109,77 +94,144 @@ public class NetworkDiagnosticTool {
         } catch (Exception e) {
             Log.e(TAG, "Failed to get local IP", e);
         }
-        
         return "N/A";
     }
 
-    /**
-     * 检测站点的DNS解析和可访问性
-     */
-    public static SiteInfo checkSite(String domain) {
+    public static boolean isInterrupted() {
+        return Thread.currentThread().isInterrupted();
+    }
+
+    private static final ExecutorService DNS_EXECUTOR = Executors.newCachedThreadPool();
+
+    public static SiteInfo checkSite(String domain, int timeoutSeconds) {
         SiteInfo info = new SiteInfo(domain);
         long startTime = System.currentTimeMillis();
+        long deadline = startTime + TimeUnit.SECONDS.toMillis(timeoutSeconds);
 
         try {
-            // DNS解析
-            InetAddress address = InetAddress.getByName(domain);
-            info.resolvedIP = address.getHostAddress();
-            Log.d(TAG, domain + " resolved to: " + info.resolvedIP);
-
-            // 检测连通性（尝试连接80和443端口）
-            if (checkPort(domain, 443) || checkPort(domain, 80)) {
-                info.isAccessible = true;
-                Log.d(TAG, domain + " is accessible");
-            } else {
-                info.isAccessible = false;
-                info.error = "Connection refused";
-                Log.d(TAG, domain + " is NOT accessible");
+            if (isInterrupted()) {
+                info.error = "Cancelled";
+                info.responseTime = System.currentTimeMillis() - startTime;
+                return info;
             }
 
-        } catch (UnknownHostException e) {
-            info.resolvedIP = "FAILED";
-            info.isAccessible = false;
-            info.error = "DNS resolution failed";
-            Log.e(TAG, "DNS resolution failed for " + domain, e);
-        } catch (Exception e) {
-            info.isAccessible = false;
-            info.error = e.getMessage();
-            Log.e(TAG, "Error checking site: " + domain, e);
-        }
+            long dnsRemaining = Math.max(1000, deadline - System.currentTimeMillis());
+            Future<InetAddress> dnsFuture = DNS_EXECUTOR.submit(
+                    (Callable<InetAddress>) () -> InetAddress.getByName(domain));
+            InetAddress address;
+            try {
+                address = dnsFuture.get(dnsRemaining, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException e) {
+                dnsFuture.cancel(true);
+                info.error = "DNS timeout (" + dnsRemaining + "ms)";
+                info.responseTime = System.currentTimeMillis() - startTime;
+                return info;
+            } catch (Exception e) {
+                info.resolvedIP = "FAILED";
+                info.error = "DNS resolution failed: " + e.getMessage();
+                info.responseTime = System.currentTimeMillis() - startTime;
+                return info;
+            }
 
+            info.resolvedIP = address.getHostAddress();
+
+            long portRemaining = Math.max(1000, deadline - System.currentTimeMillis());
+            if (isInterrupted()) {
+                info.error = "Cancelled";
+                info.responseTime = System.currentTimeMillis() - startTime;
+                return info;
+            }
+            if (checkPort(address, 443, portRemaining) || checkPort(address, 80, portRemaining)) {
+                info.isAccessible = true;
+            } else {
+                info.error = "Connection refused";
+            }
+        } catch (Exception e) {
+            info.error = e.getMessage();
+        }
         info.responseTime = System.currentTimeMillis() - startTime;
         return info;
     }
 
-    /**
-     * 检测特定端口是否可连接
-     */
-    private static boolean checkPort(String host, int port) {
+    public static SiteInfo checkSite(String domain) {
+        return checkSite(domain, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    private static boolean checkPort(InetAddress address, int port, long remainingMs) {
         try (Socket socket = new Socket()) {
             socket.setReuseAddress(true);
-            // 增加超时时间到10秒，某些网络环境需要更长时间
-            socket.connect(new java.net.InetSocketAddress(host, port), 10000);
+            int timeout = (int) Math.max(1000, remainingMs);
+            socket.connect(new InetSocketAddress(address, port), timeout);
             return true;
-        } catch (java.net.SocketTimeoutException e) {
-            Log.d(TAG, "Port " + port + " connection timeout for " + host);
-            return false;
-        } catch (java.net.ConnectException e) {
-            Log.d(TAG, "Port " + port + " connection refused for " + host);
-            return false;
         } catch (Exception e) {
-            Log.d(TAG, "Port " + port + " check failed for " + host + ": " + e.getMessage());
             return false;
         }
     }
 
-    /**
-     * 批量检测多个站点
-     */
-    public static List<SiteInfo> checkMultipleSites(String[] domains) {
+    public static List<SiteInfo> checkMultipleSites(String[] domains, int timeoutSeconds) {
         List<SiteInfo> results = new ArrayList<>();
         for (String domain : domains) {
-            results.add(checkSite(domain));
+            if (isInterrupted()) break;
+            results.add(checkSite(domain, timeoutSeconds));
         }
         return results;
+    }
+
+    public static List<SiteInfo> checkMultipleSites(String[] domains) {
+        return checkMultipleSites(domains, DEFAULT_TIMEOUT_SECONDS);
+    }
+
+    public static DiagnosticEndpoint.CheckResult checkHttpEndpoint(
+            DiagnosticEndpoint.EndpointItem endpoint, OkHttpClient client) {
+        DiagnosticEndpoint.CheckResult result = new DiagnosticEndpoint.CheckResult(endpoint);
+        String resolvedUrl = DiagnosticEndpoint.resolveUrl(endpoint.url, endpoint.site);
+        long startTime = System.currentTimeMillis();
+
+        if (isInterrupted()) {
+            result.error = "Cancelled";
+            result.totalTimeMs = 0;
+            return result;
+        }
+
+        try {
+            Request.Builder reqBuilder = new Request.Builder()
+                    .url(resolvedUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+                    .header("Accept-Language", "en-US,en;q=0.5")
+                    .header("Referer", endpoint.site.getHost());
+
+            if (endpoint.method == DiagnosticEndpoint.HttpMethod.POST) {
+                MediaType JSON = MediaType.get("application/json; charset=utf-8");
+                String body = endpoint.postBody != null ? endpoint.postBody : "{}";
+                reqBuilder.post(RequestBody.create(JSON, body));
+            } else if (endpoint.method == DiagnosticEndpoint.HttpMethod.HEAD) {
+                reqBuilder.head();
+            }
+
+            Request request = reqBuilder.build();
+            Response response = client.newCall(request).execute();
+            result.httpCode = response.code();
+            result.isReachable = true;
+
+            if (response.body() != null) {
+                response.body().close();
+            }
+        } catch (Exception e) {
+            result.isReachable = false;
+            result.error = e.getClass().getSimpleName() + ": " + e.getMessage();
+            Log.e(TAG, "HTTP check failed for " + resolvedUrl, e);
+        }
+        result.totalTimeMs = System.currentTimeMillis() - startTime;
+        return result;
+    }
+
+    public static OkHttpClient buildDiagnosticClient(OkHttpClient base, int timeoutSeconds) {
+        long timeoutMs = TimeUnit.SECONDS.toMillis(timeoutSeconds);
+        return base.newBuilder()
+                .connectTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .readTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .writeTimeout(timeoutMs, TimeUnit.MILLISECONDS)
+                .build();
     }
 }

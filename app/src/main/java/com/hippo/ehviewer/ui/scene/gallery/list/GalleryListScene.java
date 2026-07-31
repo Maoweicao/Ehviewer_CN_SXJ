@@ -1010,6 +1010,27 @@ public final class GalleryListScene extends BaseScene
         mLeftDrawable = null;
         mRightDrawable = null;
         mActionFabDrawable = null;
+
+        if (null != alertDialog) {
+            alertDialog.dismiss();
+            alertDialog = null;
+        }
+        if (null != jumpSelectorDialog) {
+            jumpSelectorDialog.dismiss();
+            jumpSelectorDialog = null;
+        }
+        if (null != popupWindow) {
+            popupWindow.dismiss();
+            popupWindow = null;
+        }
+        mJumpDateSelector = null;
+        tagDialog = null;
+        mBookmarksDraw = null;
+        mSubscriptionDraw = null;
+        drawPager = null;
+        bookmarksView = null;
+        subscriptionView = null;
+        ehTags = null;
     }
 
     void showQuickSearchTipDialog(final List<QuickSearch> list,
@@ -1423,6 +1444,10 @@ public final class GalleryListScene extends BaseScene
         });
 
 
+        if (null != alertDialog) {
+            alertDialog.dismiss();
+            alertDialog = null;
+        }
         alertDialog = new AlertDialog.Builder(getDialogContext())
 //                .setTitle(EhUtils.getSuitableTitle(gi))
 //                .setView(imageViewNew)
@@ -1461,7 +1486,14 @@ public final class GalleryListScene extends BaseScene
                             startActivity(pipIntent);
                             break;
                     }
-                }).show();
+                }).create();
+        try {
+            alertDialog.show();
+        } catch (OutOfMemoryError e) {
+            Log.e(TAG, "OOM while showing dialog", e);
+            alertDialog = null;
+            EhApplication.clearMemoryCacheSafely();
+        }
         return true;
     }
 

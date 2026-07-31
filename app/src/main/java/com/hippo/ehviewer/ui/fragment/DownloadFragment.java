@@ -35,6 +35,8 @@ import androidx.core.app.NotificationCompat;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 
+import com.hippo.preference.ListPreference;
+
 import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
@@ -45,6 +47,7 @@ import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadLogger;
+import com.hippo.ehviewer.download.SystemDMBackend;
 import com.hippo.ehviewer.ui.CommonOperations;
 import com.hippo.ehviewer.ui.DirPickerActivity;
 import com.hippo.ehviewer.task.RebuildDownloadRecordsTask;
@@ -98,6 +101,8 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
     public static final String KEY_REPAIR_ALL_DOWNLOADED_GALLERY = "repair_all_downloaded_gallery";
     public static final String KEY_REPAIR_UNKNOWN_CATEGORY_GALLERY = "repair_unknown_category_gallery";
     public static final String KEY_REBUILD_DOWNLOAD_RECORDS = "rebuild_download_records";
+    public static final String KEY_REPAIR_DOWNLOADED_THUMBNAIL = "repair_downloaded_thumbnail";
+    public static final String KEY_VERIFY_DOWNLOAD_INTEGRITY = "verify_download_integrity";
     public static final String KEY_VIEW_DOWNLOAD_LOGS = "view_download_logs";
     public static final String KEY_CLEAN_DOWNLOAD_LOGS = "clean_download_logs";
     public static final String KEY_RESET_MEDIA_SCAN = "reset_media_scan";
@@ -132,6 +137,8 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
         Preference repairAllDownloadedGallery = findPreference(KEY_REPAIR_ALL_DOWNLOADED_GALLERY);
         Preference repairUnknownCategoryGallery = findPreference(KEY_REPAIR_UNKNOWN_CATEGORY_GALLERY);
         Preference rebuildDownloadRecords = findPreference(KEY_REBUILD_DOWNLOAD_RECORDS);
+        Preference repairDownloadedThumbnail = findPreference(KEY_REPAIR_DOWNLOADED_THUMBNAIL);
+        Preference verifyDownloadIntegrity = findPreference(KEY_VERIFY_DOWNLOAD_INTEGRITY);
         Preference mergeDuplicateGallery = findPreference("merge_duplicate_gallery");
         Preference scanDownloadFiles = findPreference("scan_download_files");
         Preference viewDownloadLogs = findPreference(KEY_VIEW_DOWNLOAD_LOGS);
@@ -164,6 +171,43 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
         if (mediaScan != null) {
             mediaScan.setOnPreferenceChangeListener(this);
         }
+
+        // 系统下载服务：检测可用性，不可用则禁用开关
+        Preference useSystemDownloadManager = findPreference(Settings.KEY_USE_SYSTEM_DOWNLOAD_MANAGER);
+        if (useSystemDownloadManager != null) {
+            boolean dmAvailable = SystemDMBackend.isAvailable(requireContext());
+            useSystemDownloadManager.setEnabled(dmAvailable);
+            if (!dmAvailable) {
+                useSystemDownloadManager.setSummary(R.string.settings_download_use_system_download_manager_unavailable);
+                // 如果用户之前开了但现在不可用，强制关掉
+                if (Settings.getUseSystemDownloadManager()) {
+                    Settings.putUseSystemDownloadManager(false);
+                }
+            }
+            useSystemDownloadManager.setOnPreferenceChangeListener((preference, newValue) -> true);
+        }
+        // 隐私下载模式：开启时如果下载位置不在 Ehviewer 专属 / 不含 "Ehviewer" 则弹窗
+        Preference downloadPrivateMode = findPreference(Settings.KEY_DOWNLOAD_PRIVATE_MODE);
+        if (downloadPrivateMode != null) {
+            downloadPrivateMode.setOnPreferenceChangeListener((preference, newValue) -> {
+                boolean enabled = (Boolean) newValue;
+                if (enabled && !isEhviewerOwnedDownloadLocation()) {
+                    showPrivateModeLocationWarning(preference);
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        // 系统下载服务检测按钮
+        Preference checkSystemDm = findPreference("check_system_download_service");
+        if (checkSystemDm != null) {
+            checkSystemDm.setOnPreferenceClickListener(preference -> {
+                showSystemDmCheckDialog();
+                return true;
+            });
+        }
+
         if (enableMinDownloadSpeed != null) {
             enableMinDownloadSpeed.setOnPreferenceChangeListener(this);
         }
@@ -210,6 +254,12 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
         if (rebuildDownloadRecords != null) {
             rebuildDownloadRecords.setOnPreferenceClickListener(this);
         }
+        if (repairDownloadedThumbnail != null) {
+            repairDownloadedThumbnail.setOnPreferenceClickListener(this);
+        }
+        if (verifyDownloadIntegrity != null) {
+            verifyDownloadIntegrity.setOnPreferenceClickListener(this);
+        }
         if (mergeDuplicateGallery != null) {
             mergeDuplicateGallery.setOnPreferenceClickListener(this);
         }
@@ -224,6 +274,18 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
         }
         if (cleanDownloadLogs != null) {
             cleanDownloadLogs.setOnPreferenceClickListener(this);
+        }
+
+        // Secondary sort depends on primary sort being non-default
+        ListPreference queueOrder = findPreference("download_queue_order");
+        Preference secondaryOrder = findPreference("download_queue_secondary_order");
+        if (queueOrder != null && secondaryOrder != null) {
+            String currentValue = queueOrder.getValue();
+            secondaryOrder.setEnabled(!"0".equals(currentValue));
+            queueOrder.setOnPreferenceChangeListener((pref, newValue) -> {
+                secondaryOrder.setEnabled(!"0".equals(String.valueOf(newValue)));
+                return true;
+            });
         }
     }
 
@@ -400,6 +462,36 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
                     showCheckResultOnMainThread("检查下载目录时发生错误: " + e.getMessage());
                 }
             });
+            return true;
+        } else if (KEY_REPAIR_DOWNLOADED_THUMBNAIL.equals(key)) {
+            new AlertDialog.Builder(requireActivity())
+                    .setTitle(R.string.settings_download_repair_thumbnail)
+                    .setMessage(R.string.repair_thumbnail_confirm)
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        com.hippo.ehviewer.task.RepairDownloadedThumbnailTask task =
+                                new com.hippo.ehviewer.task.RepairDownloadedThumbnailTask(requireContext(), false);
+                        com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+                        Toast.makeText(requireActivity(),
+                                R.string.repair_thumbnail_start,
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return true;
+        } else if (KEY_VERIFY_DOWNLOAD_INTEGRITY.equals(key)) {
+            new AlertDialog.Builder(requireActivity())
+                    .setTitle(R.string.settings_download_verify_integrity)
+                    .setMessage(R.string.verify_integrity_confirm)
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        com.hippo.ehviewer.task.VerifyDownloadIntegrityTask task =
+                                new com.hippo.ehviewer.task.VerifyDownloadIntegrityTask(requireContext());
+                        com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+                        Toast.makeText(requireActivity(),
+                                R.string.verify_integrity_start,
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
             return true;
         } else if ("merge_duplicate_gallery".equals(key)) {
             com.hippo.ehviewer.BackgroundTaskManager taskManager = com.hippo.ehviewer.BackgroundTaskManager.getInstance();
@@ -937,6 +1029,139 @@ public class DownloadFragment extends PreferenceFragmentCompat implements
         new AlertDialog.Builder(requireActivity())
                 .setTitle(R.string.clean_invalid_download_detail_title)
                 .setMessage(R.string.clean_invalid_download_detail_message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    /**
+     * 判断当前下载位置是否是 Ehviewer 相关目录（dataDir / externalFilesDir 下的子目录，
+     * 或路径中任意部分包含 "ehviewer" 字符）。
+     * 用于「隐私下载模式」开关的位置兼容性检查。
+     */
+    private boolean isEhviewerOwnedDownloadLocation() {
+        UniFile location = Settings.getDownloadLocation();
+        if (location == null) return false;
+        android.net.Uri uri = location.getUri();
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        if (scheme == null) return false;
+        // SAF Tree URI（content://）→ 用户显式选择的公共目录
+        if ("content".equalsIgnoreCase(scheme)) return false;
+        // file:// 路径
+        if (!"file".equalsIgnoreCase(scheme)) return false;
+        String path = uri.getPath();
+        if (path == null) return false;
+
+        Context ctx = requireContext();
+        File appDir;
+        File extDir = null;
+        try {
+            appDir = new File(ctx.getApplicationInfo().dataDir);
+            extDir = ctx.getExternalFilesDir(null);
+        } catch (Exception e) {
+            return false;
+        }
+
+        try {
+            String canonical = new File(path).getCanonicalPath();
+            // Ehviewer 专属目录：dataDir 或 externalFilesDir 下的子目录
+            String canonicalApp = appDir.getCanonicalPath();
+            String canonicalExt = extDir != null ? extDir.getCanonicalPath() : null;
+            if (canonical.startsWith(canonicalApp) ||
+                    (canonicalExt != null && canonical.startsWith(canonicalExt))) {
+                return true;
+            }
+            // 路径中任一部分包含 "ehviewer" 视为相关目录
+            if (path.toLowerCase().contains("ehviewer")) {
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 下载位置不兼容提示弹窗。用户取消时回滚 SwitchPreference。
+     */
+    private void showPrivateModeLocationWarning(final Preference preference) {
+        new AlertDialog.Builder(requireActivity())
+                .setTitle(R.string.settings_download_private_mode_location_warning_title)
+                .setMessage(R.string.settings_download_private_mode_location_warning_message)
+                .setPositiveButton(R.string.go_to_download_location, (d, w) -> {
+                    // 跳到 DownloadFragment 顶部（用户在当前页）
+                    // 用户自行修改 download_location 后返回本页重试
+                })
+                .setNegativeButton(android.R.string.cancel, (d, w) -> {
+                    // 用户取消：回滚 SwitchPreference
+                    if (preference instanceof androidx.preference.SwitchPreference) {
+                        ((androidx.preference.SwitchPreference) preference).setChecked(false);
+                    }
+                    // 同时清掉刚刚 write 进去的 Settings 值
+                    if (Settings.KEY_USE_SYSTEM_DOWNLOAD_MANAGER.equals(preference.getKey())) {
+                        Settings.putUseSystemDownloadManager(false);
+                    } else if (Settings.KEY_DOWNLOAD_PRIVATE_MODE.equals(preference.getKey())) {
+                        Settings.putDownloadPrivateMode(false);
+                    }
+                })
+                .show();
+    }
+
+    /**
+     * 弹出系统下载服务检测结果对话框。
+     * 依次检查：ContentProvider / Service 获取 / 空 query 测试。
+     */
+    private void showSystemDmCheckDialog() {
+        Context ctx = requireContext();
+        StringBuilder detailBuilder = new StringBuilder();
+
+        // 1. ContentProvider 检查
+        boolean providerOk = false;
+        try {
+            providerOk = ctx.getPackageManager().resolveContentProvider("downloads", 0) != null;
+        } catch (Exception ignored) {}
+        String providerResult = providerOk
+                ? getString(R.string.settings_download_check_result_passed)
+                : getString(R.string.settings_download_check_result_failed);
+
+        // 2. Service 获取检查
+        boolean serviceOk = false;
+        try {
+            android.app.DownloadManager dm =
+                    (android.app.DownloadManager) ctx.getSystemService(Context.DOWNLOAD_SERVICE);
+            serviceOk = (dm != null);
+        } catch (Exception ignored) {}
+        String serviceResult = serviceOk
+                ? getString(R.string.settings_download_check_result_passed)
+                : getString(R.string.settings_download_check_result_failed);
+
+        // 3. 空 query 测试
+        boolean queryOk = false;
+        if (serviceOk) {
+            try {
+                android.app.DownloadManager dm =
+                        (android.app.DownloadManager) ctx.getSystemService(Context.DOWNLOAD_SERVICE);
+                dm.query(new android.app.DownloadManager.Query().setFilterById(-1L));
+                queryOk = true;
+            } catch (Exception ignored) {}
+        }
+        String queryResult = queryOk
+                ? getString(R.string.settings_download_check_result_passed)
+                : getString(R.string.settings_download_check_result_failed);
+
+        String detail = getString(R.string.settings_download_check_result_detail,
+                providerResult, serviceResult, queryResult);
+
+        boolean overallOk = providerOk && serviceOk && queryOk;
+        String title = getString(R.string.settings_download_check_result_title);
+        String status = overallOk
+                ? getString(R.string.settings_download_check_result_available)
+                : getString(R.string.settings_download_check_result_unavailable);
+        String message = status + "\n\n" + detail;
+
+        new AlertDialog.Builder(requireActivity())
+                .setTitle(title)
+                .setMessage(message)
                 .setPositiveButton(android.R.string.ok, null)
                 .show();
     }

@@ -259,6 +259,7 @@ public class DirGalleryProvider extends GalleryProvider2 implements Runnable {
             // Check index valid
             if (index < 0 || index >= files.length) {
                 mDecodingIndex.lazySet(GalleryPageView.INVALID_INDEX);
+                putPageError(index, GetText.getString(R.string.error_out_of_range));
                 notifyPageFailed(index, GetText.getString(R.string.error_out_of_range));
                 continue;
             }
@@ -273,10 +274,12 @@ public class DirGalleryProvider extends GalleryProvider2 implements Runnable {
                 if (image != null) {
                     notifyPageSucceed(index, image);
                 } else {
+                    putPageError(index, GetText.getString(R.string.error_decoding_failed));
                     notifyPageFailed(index, GetText.getString(R.string.error_decoding_failed));
                 }
             } catch (IOException e) {
                 mDecodingIndex.lazySet(GalleryPageView.INVALID_INDEX);
+                putPageError(index, GetText.getString(R.string.error_reading_failed));
                 notifyPageFailed(index, GetText.getString(R.string.error_reading_failed));
             } finally {
                 IOUtils.closeQuietly(is);

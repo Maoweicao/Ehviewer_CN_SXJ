@@ -24,4 +24,11 @@
         <item>https://raw.githubusercontent.com/Mapaler/EhViewer/tag-translations/tag-translations/tag-translations-zh-rCN</item>
     </string-array>
 
+    <!-- VPN 聯動模式選項 -->
+    <string-array name="vpn_aware_mode_entries">
+        <item>@string/vpn_mode_auto_disable</item>
+        <item>@string/vpn_mode_prompt</item>
+        <item>@string/vpn_mode_ignore</item>
+    </string-array>
+
 </resources>

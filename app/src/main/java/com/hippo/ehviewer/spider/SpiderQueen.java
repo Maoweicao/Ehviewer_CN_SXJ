@@ -23,6 +23,7 @@ import android.os.AsyncTask;
 import android.os.Process;
 import android.text.TextUtils;
 import android.util.Log;
+import android.util.LruCache;
 import android.util.SparseArray;
 import android.webkit.MimeTypeMap;
 
@@ -81,6 +82,7 @@ import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ConcurrentHashMap;
@@ -119,6 +121,19 @@ public final class SpiderQueen implements Runnable {
             "/509s.gif"
     };
     private static final SparseJLArray<SpiderQueen> sQueenMap = new SparseJLArray<>();
+
+    /**
+     * In-memory gid -> startPage cache. Gallery list bindings query the start
+     * page for every visible item; without this cache each lookup performs
+     * disk I/O (directory scan + spider info file read), which previously
+     * flooded the shared executor with hundreds of slow tasks.
+     * All in-process writes go through {@link #putStartPage}, which keeps the
+     * cache coherent; the cache dies with the process.
+     */
+    private static final LruCache<Long, Integer> sStartPageCache = new LruCache<>(512);
+
+    /** Gids with an in-flight async start-page lookup (dedupe). */
+    private static final Set<Long> sStartPageInFlight = ConcurrentHashMap.newKeySet();
     @NonNull
     private final OkHttpClient mHttpClient;
     @NonNull
@@ -149,6 +164,8 @@ public final class SpiderQueen implements Runnable {
     private final Object showKeyLock = new Object();
     // Store page error
     private final ConcurrentHashMap<Integer, String> mPageErrorMap = new ConcurrentHashMap<>();
+    @Nullable
+    private volatile String mGlobalError;
     // Store page download percent
     private final ConcurrentHashMap<Integer, Float> mPagePercentMap = new ConcurrentHashMap<>();
     private final List<OnSpiderListener> mSpiderListeners = new ArrayList<>();
@@ -187,7 +204,7 @@ public final class SpiderQueen implements Runnable {
 
         mWorkerPoolExecutor = new ThreadPoolExecutor(mWorkerMaxCount, mWorkerMaxCount,
                 0, TimeUnit.SECONDS, new LinkedBlockingDeque<>(),
-                new PriorityThreadFactory(SpiderWorker.class.getSimpleName(), Process.THREAD_PRIORITY_BACKGROUND));
+                new PriorityThreadFactory(SpiderWorker.class.getSimpleName(), Process.THREAD_PRIORITY_DEFAULT));
         mDownloadDelay = Settings.getDownloadDelay();
         downloadTimeout = Settings.getEnableDownloadTimeout() ? Settings.getDownloadTimeout() : 0;
     }
@@ -212,8 +229,39 @@ public final class SpiderQueen implements Runnable {
         return queen;
     }
 
-    @UiThread
+    /**
+     * Returns the cached start page for {@code gid}, or -1 if unknown.
+     * Never performs disk I/O; safe to call on any thread.
+     */
+    public static int getCachedStartPage(long gid) {
+        Integer page = sStartPageCache.get(gid);
+        return page != null ? page : -1;
+    }
+
+    public static void cacheStartPage(long gid, int startPage) {
+        sStartPageCache.put(gid, startPage);
+    }
+
+    /**
+     * Marks {@code gid} as having an in-flight async start-page lookup.
+     *
+     * @return true if successfully marked (caller should submit the lookup),
+     * false if a lookup for this gid is already in flight
+     */
+    public static boolean markStartPageInFlight(long gid) {
+        return sStartPageInFlight.add(gid);
+    }
+
+    public static void unmarkStartPageInFlight(long gid) {
+        sStartPageInFlight.remove(gid);
+    }
+
     public static int findStartPage(@NonNull Context context, @NonNull GalleryInfo galleryInfo) {
+        int cached = getCachedStartPage(galleryInfo.gid);
+        if (cached >= 0) {
+            return cached;
+        }
+
         SpiderInfo fromDownload = SpiderInfo.getSpiderInfo(galleryInfo);
         SpiderInfo fromCache = readSpiderInfoFromCache(context, galleryInfo.gid);
 
@@ -224,6 +272,7 @@ public final class SpiderQueen implements Runnable {
         if (isValidSpiderInfo(fromCache, galleryInfo)) {
             startPage = Math.max(startPage, fromCache.startPage);
         }
+        cacheStartPage(galleryInfo.gid, startPage);
         return startPage;
     }
 
@@ -418,12 +467,14 @@ public final class SpiderQueen implements Runnable {
                 mReadReference++;
                 break;
             case MODE_DOWNLOAD:
+                if (mDownloadReference > 0) {
+                    // Already in download mode, skip increment to avoid crash.
+                    // This can happen when ensureDownload() is called multiple times
+                    // for the same gallery (e.g. service restart).
+                    return;
+                }
                 mDownloadReference++;
                 break;
-        }
-
-        if (mDownloadReference > 1) {
-            throw new IllegalStateException("mDownloadReference can't more than 0");
         }
 
         updateMode();
@@ -432,15 +483,15 @@ public final class SpiderQueen implements Runnable {
     private void clearMode(@Mode int mode) {
         switch (mode) {
             case MODE_READ:
-                mReadReference--;
+                if (mReadReference > 0) {
+                    mReadReference--;
+                }
                 break;
             case MODE_DOWNLOAD:
-                mDownloadReference--;
+                if (mDownloadReference > 0) {
+                    mDownloadReference--;
+                }
                 break;
-        }
-
-        if (mReadReference < 0 || mDownloadReference < 0) {
-            throw new IllegalStateException("Mode reference < 0");
         }
 
         updateMode();
@@ -448,7 +499,7 @@ public final class SpiderQueen implements Runnable {
 
     private void start() {
         Thread queenThread = new PriorityThread(this, TAG + '-' + sIdGenerator.incrementAndGet(),
-                Process.THREAD_PRIORITY_BACKGROUND);
+                Process.THREAD_PRIORITY_DEFAULT);
         mQueenThread = queenThread;
         queenThread.start();
     }
@@ -459,24 +510,44 @@ public final class SpiderQueen implements Runnable {
             queenThread.interrupt();
             mQueenThread = null;
         }
+        // Decoders and workers are owned by the SpiderQueen, not the queen
+        // thread. They must keep running after the queen thread exits so they
+        // can finish decoding already-downloaded pages; tear them down here
+        // when the spider is actually released.
+        for (Thread decoderThread : mDecodeThreadArray) {
+            if (decoderThread != null) {
+                decoderThread.interrupt();
+            }
+        }
+        synchronized (mWorkerLock) {
+            if (mWorkerPoolExecutor != null) {
+                mWorkerPoolExecutor.shutdownNow();
+                mWorkerPoolExecutor = null;
+            }
+        }
     }
 
     public int size() {
-        if (mQueenThread == null) {
-            return GalleryProvider.STATE_ERROR;
-        } else if (mPageStateArray == null) {
-            return GalleryProvider.STATE_WAIT;
-        } else {
+        if (mPageStateArray != null) {
             return mPageStateArray.length;
         }
+        if (mQueenThread == null) {
+            return GalleryProvider.STATE_ERROR;
+        }
+        return GalleryProvider.STATE_WAIT;
     }
 
     public String getError() {
-        if (mQueenThread == null) {
-            return "Error";
-        } else {
+        if (mPageStateArray != null) {
             return null;
         }
+        if (mQueenThread == null) {
+            if (mGlobalError != null) {
+                return mGlobalError;
+            }
+            return GetText.getString(R.string.error_spider_not_started);
+        }
+        return null;
     }
 
     public Object forceRequest(int index) {
@@ -515,7 +586,9 @@ public final class SpiderQueen implements Runnable {
     }
 
     public void cancelRequest(int index) {
-        if (mQueenThread == null) {
+        // Decoders must keep running even after the queen thread has exited,
+        // so we only bail out when the page state array was never set up.
+        if (mPageStateArray == null) {
             return;
         }
 
@@ -533,7 +606,10 @@ public final class SpiderQueen implements Runnable {
      * null for wait
      */
     private Object request(int index, boolean ignoreError, boolean force, boolean addNeighbor) {
-        if (mQueenThread == null) {
+        // mPageStateArray is the source of truth once it's been set up; checking it
+        // instead of mQueenThread lets us still dispatch finished pages to the decoder
+        // after the queen thread has exited (e.g. allPagesExistFast fast path).
+        if (mPageStateArray == null) {
             return null;
         }
 
@@ -620,9 +696,10 @@ public final class SpiderQueen implements Runnable {
             Runtime rt = Runtime.getRuntime();
             long used = rt.totalMemory() - rt.freeMemory();
             long max = rt.maxMemory();
-            if (used > max * 0.85) {
+            if (used > max * 0.75) {
                 targetCount = Math.max(1, mWorkerCount);
                 Log.w(TAG, "Low memory, limiting workers to " + targetCount);
+                EhApplication.clearMemoryCacheSafely();
             }
 
             try {
@@ -631,6 +708,7 @@ public final class SpiderQueen implements Runnable {
                 }
             } catch (OutOfMemoryError outOfMemoryError) {
                 Analytics.recordException(outOfMemoryError);
+                EhApplication.clearMemoryCacheSafely();
                 notifyFinish();
             }
         }
@@ -755,6 +833,7 @@ public final class SpiderQueen implements Runnable {
         }
         if (spiderInfo != null) {
             spiderInfo.startPage = page;
+            cacheStartPage(mGalleryInfo.gid, page);
             final SpiderInfo infoToWrite = spiderInfo;
             new AsyncTask<Void, Void, Void>() {
                 @Override
@@ -766,7 +845,11 @@ public final class SpiderQueen implements Runnable {
         }
     }
 
-    private synchronized SpiderInfo readSpiderInfoFromLocal() {
+    // Not synchronized on purpose: this is an idempotent read guarded by the
+    // mSpiderInfo AtomicReference. Holding the instance monitor here previously
+    // blocked the main thread (GalleryActivity#getStartPage) behind slow
+    // directory scans performed by the queen worker thread.
+    private SpiderInfo readSpiderInfoFromLocal() {
         SpiderInfo spiderInfo = mSpiderInfo.get();
         if (spiderInfo != null) {
             return spiderInfo;
@@ -854,6 +937,7 @@ public final class SpiderQueen implements Runnable {
             return spiderInfo;
         } catch (Throwable e) {
             ExceptionUtils.throwIfFatal(e);
+            mGlobalError = "网络请求失败: " + e.getMessage();
             Analytics.recordException(e);
             return null;
         }
@@ -945,6 +1029,7 @@ public final class SpiderQueen implements Runnable {
 
         // Error! Can't get spiderInfo
         if (spiderInfo == null) {
+            mGlobalError = "无法加载图库信息:\n本地缓存失效且网络请求失败\nGID=" + mGalleryInfo.gid + "\n标题=" + mGalleryInfo.title;
             return;
         }
         mSpiderInfo.lazySet(spiderInfo);
@@ -970,15 +1055,35 @@ public final class SpiderQueen implements Runnable {
         // Notify get pages
         notifyGetPages(spiderInfo.pages);
 
-        // Ensure worker
-        tryToEnsureWorkers();
+        // Fast path: if all pages already exist on disk, skip worker creation
+        // but we still need decoders to actually decode the FINISHED pages
+        // and notify the UI.
+        boolean allOnDisk = mSpiderDen.allPagesExistFast(spiderInfo.pages);
+        if (allOnDisk) {
+            Log.i(TAG, "[ImgLoad] ALL_ON_DISK pages=" + spiderInfo.pages);
+            synchronized (mPageStateLock) {
+                for (int i = 0; i < spiderInfo.pages; i++) {
+                    mPageStateArray[i] = STATE_FINISHED;
+                }
+            }
+            mFinishedPages.lazySet(spiderInfo.pages);
+            mDownloadedPages.lazySet(spiderInfo.pages);
+        } else {
+            // Ensure worker
+            tryToEnsureWorkers();
+        }
 
-        // Start decoder
+        // Start decoder (always needed, even when all pages are on disk)
         for (int i = 0; i < DECODE_THREAD_NUM; i++) {
             Thread decoderThread = new PriorityThread(new SpiderDecoder(i),
                     "SpiderDecoder-" + i, Process.THREAD_PRIORITY_DEFAULT);
             mDecodeThreadArray[i] = decoderThread;
             decoderThread.start();
+        }
+
+        if (allOnDisk) {
+            // No pToken loop needed when every page is already on disk
+            return;
         }
 
         // handle pToken request
@@ -1042,18 +1147,9 @@ public final class SpiderQueen implements Runnable {
         // Set mQueenThread null
         mQueenThread = null;
 
-        // Interrupt decoder
-        for (Thread decoderThread : mDecodeThreadArray) {
-            if (decoderThread != null) {
-                decoderThread.interrupt();
-            }
-        }
-
-        // Interrupt all workers
-        synchronized (mWorkerLock) {
-            mWorkerPoolExecutor.shutdownNow();
-            mWorkerPoolExecutor = null;
-        }
+        // Decoders and workers keep running after the queen thread exits so
+        // they can finish serving already-loaded pages. They are torn down in
+        // stop() when the spider is released.
         notifyFinish();
 
         if (DEBUG_LOG) {
@@ -1253,7 +1349,7 @@ public final class SpiderQueen implements Runnable {
             boolean interrupt = false;
             boolean leakSkipHathKey = false;
 
-            Log.d(TAG, "downloadImage: START gid=" + gid + ", index=" + index + ", pToken=" + pToken + ", force=" + force);
+            Log.d(TAG, "[ImgLoad] SPIDER_START gid=" + gid + " index=" + index + " pToken=" + pToken + " force=" + force);
 
             for (int i = 0; i < 5; i++) {
                 String imageUrl = null;
@@ -1269,14 +1365,14 @@ public final class SpiderQueen implements Runnable {
 
                         // Try to get show key
                         pageUrl = getPageUrl(gid, index, pToken, pageUrl, skipHathKey);
-                        Log.d(TAG, "downloadImage: fetching pageUrl=" + pageUrl + ", attempt=" + i);
+                        Log.d(TAG, "[ImgLoad] FETCH_URL pageUrl=" + pageUrl + " attempt=" + i);
                         try {
                             GalleryPageParser.Result result = fetchPageResultFromHtml(index, pageUrl);
                             imageUrl = result.imageUrl;
                             skipHathKey = result.skipHathKey;
                             originImageUrl = result.originImageUrl;
                             localShowKey = result.showKey;
-                            Log.d(TAG, "downloadImage: page fetch SUCCESS, imageUrl=" + (imageUrl != null ? imageUrl.substring(0, Math.min(60, imageUrl.length())) : "null") + ", showKey=" + localShowKey);
+                            Log.d(TAG, "[ImgLoad] PAGE_OK imageUrl=" + (imageUrl != null ? imageUrl.substring(0, Math.min(60, imageUrl.length())) : "null") + " showKey=" + localShowKey);
 
                             if (!TextUtils.isEmpty(skipHathKey)) {
                                 if (skipHathKeys.contains(skipHathKey)) {
@@ -1292,12 +1388,12 @@ public final class SpiderQueen implements Runnable {
                             showKey.lazySet(result.showKey);
                         } catch (Image509Exception e) {
                             error = GetText.getString(R.string.error_509);
-                            Log.e(TAG, "downloadImage: 509 error at index=" + index);
+                            Log.e(TAG, "[ImgLoad] 509_ERROR index=" + index);
                             break;
                         } catch (Throwable e) {
                             ExceptionUtils.throwIfFatal(e);
                             error = ExceptionUtils.getReadableString(e);
-                            Log.e(TAG, "downloadImage: page fetch FAILED at index=" + index + ", pageUrl=" + pageUrl + ", error=" + error, e);
+                            Log.e(TAG, "[ImgLoad] PAGE_FAILED index=" + index + " pageUrl=" + pageUrl + " error=" + error, e);
                             break;
                         }
 
@@ -1394,7 +1490,7 @@ public final class SpiderQueen implements Runnable {
                 try {
 
                     if (DEBUG_LOG) {
-                        Log.d(TAG, "Start download image " + index);
+                        Log.d(TAG, "[ImgLoad] DOWNLOAD_START index=" + index);
                     }
 
                     // disable Call Timeout for image-downloading requests
@@ -1508,13 +1604,21 @@ public final class SpiderQueen implements Runnable {
                         // check download size
                         if (contentLength >= 0) {
                             if (receivedSize < contentLength) {
-                                Log.e(TAG, "Can't download all of image data");
+                                Log.e(TAG, "[ImgLoad] DL_INCOMPLETE index=" + index);
                                 error = "Incomplete";
                                 forceHtml = true;
                                 continue;
                             } else if (receivedSize > contentLength) {
-                                Log.w(TAG, "Received data is more than contentLength");
+                                Log.w(TAG, "[ImgLoad] DL_OVERSIZED index=" + index);
                             }
+                        }
+
+                        // Check for empty file (0 bytes)
+                        if (receivedSize == 0) {
+                            Log.e(TAG, "[ImgLoad] DL_EMPTY index=" + index);
+                            error = "Empty file";
+                            forceHtml = true;
+                            continue;
                         }
                     } finally {
                         if (osPipe != null) {
@@ -1567,7 +1671,7 @@ public final class SpiderQueen implements Runnable {
                     }
 
                     if (DEBUG_LOG) {
-                        Log.d(TAG, "Download image succeed " + index);
+                        Log.d(TAG, "[ImgLoad] DOWNLOAD_OK index=" + index);
                     }
 
                     // Download finished
@@ -1595,7 +1699,7 @@ public final class SpiderQueen implements Runnable {
             // Remove download failed image
             mSpiderDen.remove(index);
 
-            Log.e(TAG, "downloadImage: FAILED gid=" + gid + ", index=" + index + ", pToken=" + pToken + ", error=" + error);
+            Log.e(TAG, "[ImgLoad] SPIDER_FAILED gid=" + gid + " index=" + index + " pToken=" + pToken + " error=" + error);
             updatePageState(index, STATE_FAILED, error);
             return !interrupt;
         }
@@ -1871,11 +1975,12 @@ public final class SpiderQueen implements Runnable {
                         image = Image.decode((FileInputStream) is, false);
                     } catch (OutOfMemoryError e){
                         Analytics.recordException(e);
+                        EhApplication.clearMemoryCacheSafely();
                     } finally {
                         try {
                             is.close();
                         } catch (IOException e) {
-                            Log.e(TAG, "解码失败", e);
+                            Log.e(TAG, "[ImgLoad] DECODE_FAIL " + e.getMessage(), e);
                             Analytics.recordException(e);
                         }
                     }

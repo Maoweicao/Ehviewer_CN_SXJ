@@ -24,6 +24,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -65,6 +66,14 @@ public class LabelApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleLabelList(NanoHTTPD.IHTTPSession session) {
         try {
+            // Check cache
+            String cacheKey = "labels:list";
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for labels list");
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             List<DownloadLabel> labels = EhDB.getAllDownloadLabelList();
             
             StringBuilder sb = new StringBuilder();
@@ -96,7 +105,12 @@ public class LabelApiHandler extends BaseApiHandler {
             
             sb.append("]}");
             
-            return ResponseBuilder.jsonSuccess(sb.toString());
+            String responseJson = sb.toString();
+            
+            // Store in cache
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+            
+            return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
             Log.e(TAG, "Error listing labels", e);
@@ -112,6 +126,14 @@ public class LabelApiHandler extends BaseApiHandler {
             int page = RequestParser.getIntQueryParameter(session, "page", 1);
             int limit = RequestParser.getIntQueryParameter(session, "limit", 20);
             
+            // Check cache
+            String cacheKey = ResponseCache.buildKey("label_galleries", label, String.valueOf(page), String.valueOf(limit));
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for label galleries: " + label);
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             List<DownloadInfo> allList;
             
             if ("默认".equals(label) || "default".equals(label)) {
@@ -152,7 +174,12 @@ public class LabelApiHandler extends BaseApiHandler {
             
             sb.append("]}");
             
-            return ResponseBuilder.jsonSuccess(sb.toString());
+            String responseJson = sb.toString();
+            
+            // Store in cache
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+            
+            return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
             Log.e(TAG, "Error listing label galleries", e);
@@ -197,6 +224,13 @@ public class LabelApiHandler extends BaseApiHandler {
         sb.append(",\"pages\":").append(info.pages);
         sb.append(",\"state\":").append(info.state);
         sb.append(",\"time\":").append(info.time);
+
+        // 完整性信息
+        boolean isComplete = info.state == DownloadInfo.STATE_FINISH;
+        int downloadedPages = info.finished > 0 ? info.finished : info.downloaded;
+        sb.append(",\"isComplete\":").append(isComplete);
+        sb.append(",\"downloadedPages\":").append(downloadedPages);
+
         sb.append("}");
         
         return sb.toString();

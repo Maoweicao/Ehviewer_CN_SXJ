@@ -217,6 +217,7 @@ public class ArchiveGalleryProvider extends GalleryProvider2 {
         // Check index valid
         if (index < 0 || index >= entries.size()) {
           extractingIndex.lazySet(GalleryPageView.INVALID_INDEX);
+          putPageError(index, GetText.getString(R.string.error_out_of_range));
           notifyPageFailed(index, GetText.getString(R.string.error_out_of_range));
           continue;
         }
@@ -266,6 +267,7 @@ public class ArchiveGalleryProvider extends GalleryProvider2 {
           try{
             stream = entry.getValue();
           } catch (ClassCastException e) {
+            putPageError(index, GetText.getString(R.string.error_decoding_failed));
             notifyPageFailed(index, GetText.getString(R.string.error_decoding_failed));
             decodingIndex.lazySet(index);
             return;
@@ -286,6 +288,7 @@ public class ArchiveGalleryProvider extends GalleryProvider2 {
           if (image != null) {
             notifyPageSucceed(index, image);
           } else {
+            putPageError(index, GetText.getString(R.string.error_decoding_failed));
             notifyPageFailed(index, GetText.getString(R.string.error_decoding_failed));
           }
         } finally {

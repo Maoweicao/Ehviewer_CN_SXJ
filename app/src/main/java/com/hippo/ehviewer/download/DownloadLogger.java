@@ -1,14 +1,12 @@
 package com.hippo.ehviewer.download;
 
 import android.content.Context;
-import android.os.Environment;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.Settings;
-import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.unifile.UniFile;
@@ -17,6 +15,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.BlockingQueue;
@@ -30,7 +30,6 @@ import java.util.concurrent.Executors;
  */
 public class DownloadLogger {
     private static final String TAG = "DownloadLogger";
-    private static final String LOG_FILE_PREFIX = "ehviewer_download_";
     private static final String LOG_FILE_EXTENSION = ".log";
     private static final int MAX_LOG_QUEUE_SIZE = 1000;
     private static final long LOG_FLUSH_INTERVAL = 5000; // 5秒
@@ -40,18 +39,19 @@ public class DownloadLogger {
     private final ExecutorService mLogExecutor;
     private final BlockingQueue<LogEntry> mLogQueue;
     private final SimpleDateFormat mDateFormat;
-    private final SimpleDateFormat mDayFormat;
-    private String mCurrentLogDate;
     private final Object mLock = new Object();
-    
-    private File mCurrentLogFile;
-    private FileWriter mLogFileWriter;
     private long mLastFlushTime;
     private boolean mIsLoggingEnabled;
     
     public static synchronized void initialize(@NonNull Context context) {
         if (sInstance == null) {
-            sInstance = new DownloadLogger(context.getApplicationContext());
+            try {
+                sInstance = new DownloadLogger(context.getApplicationContext());
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to initialize DownloadLogger", e);
+                // Create a fallback instance that does nothing
+                sInstance = new DownloadLogger(context.getApplicationContext(), true);
+            }
         }
     }
     
@@ -63,20 +63,27 @@ public class DownloadLogger {
     }
     
     private DownloadLogger(@NonNull Context context) {
+        this(context, false);
+    }
+    
+    private DownloadLogger(@NonNull Context context, boolean fallback) {
         mContext = context;
-        mLogExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "DownloadLogger");
-            thread.setPriority(Thread.MIN_PRIORITY);
-            return thread;
-        });
-        mLogQueue = new LinkedBlockingQueue<>(MAX_LOG_QUEUE_SIZE);
-        mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
-        mDayFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
-        mCurrentLogDate = null;
-        mIsLoggingEnabled = Settings.getDownloadLoggingEnabled();
-        
-        // 启动日志处理线程
-        startLogProcessor();
+        mIsLoggingEnabled = fallback ? false : Settings.getDownloadLoggingEnabled();
+        if (fallback) {
+            mLogExecutor = null;
+            mLogQueue = null;
+            mDateFormat = null;
+        } else {
+            mLogExecutor = Executors.newSingleThreadExecutor(r -> {
+                Thread thread = new Thread(r, "DownloadLogger");
+                thread.setPriority(Thread.MIN_PRIORITY);
+                return thread;
+            });
+            mLogQueue = new LinkedBlockingQueue<>(MAX_LOG_QUEUE_SIZE);
+            mDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault());
+            // 启动日志处理线程
+            startLogProcessor();
+        }
     }
     
     /**
@@ -284,15 +291,7 @@ public class DownloadLogger {
      * 立即刷新日志到文件
      */
     public void flushLogs() {
-        synchronized (mLock) {
-            if (mLogFileWriter != null) {
-                try {
-                    mLogFileWriter.flush();
-                } catch (IOException e) {
-                    Log.e(TAG, "刷新日志文件失败", e);
-                }
-            }
-        }
+        // Every entry is opened and flushed immediately so logs survive process kills.
     }
     
     /**
@@ -326,85 +325,51 @@ public class DownloadLogger {
      */
     private void writeLogToFile(@NonNull LogEntry entry) {
         synchronized (mLock) {
-            try {
-                // 检查是否需要创建新的日志文件
-                if (mCurrentLogFile == null || shouldCreateNewLogFile(entry.timestamp)) {
-                    createNewLogFile();
+            File logDir = getLogDirectory();
+            if (logDir == null) {
+                Log.w(TAG, "Download log path is unavailable; entry remains in Logcat only");
+                return;
+            }
+            if (!logDir.exists() && !logDir.mkdirs()) {
+                Log.e(TAG, "Unable to create download log directory: " + logDir);
+                return;
+            }
+            File logFile = new File(logDir, buildLogFileName(entry));
+            try (FileWriter writer = new FileWriter(logFile, true)) {
+                if (logFile.length() == 0) {
+                    writer.write("=== EhViewer 下载日志 - " + mDateFormat.format(new Date(entry.timestamp)) + " ===\n");
                 }
-                
-                if (mLogFileWriter != null) {
-                    String logLine = formatLogEntry(entry);
-                    mLogFileWriter.write(logLine);
-                    mLogFileWriter.write("\n");
-                }
+                writer.write(formatLogEntry(entry));
+                writer.write("\n");
+                writer.flush();
             } catch (IOException e) {
                 Log.e(TAG, "写入日志文件失败", e);
             }
         }
     }
-    
-    /**
-     * 判断是否需要创建新的日志文件
-     */
-    private boolean shouldCreateNewLogFile(long timestamp) {
-        try {
-            String currentDay = mDayFormat.format(new Date(timestamp));
-            if (mCurrentLogDate == null) {
-                // 旧文件日期还不知道，直接判断文件修改时间，避免每次都 new Date(mCurrentLogFile.lastModified())
-                mCurrentLogDate = mCurrentLogFile != null ? mDayFormat.format(new Date(mCurrentLogFile.lastModified())) : null;
-            }
-            return mCurrentLogDate == null || !currentDay.equals(mCurrentLogDate);
-        } catch (Throwable t) {
-            Log.w(TAG, "shouldCreateNewLogFile 日期判断失败，强制切换文件", t);
-            return true;
-        }
-    }
-    
-    /**
-     * 创建新的日志文件
-     */
-    private void createNewLogFile() throws IOException {
-        // 关闭当前的日志文件
-        if (mLogFileWriter != null) {
-            mLogFileWriter.close();
-            mLogFileWriter = null;
-        }
-        
-        // 获取日志目录
-        File logDir = getLogDirectory();
-        if (!logDir.exists() && !logDir.mkdirs()) {
-            throw new IOException("无法创建日志目录: " + logDir.getAbsolutePath());
-        }
-        
-        // 创建新的日志文件
-        String fileName = LOG_FILE_PREFIX + mDayFormat.format(new Date()) + LOG_FILE_EXTENSION;
-        mCurrentLogFile = new File(logDir, fileName);
-        mCurrentLogDate = mDayFormat.format(new Date());
-        mLogFileWriter = new FileWriter(mCurrentLogFile, true); // 追加模式
-        
-        // 写入文件头
-        if (mCurrentLogFile.length() == 0) {
-            String header = String.format("=== EhViewer 下载日志 - %s ===\n", 
-                mDateFormat.format(new Date()));
-            mLogFileWriter.write(header);
-        }
+
+    private String buildLogFileName(@NonNull LogEntry entry) {
+        String gid = entry.gid == null ? "session" : entry.gid.replaceAll("[^0-9]", "");
+        if (gid.isEmpty()) gid = "session";
+        String minute = new SimpleDateFormat("yyyyMMddHHmm", Locale.getDefault()).format(new Date(entry.timestamp));
+        return gid + "_" + minute + LOG_FILE_EXTENSION;
     }
     
     /**
      * 获取日志目录
      */
+    @Nullable
     public File getLogDirectory() {
-        // 优先使用用户设置的下载位置
         UniFile downloadLocation = Settings.getDownloadLocation();
         if (downloadLocation != null) {
-            File logDir = new File(downloadLocation.getUri().getPath(), "logs");
-            if (logDir.exists() || logDir.mkdirs()) {
-                return logDir;
+            String path = downloadLocation.getUri().getPath();
+            if (path != null) {
+                File downloadDir = new File(path);
+                File parent = downloadDir.getParentFile();
+                if (parent != null) return new File(new File(parent, "logs"), "download");
             }
         }
-        
-        // 备用：使用应用私有目录
-        return new File(mContext.getFilesDir(), "logs");
+        return null;
     }
     
     /**
@@ -412,8 +377,11 @@ public class DownloadLogger {
      */
     public File[] getLogFiles() {
         File logDir = getLogDirectory();
-        if (logDir.exists() && logDir.isDirectory()) {
-            return logDir.listFiles((dir, name) -> name.startsWith(LOG_FILE_PREFIX) && name.endsWith(LOG_FILE_EXTENSION));
+        if (logDir != null && logDir.exists() && logDir.isDirectory()) {
+            File[] files = logDir.listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
+            if (files == null) return new File[0];
+            Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+            return files;
         }
         return new File[0];
     }
@@ -423,8 +391,8 @@ public class DownloadLogger {
      */
     public void cleanOldLogs() {
         File logDir = getLogDirectory();
-        if (logDir.exists() && logDir.isDirectory()) {
-            File[] logFiles = logDir.listFiles((dir, name) -> name.startsWith(LOG_FILE_PREFIX) && name.endsWith(LOG_FILE_EXTENSION));
+        if (logDir != null && logDir.exists() && logDir.isDirectory()) {
+            File[] logFiles = logDir.listFiles((dir, name) -> name.endsWith(LOG_FILE_EXTENSION));
             if (logFiles != null) {
                 long sevenDaysAgo = System.currentTimeMillis() - (7 * 24 * 60 * 60 * 1000L);
                 for (File logFile : logFiles) {

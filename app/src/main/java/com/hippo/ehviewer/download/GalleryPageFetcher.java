@@ -191,9 +191,16 @@ public class GalleryPageFetcher {
                     int pages = fetchPages(context, info);
                     if (pages > 0) {
                         info.total = pages;
+                        info.pages = pages;
                         EhDB.putDownloadInfo(info);
                         successCount.incrementAndGet();
                         Log.d(TAG, "Updated total=" + pages + " for GID=" + info.gid);
+                    } else if (pages == -2) {
+                        info.state = DownloadInfo.STATE_FINISH;
+                        info.total = 0;
+                        info.pages = 0;
+                        EhDB.putDownloadInfo(info);
+                        Log.i(TAG, "Gallery GID=" + info.gid + " has been removed, marked as finished");
                     }
                 } finally {
                     latch.countDown();

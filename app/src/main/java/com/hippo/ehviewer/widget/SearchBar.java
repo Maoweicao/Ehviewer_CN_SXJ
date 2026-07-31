@@ -25,6 +25,7 @@ import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.text.Editable;
@@ -43,9 +44,15 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.AutoCompleteTextView;
+import android.widget.ArrayAdapter;
+import android.widget.ScrollView;
 
 import androidx.annotation.NonNull;
 import androidx.cardview.widget.CardView;
+import androidx.appcompat.app.AlertDialog;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
@@ -62,6 +69,9 @@ import com.google.android.material.chip.Chip;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 public class SearchBar extends CardView implements View.OnClickListener,
         TextView.OnEditorActionListener, TextWatcher,
@@ -113,6 +123,10 @@ public class SearchBar extends CardView implements View.OnClickListener,
     
     // 标志位：建议列表是否被手动控制
     private boolean mSuggestionsListManuallyControlled = false;
+
+    private static final int[] KEYWORD_GROUP_COLORS = {
+            0xff3f51b5, 0xff008577, 0xff7b1fa2, 0xffef6c00, 0xff2e7d32
+    };
 
     // Tag chip container and data
     private AutoWrapLayout mTagContainer;
@@ -191,6 +205,16 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
     private void addListHeader() {
         mListHeader.setVisibility(VISIBLE);
+    }
+
+    private void updateSuggestionsToggleVisual() {
+        if (mMenuButton == null || (mState != STATE_SEARCH && mState != STATE_SEARCH_LIST)) {
+            return;
+        }
+        boolean visible = mListContainer.getVisibility() == View.VISIBLE;
+        mMenuButton.setRotation(visible ? 180f : 0f);
+        mMenuButton.setContentDescription(getResources().getString(
+                visible ? R.string.search_collapse_suggestions : R.string.search_expand_suggestions));
     }
 
     private void removeListHeader() {
@@ -356,13 +380,6 @@ public class SearchBar extends CardView implements View.OnClickListener,
         mActionButton.setVisibility(visibility);
     }
 
-    public void setEditTextMargin(int left, int right) {
-        MarginLayoutParams lp = (MarginLayoutParams) mEditText.getLayoutParams();
-        lp.leftMargin = left;
-        lp.rightMargin = right;
-        mEditText.setLayoutParams(lp);
-    }
-
     public void setIsComeFromDownload(boolean isComeFromDownload){
         this.isComeFromDownload = isComeFromDownload;
     }
@@ -382,6 +399,307 @@ public class SearchBar extends CardView implements View.OnClickListener,
         mHelper.onApplySearch(query);
         // Clear chips after search
         clearTagChips();
+    }
+
+    private static class KeywordItem {
+        String text;
+        int group;
+        boolean excluded;
+        boolean groupExcluded;
+
+        KeywordItem(String text, int group, boolean excluded) {
+            this.text = text;
+            this.group = group;
+            this.excluded = excluded;
+        }
+    }
+
+    private static class KeywordSuggestionAdapter extends ArrayAdapter<String> {
+        KeywordSuggestionAdapter(Context context) {
+            super(context, android.R.layout.simple_dropdown_item_1line);
+        }
+    }
+
+    private void showKeywordEditor() {
+        final List<KeywordItem> items = parseKeywords(buildCombinedQuery());
+        final LinearLayout root = new LinearLayout(getContext());
+        root.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (getResources().getDisplayMetrics().density * 16);
+        root.setPadding(padding, padding / 2, padding, 0);
+
+        LinearLayout addRow = new LinearLayout(getContext());
+        addRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        final AutoCompleteTextView input = createKeywordInput();
+        input.setSingleLine(true);
+        input.setHint(R.string.search_keyword_input_hint);
+        addRow.addView(input, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button addButton = new Button(getContext());
+        addButton.setText(R.string.search_keyword_add);
+        addRow.addView(addButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(addRow);
+
+        TextView relationHint = new TextView(getContext());
+        relationHint.setText(R.string.search_keyword_relation_hint);
+        relationHint.setPadding(0, padding / 2, 0, padding / 2);
+        root.addView(relationHint);
+
+        final LinearLayout list = new LinearLayout(getContext());
+        list.setOrientation(LinearLayout.VERTICAL);
+        ScrollView scroll = new ScrollView(getContext());
+        scroll.addView(list);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1);
+        int editorHeight = (int) (getResources().getDisplayMetrics().density * 480);
+        scrollParams.height = editorHeight - padding * 4;
+        scrollParams.weight = 0;
+        root.addView(scroll, scrollParams);
+
+        final Runnable[] refresh = new Runnable[1];
+        refresh[0] = () -> {
+            list.removeAllViews();
+            for (int i = 0; i < items.size(); i++) {
+                if (i == 0 || items.get(i).group != items.get(i - 1).group) {
+                    addGroupSeparator(list, items, i, refresh[0]);
+                }
+                addKeywordRow(list, items, i, refresh[0]);
+            }
+            if (items.isEmpty()) {
+                TextView empty = new TextView(getContext());
+                empty.setText(R.string.search_keyword_empty);
+                empty.setPadding(0, padding, 0, padding);
+                list.addView(empty);
+            }
+        };
+        addButton.setOnClickListener(v -> {
+            String text = normalizeKeyword(input.getText().toString());
+            if (isValidKeyword(text)) {
+                items.add(new KeywordItem(text, items.isEmpty() ? 0 : items.get(items.size() - 1).group, false));
+                input.setText("");
+                refresh[0].run();
+            }
+        });
+        refresh[0].run();
+
+        AlertDialog dialog = new AlertDialog.Builder(getContext())
+                .setTitle(R.string.search_keyword_editor)
+                .setView(root)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, null)
+                .create();
+        dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+            String query = buildKeywordQuery(items);
+            if (query.isEmpty()) {
+                return;
+            }
+            clearTagChips();
+            setText(query);
+            dialog.dismiss();
+            applySearch(true);
+        }));
+        dialog.show();
+    }
+
+    private void addKeywordRow(LinearLayout list, List<KeywordItem> items, int index, Runnable refresh) {
+        KeywordItem item = items.get(index);
+        LinearLayout row = new LinearLayout(getContext());
+        row.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        row.setPadding(8, 4, 0, 4);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0x18000000 | (KEYWORD_GROUP_COLORS[item.group % KEYWORD_GROUP_COLORS.length] & 0x00ffffff));
+        background.setStroke(4, KEYWORD_GROUP_COLORS[item.group % KEYWORD_GROUP_COLORS.length]);
+        row.setBackground(background);
+
+        TextView text = new TextView(getContext());
+        text.setText((item.excluded ? getResources().getString(R.string.search_keyword_not)
+                : getResources().getString(R.string.search_keyword_and)) + "  " + item.text);
+        text.setTextColor(KEYWORD_GROUP_COLORS[item.group % KEYWORD_GROUP_COLORS.length]);
+        text.setSingleLine(true);
+        text.setOnLongClickListener(v -> {
+            showKeywordItemEditor(item, refresh);
+            return true;
+        });
+        row.addView(text, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+        Button relation = smallButton(item.excluded ? getResources().getString(R.string.search_keyword_not)
+                : getResources().getString(R.string.search_keyword_and));
+        relation.setContentDescription(getResources().getString(R.string.search_keyword_toggle_relation));
+        relation.setOnClickListener(v -> {
+            item.excluded = !item.excluded;
+            refresh.run();
+        });
+        row.addView(relation);
+
+        Button up = smallButton("↑");
+        up.setEnabled(index > 0);
+        up.setOnClickListener(v -> {
+            Collections.swap(items, index, index - 1);
+            refresh.run();
+        });
+        row.addView(up);
+        Button down = smallButton("↓");
+        down.setEnabled(index + 1 < items.size());
+        down.setOnClickListener(v -> {
+            Collections.swap(items, index, index + 1);
+            refresh.run();
+        });
+        row.addView(down);
+        Button group = smallButton("G");
+        group.setContentDescription(getResources().getString(R.string.search_keyword_change_group));
+        group.setOnClickListener(v -> {
+            item.group = (item.group + 1) % KEYWORD_GROUP_COLORS.length;
+            refresh.run();
+        });
+        row.addView(group);
+        Button delete = smallButton("×");
+        delete.setOnClickListener(v -> {
+            items.remove(index);
+            refresh.run();
+        });
+        row.addView(delete);
+        list.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+    }
+
+    private void addGroupSeparator(LinearLayout list, List<KeywordItem> items, int index, Runnable refresh) {
+        KeywordItem item = items.get(index);
+        TextView separator = new TextView(getContext());
+        separator.setText(getResources().getString(R.string.search_keyword_group_separator,
+                item.group + 1, item.groupExcluded ? getResources().getString(R.string.search_keyword_not)
+                        : getResources().getString(R.string.search_keyword_and)));
+        separator.setTextColor(KEYWORD_GROUP_COLORS[item.group % KEYWORD_GROUP_COLORS.length]);
+        separator.setPadding(8, 12, 8, 4);
+        separator.setOnClickListener(v -> {
+            item.groupExcluded = !item.groupExcluded;
+            refresh.run();
+        });
+        list.addView(separator);
+    }
+
+    private Button smallButton(String text) {
+        Button button = new Button(getContext());
+        button.setText(text);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setPadding(8, 0, 8, 0);
+        return button;
+    }
+
+    private void showKeywordItemEditor(KeywordItem item, Runnable refresh) {
+        AutoCompleteTextView input = createKeywordInput();
+        input.setSingleLine(true);
+        input.setText(item.text);
+        input.setSelection(input.length());
+        LinearLayout editor = new LinearLayout(getContext());
+        editor.setPadding(32, 0, 32, 0);
+        editor.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(getContext())
+                .setTitle(R.string.search_keyword_edit)
+                .setView(editor)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    String text = normalizeKeyword(input.getText().toString());
+                    if (isValidKeyword(text)) {
+                        item.text = text;
+                        refresh.run();
+                    }
+                }).show();
+    }
+
+    private AutoCompleteTextView createKeywordInput() {
+        AutoCompleteTextView input = new AutoCompleteTextView(getContext());
+        KeywordSuggestionAdapter adapter = new KeywordSuggestionAdapter(getContext());
+        input.setAdapter(adapter);
+        input.setThreshold(1);
+        input.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) updateKeywordSuggestions(input, adapter);
+        });
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                updateKeywordSuggestions(input, adapter);
+            }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+        input.setOnItemClickListener((parent, view, position, id) -> {
+            String suggestion = adapter.getItem(position);
+            if (suggestion != null) {
+                input.setText(suggestion);
+                input.setSelection(input.length());
+            }
+        });
+        return input;
+    }
+
+    private void updateKeywordSuggestions(AutoCompleteTextView input, KeywordSuggestionAdapter adapter) {
+        String text = input.getText() == null ? "" : input.getText().toString().trim();
+        String lookup = text.startsWith("-") ? text.substring(1) : text;
+        adapter.clear();
+        EhTagDatabase database = EhTagDatabase.getInstance(getContext());
+        if (database != null && !lookup.isEmpty()) {
+            List<Pair<String, String>> suggestions = database.suggest(lookup);
+            for (Pair<String, String> suggestion : suggestions) {
+                if (suggestion.second != null && !suggestion.second.equals(lookup)) {
+                    adapter.add((text.startsWith("-") ? "-" : "") + suggestion.second);
+                }
+            }
+        }
+        adapter.notifyDataSetChanged();
+        if (adapter.getCount() > 0 && input.hasFocus()) input.showDropDown();
+    }
+
+    private List<KeywordItem> parseKeywords(String query) {
+        List<KeywordItem> result = new ArrayList<>();
+        if (TextUtils.isEmpty(query)) return result;
+        boolean quoted = false;
+        StringBuilder token = new StringBuilder();
+        for (int i = 0; i < query.length(); i++) {
+            char c = query.charAt(i);
+            if (c == '"') quoted = !quoted;
+            if (Character.isWhitespace(c) && !quoted) {
+                if (token.length() > 0) {
+                    String value = normalizeKeyword(token.toString());
+                    result.add(new KeywordItem(value.startsWith("-") ? value.substring(1) : value,
+                            0, value.startsWith("-")));
+                    token.setLength(0);
+                }
+            } else token.append(c);
+        }
+        if (token.length() > 0) {
+            String value = normalizeKeyword(token.toString());
+            result.add(new KeywordItem(value.startsWith("-") ? value.substring(1) : value,
+                    0, value.startsWith("-")));
+        }
+        return result;
+    }
+
+    private String normalizeKeyword(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", " ");
+    }
+
+    private boolean isValidKeyword(String value) {
+        if (TextUtils.isEmpty(value)) return false;
+        int quotes = 0;
+        for (int i = 0; i < value.length(); i++) if (value.charAt(i) == '"') quotes++;
+        return quotes % 2 == 0;
+    }
+
+    private String buildKeywordQuery(List<KeywordItem> items) {
+        StringBuilder result = new StringBuilder();
+        Map<Integer, Boolean> excludedGroups = new HashMap<>();
+        for (KeywordItem item : items) {
+            if (!excludedGroups.containsKey(item.group)) {
+                excludedGroups.put(item.group, item.groupExcluded);
+            }
+        }
+        for (KeywordItem item : items) {
+            String keyword = normalizeKeyword(item.text);
+            if (!isValidKeyword(keyword)) continue;
+            if (result.length() > 0) result.append(' ');
+            if ((item.excluded || Boolean.TRUE.equals(excludedGroups.get(item.group)))
+                    && !keyword.startsWith("-")) result.append('-');
+            result.append(keyword.startsWith("-") ? keyword.substring(1) : keyword);
+        }
+        return result.toString();
     }
 
     public void applySearch(boolean hideKeyboard) {
@@ -410,7 +728,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
         } else if (v == mActionButton) {
             mHelper.onClickRightIcon();
         } else if (v == mAdvanceButton) {
-            mHelper.onClickAdvance();
+            showKeywordEditor();
         }
     }
 
@@ -447,9 +765,9 @@ public class SearchBar extends CardView implements View.OnClickListener,
                 clearTagChips();
             }
 
-            // Toggle advance search button visibility
+            // Show keyword editor while the search field is active.
             if (mAdvanceButton != null) {
-                mAdvanceButton.setVisibility(state == STATE_NORMAL ? View.VISIBLE : View.GONE);
+                mAdvanceButton.setVisibility(state == STATE_NORMAL ? View.GONE : View.VISIBLE);
             }
 
             switch (oldState) {
@@ -520,6 +838,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
             mListContainer.setVisibility(View.VISIBLE);
             setProgress(1f);
         }
+        updateSuggestionsToggleVisual();
     }
 
     private void hideImeAndSuggestionsList() {
@@ -553,6 +872,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
             setProgress(0f);
             mListContainer.setVisibility(View.GONE);
         }
+        updateSuggestionsToggleVisual();
     }
 
     // 公共方法：隐藏建议列表

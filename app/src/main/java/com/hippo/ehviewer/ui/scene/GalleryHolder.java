@@ -26,6 +26,8 @@ import com.hippo.widget.LoadImageView;
 
 public class GalleryHolder extends RecyclerView.ViewHolder {
 
+    /** Gid of the item currently bound to this holder (for stale async writes). */
+    public long boundGid = -1;
     public final LoadImageView thumb;
     public final TextView title;
     public final TextView uploader;

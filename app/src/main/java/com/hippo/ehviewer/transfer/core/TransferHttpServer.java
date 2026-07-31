@@ -21,15 +21,21 @@ import android.util.Log;
 
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.api.AuthApiHandler;
+import com.hippo.ehviewer.transfer.api.CompressApiHandler;
+import com.hippo.ehviewer.transfer.api.ConnectApiHandler;
+import com.hippo.ehviewer.transfer.api.DataApiHandler;
 import com.hippo.ehviewer.transfer.api.DebugApiHandler;
+import com.hippo.ehviewer.transfer.api.DownloadApiHandler;
 import com.hippo.ehviewer.transfer.api.FileApiHandler;
 import com.hippo.ehviewer.transfer.api.GalleryApiHandler;
 import com.hippo.ehviewer.transfer.api.LabelApiHandler;
 import com.hippo.ehviewer.transfer.api.PageApiHandler;
 import com.hippo.ehviewer.transfer.api.PushApiHandler;
+import com.hippo.ehviewer.transfer.api.RelayApiHandler;
 import com.hippo.ehviewer.transfer.api.ResponseBuilder;
 import com.hippo.ehviewer.transfer.api.SettingsApiHandler;
 import com.hippo.ehviewer.transfer.api.SystemApiHandler;
+import com.hippo.ehviewer.transfer.api.TasksApiHandler;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
@@ -73,6 +79,18 @@ import fi.iki.elonen.NanoHTTPD;
  * - GET    /api/v1/settings/receive       获取接收设置
  * - PUT    /api/v1/settings/receive       更新接收设置
  * - GET    /api/v1/device/info            设备信息
+ * - GET    /api/v1/downloads              获取下载任务列表
+ * - GET    /api/v1/downloads/{gid}        获取下载任务详情
+ * - POST   /api/v1/downloads              创建下载任务
+ * - POST   /api/v1/downloads/{gid}/start  开始/恢复下载
+ * - POST   /api/v1/downloads/{gid}/pause  暂停下载
+ * - DELETE /api/v1/downloads/{gid}        删除下载任务
+ * - POST   /api/v1/downloads/batch/start  批量开始下载
+ * - POST   /api/v1/downloads/batch/pause  批量暂停下载
+ * - DELETE /api/v1/downloads/batch        批量删除下载任务
+ * - POST   /api/v1/connect                注册设备连接
+ * - DELETE /api/v1/connect                注销设备连接
+ * - GET    /api/v1/connect/peers          获取已连接设备列表
  * - GET    /docs                          Swagger UI 文档页面
  * - GET    /openapi.yaml                  OpenAPI 规范文件
  * - GET    /web/*                         静态资源
@@ -98,6 +116,12 @@ public class TransferHttpServer {
     private PushApiHandler pushApiHandler;
     private SettingsApiHandler settingsApiHandler;
     private FileApiHandler fileApiHandler;
+    private DataApiHandler dataApiHandler;
+    private CompressApiHandler compressApiHandler;
+    private TasksApiHandler tasksApiHandler;
+    private DownloadApiHandler downloadApiHandler;
+    private ConnectApiHandler connectApiHandler;
+    private RelayApiHandler relayApiHandler;
 
     public TransferHttpServer(int port, TransferServerManager serverManager, Context context) {
         this.port = port;
@@ -110,6 +134,9 @@ public class TransferHttpServer {
         AuthMode authMode = AuthMode.fromString(authModeStr);
         authManager.initialize(authMode);
         
+        // 初始化任务管理器
+        TaskManager.getInstance().init(context);
+        
         // 初始化API处理器
         this.authApiHandler = new AuthApiHandler(context, authManager);
         this.galleryApiHandler = new GalleryApiHandler(context, authManager);
@@ -120,6 +147,12 @@ public class TransferHttpServer {
         this.pushApiHandler = new PushApiHandler(context, authManager);
         this.settingsApiHandler = new SettingsApiHandler(context, authManager);
         this.fileApiHandler = new FileApiHandler(context, authManager);
+        this.dataApiHandler = new DataApiHandler(context, authManager);
+        this.compressApiHandler = new CompressApiHandler(context, authManager);
+        this.tasksApiHandler = new TasksApiHandler(context, authManager);
+        this.downloadApiHandler = new DownloadApiHandler(context, authManager);
+        this.connectApiHandler = new ConnectApiHandler(context, authManager);
+        this.relayApiHandler = new RelayApiHandler(context, authManager);
     }
 
     /** 启动HTTP服务器 */
@@ -190,6 +223,14 @@ public class TransferHttpServer {
                 return ResponseBuilder.unauthorized();
             }
             
+            // 远程管理开关检查 - Web UI 路由
+            // 当远程管理关闭时，禁止访问 Web UI，但 API 和文档仍可用
+            if (!Settings.isRemoteManagementEnabled()) {
+                if (uri.equals("/") || uri.startsWith("/web/")) {
+                    return ResponseBuilder.forbidden("Remote management is disabled");
+                }
+            }
+            
             // Web界面路由
             if (uri.equals("/")) {
                 return ResponseBuilder.redirect("/web/index.html");
@@ -244,6 +285,11 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/galleries")) {
                 return galleryApiHandler.handleGet(session, uri);
             }
+
+            // 收藏API
+            if (uri.startsWith("/api/v1/favorites")) {
+                return galleryApiHandler.handleGet(session, uri);
+            }
             
             // 标签API
             if (uri.startsWith("/api/v1/labels")) {
@@ -275,6 +321,36 @@ public class TransferHttpServer {
                 return fileApiHandler.handleGet(session, uri);
             }
             
+            // 数据导出API
+            if (uri.startsWith("/api/v1/data")) {
+                return dataApiHandler.handleGet(session, uri);
+            }
+            
+            // 压缩API
+            if (uri.startsWith("/api/v1/compress")) {
+                return compressApiHandler.handleGet(session, uri);
+            }
+            
+            // 统一任务API
+            if (uri.startsWith("/api/v1/tasks")) {
+                return tasksApiHandler.handleGet(session, uri);
+            }
+            
+            // 下载管理API
+            if (uri.startsWith("/api/v1/downloads")) {
+                return downloadApiHandler.handleGet(session, uri);
+            }
+            
+            // 设备连接API
+            if (uri.startsWith("/api/v1/connect")) {
+                return connectApiHandler.handleGet(session, uri);
+            }
+            
+            // 接力下载API
+            if (uri.startsWith("/api/v1/relay")) {
+                return relayApiHandler.handleGet(session, uri);
+            }
+            
             // 设备信息（保持向后兼容）
             if (uri.equals("/api/v1/device/info")) {
                 String deviceName = android.os.Build.MODEL;
@@ -295,12 +371,42 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/auth")) {
                 return authApiHandler.handlePost(session, uri);
             }
-            
+
+            // 页面API（上传页面图片）—— 必须在画廊API之前匹配，因路径包含 /api/v1/galleries
+            if (uri.matches("/api/v1/galleries/\\d+/pages/\\d+/upload")) {
+                return pageApiHandler.handlePost(session, uri);
+            }
+
             // 推送API
             if (uri.startsWith("/api/v1/push")) {
                 return pushApiHandler.handlePost(session, uri);
             }
-            
+
+            // 数据导入API
+            if (uri.startsWith("/api/v1/data")) {
+                return dataApiHandler.handlePost(session, uri);
+            }
+
+            // 压缩API
+            if (uri.startsWith("/api/v1/compress")) {
+                return compressApiHandler.handlePost(session, uri);
+            }
+
+            // 下载管理API
+            if (uri.startsWith("/api/v1/downloads")) {
+                return downloadApiHandler.handlePost(session, uri);
+            }
+
+            // 设备连接API
+            if (uri.startsWith("/api/v1/connect")) {
+                return connectApiHandler.handlePost(session, uri);
+            }
+
+            // 接力下载API
+            if (uri.startsWith("/api/v1/relay")) {
+                return relayApiHandler.handlePost(session, uri);
+            }
+
             return ResponseBuilder.notFound("Endpoint");
         }
         
@@ -309,7 +415,7 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/settings")) {
                 return settingsApiHandler.handlePut(session, uri);
             }
-            
+
             return ResponseBuilder.notFound("Endpoint");
         }
         
@@ -324,6 +430,31 @@ public class TransferHttpServer {
                 return fileApiHandler.handleDelete(session, uri);
             }
             
+            // 压缩API
+            if (uri.startsWith("/api/v1/compress")) {
+                return compressApiHandler.handleDelete(session, uri);
+            }
+            
+            // 统一任务API
+            if (uri.startsWith("/api/v1/tasks")) {
+                return tasksApiHandler.handleDelete(session, uri);
+            }
+            
+            // 下载管理API
+            if (uri.startsWith("/api/v1/downloads")) {
+                return downloadApiHandler.handleDelete(session, uri);
+            }
+            
+            // 设备连接API
+            if (uri.startsWith("/api/v1/connect")) {
+                return connectApiHandler.handleDelete(session, uri);
+            }
+            
+            // 接力下载API
+            if (uri.startsWith("/api/v1/relay")) {
+                return relayApiHandler.handleDelete(session, uri);
+            }
+            
             return ResponseBuilder.notFound("Endpoint");
         }
         
@@ -336,7 +467,12 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/galleries")) {
                 return galleryApiHandler.handleQuery(session, uri);
             }
-            
+
+            // 收藏API
+            if (uri.startsWith("/api/v1/favorites")) {
+                return galleryApiHandler.handleQuery(session, uri);
+            }
+
             return ResponseBuilder.notFound("Endpoint");
         }
         

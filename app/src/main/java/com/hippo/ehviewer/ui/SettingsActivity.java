@@ -19,24 +19,33 @@ package com.hippo.ehviewer.ui;
 import android.content.Intent;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
-import android.os.PersistableBundle;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.MenuItem;
+import android.view.View;
+import android.widget.EditText;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.ActionBarDrawerToggle;
-import androidx.preference.Preference;
-import androidx.preference.PreferenceFragmentCompat;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentTransaction;
 
+import com.google.android.material.textfield.TextInputEditText;
+import com.google.android.material.textfield.TextInputLayout;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.ui.fragment.SearchResultsFragment;
 import com.hippo.ehviewer.ui.fragment.SettingsHeaders;
 import com.hippo.util.DrawableManager;
 
 public final class SettingsActivity extends EhActivity {
 
     private static final int REQUEST_CODE_FRAGMENT = 0;
+
+    private TextInputLayout mSearchLayout;
+    private TextInputEditText mSearchInput;
 
     @Override
     protected int getThemeResId(int theme) {
@@ -70,11 +79,56 @@ public final class SettingsActivity extends EhActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_settings);
         setActionBarUpIndicator(DrawableManager.getVectorDrawable(this, R.drawable.v_arrow_left_dark_x24));
-        if (savedInstanceState==null){
+
+        mSearchLayout = findViewById(R.id.search_input_layout);
+        mSearchInput = findViewById(R.id.search_input);
+        if (mSearchInput != null) {
+            mSearchInput.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                }
+
+                @Override
+                public void afterTextChanged(Editable s) {
+                    handleSearchQuery(s.toString());
+                }
+            });
+        }
+
+        if (savedInstanceState == null) {
             getSupportFragmentManager()
                     .beginTransaction()
-                    .replace(R.id.settings,new SettingsHeaders())
+                    .replace(R.id.settings, new SettingsHeaders())
                     .commit();
+        }
+    }
+
+    private void handleSearchQuery(@NonNull String query) {
+        String trimmed = query.trim();
+        if (mSearchLayout != null) {
+            mSearchLayout.setHint(trimmed.isEmpty()
+                    ? getString(R.string.settings_search_hint)
+                    : getString(R.string.settings_search_hint));
+        }
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.settings);
+        if (trimmed.isEmpty()) {
+            if (current instanceof SearchResultsFragment) {
+                getSupportFragmentManager().popBackStack();
+            }
+            return;
+        }
+        if (current instanceof SearchResultsFragment) {
+            ((SearchResultsFragment) current).render(trimmed);
+        } else {
+            SearchResultsFragment fragment = SearchResultsFragment.newInstance(trimmed);
+            FragmentTransaction tx = getSupportFragmentManager().beginTransaction();
+            tx.replace(R.id.settings, fragment);
+            tx.addToBackStack(SearchResultsFragment.class.getSimpleName());
+            tx.commit();
         }
     }
 
@@ -101,21 +155,39 @@ public final class SettingsActivity extends EhActivity {
         }
     }
 
-    public void setSettingsTitle(int res){
-        if (getSupportActionBar()!=null){
+    public void setSettingsTitle(int res) {
+        if (getSupportActionBar() != null) {
             getSupportActionBar().setTitle(res);
             return;
         }
         setTitle(res);
     }
 
-    public void setSettingsTitle(CharSequence res){
-        if (getSupportActionBar()!=null){
+    public void setSettingsTitle(CharSequence res) {
+        if (getSupportActionBar() != null) {
             getSupportActionBar().setTitle(res);
             return;
         }
         setTitle(res);
     }
 
+    public void clearSearch() {
+        if (mSearchInput != null && mSearchInput.getText() != null
+                && mSearchInput.getText().length() > 0) {
+            mSearchInput.setText("");
+        }
+    }
 
+    @Override
+    public void onBackPressed() {
+        Fragment current = getSupportFragmentManager().findFragmentById(R.id.settings);
+        if (current instanceof SearchResultsFragment) {
+            clearSearch();
+        }
+        super.onBackPressed();
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            actionBar.setTitle(R.string.settings);
+        }
+    }
 }

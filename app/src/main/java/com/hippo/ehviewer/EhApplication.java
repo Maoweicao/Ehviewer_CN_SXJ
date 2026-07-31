@@ -53,6 +53,7 @@ import com.hippo.ehviewer.client.data.EhNewsDetail;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
 import com.hippo.ehviewer.download.ArchiverDownloadCompleter;
+import com.hippo.ehviewer.download.SystemDownloadCompleteReceiver;
 import com.hippo.ehviewer.download.DownloadLogger;
 import com.hippo.ehviewer.network.NetworkHealthTracker;
 import com.hippo.ehviewer.network.NetworkLogger;
@@ -190,17 +191,18 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
+        EhDB.initialize(this);
+        DownloadLogger.initialize(this);
         ArchiverDownloadCompleter.resumePendingDownloads(this);
+        SystemDownloadCompleteReceiver.ensureRegisteredAndResume(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
         AppConfig.initialize(this);
-        DownloadLogger.initialize(this);
         NetworkLogger.INSTANCE.init(this);
         NetworkStateManager.INSTANCE.init(this);
         NetworkSecurityManager.INSTANCE.init();
         BackgroundTaskManager.initialize(this);
         SpiderDen.initialize(this);
-        EhDB.initialize(this);
         EhEngine.initialize();
         BitmapUtils.initialize(this);
 //        Image1.initialize(this);
@@ -210,7 +212,8 @@ public class EhApplication extends RecordingApplication {
 //        A7Zip.loadLibrary(A7ZipExtractLite.LIBRARY, libname -> ReLinker.loadLibrary(EhApplication.this, libname));
         // 64位适配
         A7Zip.initialize(this);
-        com.hippo.ehviewer.task.scheduled.ScheduledTaskManager.getInstance(this).initialize();
+        com.hippo.ehviewer.task.automation.AutomationManager.getInstance(this).initialize();
+        com.hippo.ehviewer.task.automation.EventTriggerDispatcher.getInstance(this).initialize();
         if (EhDB.needMerge()) {
             EhDB.mergeOldDB(this);
         }
@@ -245,6 +248,13 @@ public class EhApplication extends RecordingApplication {
                 try{
                     AppConfig.deleteOldParseErrorFiles();
                 } catch (Throwable ignored) {
+                }
+
+                // Rebuild ptoken index if empty (cold start after DB upgrade)
+                try {
+                    com.hippo.ehviewer.task.PtokenIndexRebuilder.rebuildIfNeeded();
+                } catch (Throwable t) {
+                    ExceptionUtils.throwIfFatal(t);
                 }
 
                 return null;

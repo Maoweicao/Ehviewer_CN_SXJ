@@ -65,7 +65,9 @@ public final class SearchDatabase {
         StringBuilder sb = new StringBuilder();
         sb.append("SELECT * FROM ").append(TABLE_SUGGESTIONS);
         if (!TextUtils.isEmpty(prefix)) {
-            sb.append(" WHERE ").append(COLUMN_QUERY).append(" LIKE '")
+            // Substring match so that Chinese users typing a fragment of a previous
+            // query (e.g. "发" against a saved "长发 female:long_hair") still hits.
+            sb.append(" WHERE ").append(COLUMN_QUERY).append(" LIKE '%")
                     .append(SqlUtils.sqlEscapeString(prefix)).append("%'");
         }
         sb.append(" ORDER BY ").append(COLUMN_DATE).append(" DESC")

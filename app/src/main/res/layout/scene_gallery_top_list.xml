@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:orientation="vertical">
+    android:layout_height="match_parent">
 
     <com.hippo.widget.ProgressView
         android:id="@+id/data_loading_view"
@@ -12,37 +12,92 @@
         android:layout_height="wrap_content"
         android:layout_gravity="center" />
 
-    <FrameLayout
+    <androidx.core.widget.NestedScrollView
         android:id="@+id/page_detail_view"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:visibility="visible"
+        android:fillViewport="true">
 
-        <Spinner
-            android:id="@+id/top_list_spinner"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="@dimen/top_list_spinner_height"
-            android:layout_marginLeft="@dimen/top_list_spinner_margin"
-            android:layout_marginTop="@dimen/top_list_spinner_margin"
-            android:layout_marginRight="@dimen/top_list_spinner_margin"
-            android:background="?attr/toolbarColor"
-            android:elevation="@dimen/top_list_spinner_elevation"
-            android:entries="@array/top_list_type"
-            android:spinnerMode="dialog"
-            android:textAlignment="center" />
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
 
-        <ScrollView
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:layout_marginTop="@dimen/top_list_scrollview_margin_top">
+            <com.google.android.material.tabs.TabLayout
+                android:id="@+id/top_list_tab_layout"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="?attr/contentColorPrimary"
+                app:tabIndicatorColor="?attr/widgetColorThemePrimary"
+                app:tabIndicatorHeight="3dp"
+                app:tabMode="scrollable"
+                app:tabSelectedTextColor="?attr/widgetColorThemePrimary"
+                app:tabTextColor="?attr/textColorThemePrimary"></com.google.android.material.tabs.TabLayout>
+
+            <com.google.android.material.tabs.TabLayout
+                android:id="@+id/top_list_sub_tab_layout"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/top_list_subtab_height"
+                android:background="?attr/contentColorPrimary"
+                app:tabGravity="fill"
+                app:tabIndicatorColor="?attr/widgetColorThemeAccent"
+                app:tabIndicatorHeight="2dp"
+                app:tabMode="fixed"
+                app:tabSelectedTextColor="?attr/widgetColorThemeAccent"
+                app:tabTextAppearance="@style/TextAppearance.AppCompat.Caption"
+                app:tabTextColor="?attr/textColorThemePrimary"></com.google.android.material.tabs.TabLayout>
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/top_list_recycler_view"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:nestedScrollingEnabled="false"></androidx.recyclerview.widget.RecyclerView>
 
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1">
 
-        </ScrollView>
-    </FrameLayout>
+                <LinearLayout
+                    android:id="@+id/empty_state_view"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center"
+                    android:orientation="vertical"
+                    android:padding="32dp"
+                    android:visibility="gone">
 
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="(×_×)"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="32sp" />
 
+                    <TextView
+                        android:id="@+id/empty_state_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:gravity="center"
+                        android:text="@string/top_list_empty"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="14sp" />
+
+                    <android.widget.Button
+                        android:id="@+id/empty_state_retry"
+                        style="@style/Widget.AppCompat.Button.Borderless.Colored"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/top_list_retry"
+                        android:textSize="14sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </FrameLayout>
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
 </FrameLayout>

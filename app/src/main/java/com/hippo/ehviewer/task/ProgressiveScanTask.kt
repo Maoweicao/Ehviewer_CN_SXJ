@@ -6,16 +6,9 @@ import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.spider.SpiderDen
-import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
-import com.hippo.unifile.UniFile
 import kotlinx.coroutines.ensureActive
-import org.json.JSONArray
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStream
-import java.io.InputStreamReader
-import java.nio.charset.StandardCharsets
 import java.util.Collections
 import kotlin.coroutines.coroutineContext
 
@@ -23,8 +16,8 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
 
     private val scanResults = mutableListOf<ProgressiveChain>()
     private var totalFolders = 0
-    private var totalComparisons = 0
-    private var completedComparisons = 0
+    private var totalCandidates = 0L
+    private var checkedCandidates = 0L
 
     override fun getTaskId(): String = "progressive_scan_${System.currentTimeMillis()}"
 
@@ -64,7 +57,8 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
                             hashCount = f.optInt("hashCount", 0),
                             fileCount = f.optInt("fileCount", 0),
                             hasEhviewer = f.optBoolean("hasEhviewer", false),
-                            title = f.optString("title", "")
+                            title = f.optString("title", ""),
+                            modifiedAt = f.optLong("modifiedAt", 0)
                         )
                     )
                 }
@@ -85,10 +79,11 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         val gid: Long,
         val name: String,
         val path: String,
-        val hashes: Set<String>,
+        val hashes: IntArray,
         val hashCount: Int,
         val fileCount: Int,
-        val title: String
+        val title: String,
+        val modifiedAt: Long
     )
 
     data class FolderInfo(
@@ -98,7 +93,8 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         val hashCount: Int,
         val fileCount: Int,
         val hasEhviewer: Boolean,
-        val title: String
+        val title: String,
+        val modifiedAt: Long
     )
 
     data class ProgressiveChain(
@@ -124,7 +120,7 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
             updateProgress(0, context.getString(R.string.progressive_scan_scanning))
 
             ensureNotCancelled()
-            val folderInfos = collectFolderInfos()
+            val (folderInfos, hashToInt) = collectFolderInfos()
             if (folderInfos.isEmpty()) {
                 updateProgress(100, context.getString(R.string.progressive_scan_no_folders))
                 notifyCompleted()
@@ -161,13 +157,13 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         coroutineContext.ensureActive()
     }
 
-    private fun collectFolderInfos(): List<FolderHashInfo> {
+    private fun collectFolderInfos(): Pair<List<FolderHashInfo>, HashMap<String, Int>> {
         var infos = EhDB.getAllDownloadInfo()
         if (infos == null) {
             infos = Collections.emptyList()
         }
 
-        val result = mutableListOf<FolderHashInfo>()
+        val tempResults = mutableListOf<TempFolderInfo>()
         totalFolders = infos.size
 
         for (i in infos.indices) {
@@ -180,120 +176,213 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
             }
 
             val name = dir.name ?: info.gid.toString()
-            val meta = parseEhviewerMeta(dir)
-            val fileCount = countFiles(dir)
+            val meta = EhviewerMetaParser.parse(dir)
             val title = EhUtils.getSuitableTitle(info)
 
             if (meta != null && meta.hashes.isNotEmpty()) {
-                result.add(
-                    FolderHashInfo(
+                tempResults.add(
+                    TempFolderInfo(
                         gid = info.gid,
                         name = name,
                         path = dir.uri?.toString() ?: "",
-                        hashes = meta.hashes,
-                        hashCount = meta.hashes.size,
-                        fileCount = fileCount,
-                        title = title ?: name
+                        hashStrings = meta.hashes,
+                        title = title ?: name,
+                        modifiedAt = maxOf(dir.lastModified(), 0L)
                     )
                 )
+                // 同步更新 ptoken 索引，避免重复扫描
+                try {
+                    val ptokens = meta.hashes.joinToString(",")
+                    EhDB.putPtokensIndex(info.gid, ptokens, meta.hashes.size)
+                } catch (_: Exception) { }
             }
 
             val pct = if (totalFolders > 0) (i + 1) * 15 / totalFolders else 0
             updateProgress(pct, "Scanning: ${i + 1}/$totalFolders")
         }
 
-        appendTaskLog("Scanned %d folders, %d have .ehviewer", totalFolders, result.size)
-        return result
+        appendTaskLog("Scanned %d folders, %d have .ehviewer", totalFolders, tempResults.size)
+
+        // Build global hash -> int mapping
+        val hashToInt = HashMap<String, Int>()
+        var nextId = 0
+        for (t in tempResults) {
+            for (h in t.hashStrings) {
+                if (!hashToInt.containsKey(h)) {
+                    hashToInt[h] = nextId++
+                }
+            }
+        }
+        appendTaskLog("Unique hashes: %d", hashToInt.size)
+
+        // Convert to int-based representation
+        val result = tempResults.map { t ->
+            val ids = IntArray(t.hashStrings.size) { hashToInt[t.hashStrings[it]]!! }
+            ids.sort()
+            FolderHashInfo(
+                gid = t.gid,
+                name = t.name,
+                path = t.path,
+                hashes = ids,
+                hashCount = ids.size,
+                fileCount = ids.size,
+                title = t.title,
+                modifiedAt = t.modifiedAt
+            )
+        }
+
+        return result to hashToInt
     }
+
+    private data class TempFolderInfo(
+        val gid: Long,
+        val name: String,
+        val path: String,
+        val hashStrings: List<String>,
+        val title: String,
+        val modifiedAt: Long
+    )
 
     private suspend fun buildProgressiveChains(folderInfos: List<FolderHashInfo>): List<ProgressiveChain> {
         val sorted = folderInfos.sortedBy { it.hashCount }
         val n = sorted.size
-        totalComparisons = n * (n - 1) / 2
-        completedComparisons = 0
 
-        val subsetEdges = mutableListOf<Pair<Int, Int>>()
-
-        for (i in 0 until n) {
-            for (j in i + 1 until n) {
-                ensureNotCancelled()
-                completedComparisons++
-
-                if (sorted[i].hashes.size >= sorted[j].hashes.size) continue
-
-                if (sorted[j].hashes.containsAll(sorted[i].hashes)) {
-                    subsetEdges.add(i to j)
-                }
-
-                if (completedComparisons % 200 == 0 || completedComparisons == totalComparisons) {
-                    val pct = 15 + (completedComparisons * 65 / maxOf(totalComparisons, 1))
-                    updateProgress(
-                        pct,
-                        "Comparing: $completedComparisons/$totalComparisons"
-                    )
-                }
+        // Determine max hash id for array sizing
+        var maxHashId = 0
+        for (f in sorted) {
+            for (h in f.hashes) {
+                if (h > maxHashId) maxHashId = h
             }
         }
+
+        // Build inverted index: hashId -> list of gallery indices that contain it
+        val hashToOwners = Array(maxHashId + 1) { mutableListOf<Int>() }
+        for (i in 0 until n) {
+            for (h in sorted[i].hashes) {
+                hashToOwners[h].add(i)
+            }
+        }
+
+        // Union-Find
+        val uf = IntArray(n) { it }
+        totalCandidates = 0
+        checkedCandidates = 0
+
+        for (i in 0 until n) {
+            ensureNotCancelled()
+
+            val candidateSet = IntHashSet()
+            for (h in sorted[i].hashes) {
+                for (j in hashToOwners[h]) {
+                    if (j != i && sorted[j].hashCount > sorted[i].hashCount) {
+                        candidateSet.add(j)
+                    }
+                }
+            }
+
+            totalCandidates += candidateSet.size
+
+            for (j in candidateSet.values()) {
+                ensureNotCancelled()
+                checkedCandidates++
+
+                if (intArrayContainsAll(sorted[j].hashes, sorted[i].hashes)) {
+                    union(uf, i, j)
+                }
+
+                if (checkedCandidates % 500 == 0L) {
+                    val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
+                    updateProgress(pct, "Comparing: $checkedCandidates/$totalCandidates")
+                }
+            }
+
+            if (i % 100 == 0) {
+                val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
+                updateProgress(pct, "Index scan: ${i + 1}/$n")
+            }
+        }
+
+        // Free inverted index
+        for (arr in hashToOwners) arr.clear()
 
         ensureNotCancelled()
         updateProgress(80, "Building chains...")
-        return buildChainsFromEdges(sorted, subsetEdges, n)
+        appendTaskLog("Index: %d galleries, %d candidates checked", n, checkedCandidates)
+        return buildChainsFromComponents(sorted, uf, n)
     }
 
-    private fun buildChainsFromEdges(
-        folderInfos: List<FolderHashInfo>,
-        edges: List<Pair<Int, Int>>,
-        n: Int
-    ): List<ProgressiveChain> {
-        val adj = Array(n) { mutableListOf<Int>() }
-        val revAdj = Array(n) { mutableListOf<Int>() }
-        val inDegree = IntArray(n)
-        for ((from, to) in edges) {
-            adj[from].add(to)
-            revAdj[to].add(from)
-            inDegree[to]++
+    private fun intArrayContainsAll(superArr: IntArray, subArr: IntArray): Boolean {
+        if (subArr.isEmpty()) return true
+        if (superArr.size < subArr.size) return false
+        var si = 0
+        var ci = 0
+        while (si < superArr.size && ci < subArr.size) {
+            when {
+                superArr[si] == subArr[ci] -> { si++; ci++ }
+                superArr[si] < subArr[ci] -> si++
+                else -> return false
+            }
+        }
+        return ci == subArr.size
+    }
+
+    private class IntHashSet {
+        private var count = 0
+        private var data = IntArray(16)
+
+        val size: Int get() = count
+
+        fun add(value: Int) {
+            for (i in 0 until count) {
+                if (data[i] == value) return
+            }
+            if (count == data.size) {
+                data = data.copyOf(data.size * 2)
+            }
+            data[count++] = value
         }
 
-        // Find connected components via undirected traversal
-        val visited = BooleanArray(n)
-        val components = mutableListOf<List<Int>>()
+        fun values(): IntArray = data.copyOf(count)
+    }
 
-        for (start in 0 until n) {
-            if (visited[start]) continue
-            if (adj[start].isEmpty() && inDegree[start] == 0) continue
+    private fun find(uf: IntArray, x: Int): Int {
+        var root = x
+        while (uf[root] != root) {
+            root = uf[root]
+        }
+        var cur = x
+        while (uf[cur] != root) {
+            val next = uf[cur]
+            uf[cur] = root
+            cur = next
+        }
+        return root
+    }
 
-            val component = mutableListOf<Int>()
-            val queue = ArrayDeque<Int>()
-            queue.add(start)
-            visited[start] = true
-            while (queue.isNotEmpty()) {
-                val u = queue.removeFirst()
-                component.add(u)
-                // Follow forward edges
-                for (v in adj[u]) {
-                    if (!visited[v]) {
-                        visited[v] = true
-                        queue.add(v)
-                    }
-                }
-                // Follow reverse edges (predecessors) using pre-built reverse adjacency
-                for (w in revAdj[u]) {
-                    if (!visited[w]) {
-                        visited[w] = true
-                        queue.add(w)
-                    }
-                }
-            }
+    private fun union(uf: IntArray, a: Int, b: Int) {
+        val ra = find(uf, a)
+        val rb = find(uf, b)
+        if (ra != rb) {
+            uf[ra] = rb
+        }
+    }
 
-            if (component.size >= 2) {
-                components.add(component)
-            }
+    private fun buildChainsFromComponents(
+        folderInfos: List<FolderHashInfo>,
+        uf: IntArray,
+        n: Int
+    ): List<ProgressiveChain> {
+        val components = HashMap<Int, MutableList<Int>>()
+        for (i in 0 until n) {
+            val root = find(uf, i)
+            components.getOrPut(root) { mutableListOf() }.add(i)
         }
 
         val chains = mutableListOf<ProgressiveChain>()
         var chainId = 0
 
-        for (component in components) {
+        for (component in components.values) {
+            if (component.size < 2) continue
             val sortedComponent = component.sortedBy { folderInfos[it].hashCount }
             val folders = sortedComponent.map { idx ->
                 val f = folderInfos[idx]
@@ -304,25 +393,42 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
                     hashCount = f.hashCount,
                     fileCount = f.fileCount,
                     hasEhviewer = true,
-                    title = f.title
+                    title = f.title,
+                    modifiedAt = f.modifiedAt
                 )
             }
-            val allHashes = mutableSetOf<String>()
-            sortedComponent.forEach { idx -> allHashes.addAll(folderInfos[idx].hashes) }
-            val commonHashes = sortedComponent.map { folderInfos[it].hashes }
-                .reduce { acc, set -> acc.intersect(set) }
+
+            // Compute unique and common hash counts using int arrays
+            val allHashIds = java.util.TreeSet<Int>()
+            for (idx in sortedComponent) {
+                for (h in folderInfos[idx].hashes) allHashIds.add(h)
+            }
+            var common = java.util.TreeSet<Int>(folderInfos[sortedComponent[0]].hashes.toList())
+            for (k in 1 until sortedComponent.size) {
+                common = intersectSorted(common, folderInfos[sortedComponent[k]].hashes)
+            }
 
             chains.add(
                 ProgressiveChain(
                     id = ++chainId,
                     folders = folders,
-                    totalUniqueHashes = allHashes.size,
-                    commonHashes = commonHashes.size
+                    totalUniqueHashes = allHashIds.size,
+                    commonHashes = common.size
                 )
             )
         }
 
         return chains
+    }
+
+    private fun intersectSorted(a: java.util.TreeSet<Int>, b: IntArray): java.util.TreeSet<Int> {
+        val result = java.util.TreeSet<Int>()
+        var bi = 0
+        for (v in a) {
+            while (bi < b.size && b[bi] < v) bi++
+            if (bi < b.size && b[bi] == v) result.add(v)
+        }
+        return result
     }
 
     private fun saveResults() {
@@ -334,64 +440,5 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
             Log.e(TAG, "Failed to save results")
             appendTaskLog("ERROR: Failed to save results")
         }
-    }
-
-    private fun parseEhviewerMeta(dir: UniFile): EhviewerMeta? {
-        val file = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
-        if (file == null || !file.exists() || !file.isFile) return null
-
-        var inputStream: InputStream? = null
-        var reader: BufferedReader? = null
-        return try {
-            val meta = EhviewerMeta()
-            inputStream = file.openInputStream()
-            reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8))
-            val lines = mutableListOf<String>()
-            while (true) {
-                val line = reader.readLine() ?: break
-                lines.add(line)
-            }
-            if (lines.size < 3) return null
-
-            for (i in 3 until lines.size) {
-                val parts = lines[i].trim().split(Regex("\\s+"))
-                if (parts.size < 2) continue
-                try {
-                    meta.hashes.add(parts[1])
-                } catch (_: NumberFormatException) {
-                }
-            }
-            meta
-        } catch (_: Exception) {
-            null
-        } finally {
-            closeQuietly(reader)
-            closeQuietly(inputStream)
-        }
-    }
-
-    private fun countFiles(dir: UniFile?): Int {
-        if (dir == null || !dir.exists()) return 0
-        if (dir.isFile) return 1
-        var total = 0
-        val children = dir.listFiles()
-        if (children != null) {
-            for (child in children) {
-                total += countFiles(child)
-            }
-        }
-        return total
-    }
-
-    private fun closeQuietly(closeable: AutoCloseable?) {
-        if (closeable == null) return
-        try {
-            closeable.close()
-        } catch (_: Exception) {
-        }
-    }
-
-    private class EhviewerMeta {
-        val hashes: MutableSet<String> = mutableSetOf()
     }
 }

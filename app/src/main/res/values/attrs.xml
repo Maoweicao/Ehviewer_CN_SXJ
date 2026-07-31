@@ -77,6 +77,15 @@
 
         <attr name="limits_shape_color" format="color"/>
         <attr name="home_shadow" format="color"/>
+
+        <!-- Top List palette: 7 harmonized pastel chip backgrounds -->
+        <attr name="topListPalette1" format="color"/>
+        <attr name="topListPalette2" format="color"/>
+        <attr name="topListPalette3" format="color"/>
+        <attr name="topListPalette4" format="color"/>
+        <attr name="topListPalette5" format="color"/>
+        <attr name="topListPalette6" format="color"/>
+        <attr name="topListPalette7" format="color"/>
     </declare-styleable>
 
     <declare-styleable name="ProgressView">

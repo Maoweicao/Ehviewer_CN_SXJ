@@ -143,29 +143,29 @@
 
     <color name="check_text_view_mask">#8a000000</color>
 
-    <!-- Red -->
-    <color name="doujinshi">#fff44336</color>
-    <!-- Orange -->
-    <color name="manga">#ffff9800</color>
-    <!-- Yellow 700 -->
-    <color name="artist_cg">#ffFbc02d</color>
+    <!-- E-Hentai ct2 -->
+    <color name="doujinshi">#fffc4e4e</color>
+    <!-- E-Hentai ct3 -->
+    <color name="manga">#ffe78c1a</color>
+    <!-- E-Hentai ct4 -->
+    <color name="artist_cg">#ffc7bf07</color>
     <color name="new_version_bg_color">#E6FFEB3B</color>
-    <!-- Green -->
-    <color name="game_cg">#ff4caf50</color>
-    <!-- Light Green -->
-    <color name="western">#ff8bc34a</color>
-    <!-- Blue -->
-    <color name="non_h">#ff2196f3</color>
-    <!-- Indigo -->
-    <color name="image_set">#ff3f51b5</color>
-    <!-- Purple -->
-    <color name="cosplay">#ff9c27b0</color>
+    <!-- E-Hentai ct5 -->
+    <color name="game_cg">#ff1a9317</color>
+    <!-- E-Hentai cta -->
+    <color name="western">#ff5dc13b</color>
+    <!-- E-Hentai ct9 -->
+    <color name="non_h">#ff0f9ebd</color>
+    <!-- E-Hentai ct6 -->
+    <color name="image_set">#ff2756aa</color>
+    <!-- E-Hentai ct7 -->
+    <color name="cosplay">#ff8800c3</color>
     <!--  white  -->
     <color name="white">#ffffffff</color>
-    <!-- Deep Purple 300 -->
-    <color name="asian_porn">#ff9575cd</color>
-    <!-- Pink 300 -->
-    <color name="misc">#fff06292</color>
+    <!-- E-Hentai ct8 -->
+    <color name="asian_porn">#ffb452a5</color>
+    <!-- E-Hentai ct1 -->
+    <color name="misc">#ff707070</color>
     <color name="unknown_bg">@android:color/black</color>
 
     <!-- divider -->

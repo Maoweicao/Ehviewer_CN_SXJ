@@ -159,13 +159,15 @@ public class BackgroundTaskManager {
     private BackgroundTaskManager(Context context) {
         mContext = context;
         mMainHandler = new Handler(Looper.getMainLooper());
-        
+
         // 初始化下载日志记录器
         mDownloadLogger = DownloadLogger.getInstance();
-        
+
         // 初始化任务状态管理器
         BackgroundTaskStatusManager.initialize(context);
         mTaskStatusManager = BackgroundTaskStatusManager.getInstance();
+        // 注册互斥等待队列监听器：在槽位释放时自动接力
+        mTaskStatusManager.setUniqueWaitListener(this::promoteNextUniqueTask);
 
         // 注册可恢复任务工厂
         registerTaskFactory(CompressSelectedGalleriesTask.class.getName(), (ctx, taskId, persistData) ->
@@ -400,7 +402,8 @@ public class BackgroundTaskManager {
     }
 
     /**
-     * 提交BackgroundTask并接入任务管理与通知
+     * 提交BackgroundTask并接入任务管理与通知。
+     * <p>当 unique 任务与已有互斥任务冲突时，新任务进入等待队列；当前置任务结束后自动接力启动。
      */
     @NonNull
     public TaskHandle submitBackgroundTask(@NonNull BackgroundTask task) {
@@ -431,13 +434,34 @@ public class BackgroundTaskManager {
         }
 
         if (task.isUniqueTask() && taskType != BackgroundTask.TaskType.DOWNLOAD) {
-            BackgroundTaskInfo activeUnique = mTaskStatusManager.getActiveUniqueNonDownloadTask();
-            if (activeUnique != null) {
-                Log.d(TAG, "Skip unique task, active task running: " + activeUnique.getTaskId());
-                return new TaskHandle(activeUnique.getTaskId(), createNoOpFuture());
+            String mutexGroup = task.getMutexGroup();
+            if (mutexGroup != null) {
+                BackgroundTaskInfo conflict = mTaskStatusManager.getActiveConflictTask(mutexGroup);
+                if (conflict != null) {
+                    Log.d(TAG, "Enqueue unique task (group=" + mutexGroup + "), conflict: " + conflict.getTaskId());
+                    BackgroundTaskStatusManager.PendingUniqueTask pending =
+                            new BackgroundTaskStatusManager.PendingUniqueTask(task);
+                    String enqueuedId = mTaskStatusManager.enqueueUniqueWaitingTask(pending);
+                    if (enqueuedId == null) {
+                        Log.w(TAG, "Failed to enqueue unique task (duplicate id): " + taskId);
+                        return new TaskHandle(taskId, createNoOpFuture());
+                    }
+                    return new TaskHandle(enqueuedId, createNoOpFuture());
+                }
             }
         }
 
+        return doSubmitRunning(task, taskId, taskName, taskDescription, taskType, cpuBound);
+    }
+
+    /**
+     * 实际启动任务的内部入口：构造 FutureTask、注册到状态管理器、提交到对应线程池。
+     * 被 submitBackgroundTask（初次提交）和 promoteNextUniqueTask（接力启动）共用。
+     */
+    @NonNull
+    private TaskHandle doSubmitRunning(@NonNull BackgroundTask task, @NonNull String taskId,
+                                       @NonNull String taskName, @Nullable String taskDescription,
+                                       @NonNull BackgroundTask.TaskType taskType, boolean cpuBound) {
         task.setProgressListener(new BackgroundTask.ProgressListener() {
             @Override
             public void onProgressChanged(int progress, @Nullable String detail) {
@@ -479,7 +503,8 @@ public class BackgroundTaskManager {
         });
 
         String registeredTaskId = mTaskStatusManager.addTask(taskId, taskName, taskDescription, futureTask,
-                taskType, task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData());
+                taskType, task.isUniqueTask(), task.getTaskClassName(), task.getTaskPersistData(),
+                task.getMutexGroup());
         if (registeredTaskId == null) {
             return new TaskHandle(taskId, createNoOpFuture());
         }
@@ -498,6 +523,23 @@ public class BackgroundTaskManager {
         return new TaskHandle(taskId, futureTask);
     }
 
+    /**
+     * 从互斥等待队列中取出队首任务并真正启动。
+     * 该方法通常由 BackgroundTaskStatusManager 在 unique 槽位释放时回调。
+     */
+    private void promoteNextUniqueTask() {
+        BackgroundTaskStatusManager.PendingUniqueTask pending =
+                mTaskStatusManager.pollNextUniqueWaitingTask();
+        if (pending == null) {
+            return;
+        }
+        BackgroundTask task = pending.getTask();
+        boolean cpuBound = isCpuBoundTask(pending.getTaskType());
+        Log.d(TAG, "Promote unique task: " + pending.getTaskId());
+        doSubmitRunning(task, pending.getTaskId(), pending.getTaskName(), pending.getTaskDescription(),
+                pending.getTaskType(), cpuBound);
+    }
+
     private Future<?> createNoOpFuture() {
         java.util.concurrent.FutureTask<?> futureTask = new java.util.concurrent.FutureTask<>(() -> null);
         futureTask.run();
@@ -513,7 +555,11 @@ public class BackgroundTaskManager {
         
         if (activeCount == 1) {
             // 第一个前台任务，启动 BackgroundTaskService 持有 WakeLock 防休眠
-            BackgroundTaskService.start(mContext, taskName, 1);
+            boolean serviceStarted = BackgroundTaskService.start(mContext, taskName, 1);
+            if (!serviceStarted) {
+                Log.w(TAG, "Foreground service failed to start (possibly background restriction), "
+                        + "task will run without WakeLock protection");
+            }
             // 同时显示通知
             showForegroundNotification(taskName, taskDescription);
         } else {

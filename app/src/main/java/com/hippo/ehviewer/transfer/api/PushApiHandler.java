@@ -29,7 +29,11 @@ import com.hippo.ehviewer.dao.BookmarkInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.data.PushTask;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -95,6 +99,12 @@ public class PushApiHandler extends BaseApiHandler {
             return handleRejectTask(session, taskId);
         }
 
+        // /api/v1/push/tasks/{taskId}/data - 传输数据/文件块
+        if (uri.matches("/api/v1/push/tasks/[^/]+/data")) {
+            String taskId = extractTaskId(uri);
+            return handlePostTaskData(session, taskId);
+        }
+
         return ResponseBuilder.notFound("Endpoint");
     }
 
@@ -115,6 +125,13 @@ public class PushApiHandler extends BaseApiHandler {
             PushTask task = new PushTask(type, mode, sourceDevice, sourceDeviceId);
             task.setTotalCount(totalCount);
 
+            // 文件传输类型参数
+            if (PushTask.TYPE_EXPORT_DB.equals(type) || PushTask.TYPE_EXPORT_CSV.equals(type)) {
+                task.setFileName(json.getString("fileName"));
+                task.setFileSize(json.getLongValue("fileSize"));
+                task.setMode(PushTask.MODE_ALL);
+            }
+
             if (PushTask.MODE_SELECTED.equals(mode) && json.containsKey("items")) {
                 JSONArray itemsArray = json.getJSONArray("items");
                 List<Long> items = new ArrayList<>();
@@ -130,7 +147,6 @@ public class PushApiHandler extends BaseApiHandler {
                 task.setStatus(PushTask.STATUS_ACCEPTED);
             } else {
                 task.setStatus(PushTask.STATUS_PENDING);
-                // 通知监听器等待确认
                 notifyTaskReceived(task);
             }
 
@@ -138,7 +154,19 @@ public class PushApiHandler extends BaseApiHandler {
 
             JSONObject response = new JSONObject();
             response.put("taskId", task.getTaskId());
+            response.put("type", task.getType());
             response.put("status", task.getStatus());
+            response.put("mode", task.getMode());
+            response.put("createdTime", task.getCreatedAt());
+            response.put("fromDevice", task.getSourceDevice());
+            response.put("progress", 0);
+            response.put("total", task.getTotalCount());
+            response.put("transferred", 0);
+
+            if (task.isFileTransfer()) {
+                response.put("fileName", task.getFileName());
+                response.put("fileSize", task.getFileSize());
+            }
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
@@ -237,6 +265,138 @@ public class PushApiHandler extends BaseApiHandler {
     }
 
     /**
+     * 传输数据/文件块（POST /api/v1/push/tasks/{taskId}/data）
+     */
+    private NanoHTTPD.Response handlePostTaskData(NanoHTTPD.IHTTPSession session, String taskId) {
+        try {
+            PushTask task = pendingTasks.get(taskId);
+            if (task == null) {
+                return ResponseBuilder.notFound("Task");
+            }
+
+            if (!PushTask.STATUS_ACCEPTED.equals(task.getStatus())) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Task not accepted");
+            }
+
+            String body = RequestParser.readBody(session);
+            JSONObject json = JSON.parseObject(body);
+
+            // 文件块传输
+            if (task.isFileTransfer()) {
+                return handleFileChunk(task, json);
+            }
+
+            // 普通数据传输
+            task.setStatus(PushTask.STATUS_TRANSFERRING);
+            task.setTransferredCount(task.getTransferredCount() + 1);
+            task.setUpdatedAt(System.currentTimeMillis());
+
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("received", 1);
+            response.put("totalReceived", task.getTransferredCount());
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to post task data", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 处理文件块传输
+     */
+    private NanoHTTPD.Response handleFileChunk(PushTask task, JSONObject json) {
+        try {
+            int chunk = json.getIntValue("chunk");
+            int totalChunks = json.getIntValue("totalChunks");
+            long offset = json.getLongValue("offset");
+            int length = json.getIntValue("length");
+            String data = json.getString("data");
+            boolean isLast = json.getBooleanValue("isLast");
+
+            // 首次接收，创建临时文件
+            if (task.getTempFilePath() == null) {
+                File tempDir = context.getCacheDir();
+                File tempFile = new File(tempDir, "push_" + task.getTaskId() + "_" + task.getFileName());
+                task.setTempFilePath(tempFile.getAbsolutePath());
+                task.setTotalChunks(totalChunks);
+                task.setReceivedChunks(0);
+                task.setReceivedBytes(0);
+            }
+
+            // 解码并写入文件
+            byte[] chunkData = android.util.Base64.decode(data, android.util.Base64.DEFAULT);
+            File tempFile = new File(task.getTempFilePath());
+
+            try (FileOutputStream fos = new FileOutputStream(tempFile, true)) {
+                fos.write(chunkData);
+            }
+
+            task.setReceivedChunks(task.getReceivedChunks() + 1);
+            task.setReceivedBytes(task.getReceivedBytes() + chunkData.length);
+            task.setStatus(PushTask.STATUS_TRANSFERRING);
+            task.setUpdatedAt(System.currentTimeMillis());
+
+            // 检查是否完成
+            if (isLast || task.getReceivedChunks() >= task.getTotalChunks()) {
+                task.setStatus(PushTask.STATUS_COMPLETED);
+                TransferLogger.getInstance().d(TAG, "File transfer completed: " + task.getFileName());
+
+                // 触发导入
+                importTransferredFile(task);
+            }
+
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("received", chunkData.length);
+            response.put("totalReceived", task.getReceivedBytes());
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to handle file chunk", e);
+            task.setStatus(PushTask.STATUS_FAILED);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 导入传输完成的文件
+     */
+    private void importTransferredFile(PushTask task) {
+        try {
+            File tempFile = new File(task.getTempFilePath());
+            if (!tempFile.exists()) {
+                TransferLogger.getInstance().e(TAG, "Temp file not found: " + task.getTempFilePath());
+                return;
+            }
+
+            String type = task.getType();
+            if (PushTask.TYPE_EXPORT_DB.equals(type)) {
+                // 导入数据库
+                String error = EhDB.importDB(context, tempFile, null);
+                if (error != null) {
+                    TransferLogger.getInstance().e(TAG, "Import DB failed: " + error);
+                    task.setStatus(PushTask.STATUS_FAILED);
+                } else {
+                    TransferLogger.getInstance().d(TAG, "Import DB success");
+                }
+            } else if (PushTask.TYPE_EXPORT_CSV.equals(type)) {
+                // CSV导入需要解析，这里标记为完成，由用户手动处理
+                TransferLogger.getInstance().d(TAG, "CSV file received: " + task.getFileName());
+            }
+
+            // 不删除临时文件，供用户查看
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to import transferred file", e);
+            task.setStatus(PushTask.STATUS_FAILED);
+        }
+    }
+
+    /**
      * 获取任务数据（分页）
      */
     private NanoHTTPD.Response handleGetTaskData(NanoHTTPD.IHTTPSession session, String taskId) {
@@ -311,6 +471,16 @@ public class PushApiHandler extends BaseApiHandler {
         json.put("transferredCount", task.getTransferredCount());
         json.put("progress", task.getProgressPercent());
         json.put("createdAt", task.getCreatedAt());
+        json.put("updatedAt", task.getUpdatedAt());
+
+        if (task.isFileTransfer()) {
+            json.put("fileName", task.getFileName());
+            json.put("fileSize", task.getFileSize());
+            json.put("totalChunks", task.getTotalChunks());
+            json.put("receivedChunks", task.getReceivedChunks());
+            json.put("receivedBytes", task.getReceivedBytes());
+        }
+
         return json;
     }
 

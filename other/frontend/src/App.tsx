@@ -13,7 +13,10 @@ import GalleryDetail from './pages/GalleryDetail'
 import GalleryViewer from './pages/GalleryViewer'
 import FileBrowser from './pages/FileBrowser'
 import Settings from './pages/Settings'
+import DataTransfer from './pages/DataTransfer'
+import TaskCenter from './pages/TaskCenter'
 import DebugPanel from './components/DebugPanel'
+import { startAutoThemeWatcher, stopAutoThemeWatcher } from './utils/theme'
 
 function MainLayout() {
   const navigate = useNavigate()
@@ -43,6 +46,8 @@ function MainLayout() {
         <Route path="/gallery/:gid/view" element={<GalleryViewer />} />
         <Route path="/files" element={<FileBrowser />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/settings/data-transfer" element={<DataTransfer />} />
+        <Route path="/settings/tasks" element={<TaskCenter />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <DebugPanel />
@@ -84,6 +89,11 @@ export default function App() {
         navigate('/login', { replace: true })
       }
     })
+  }, [])
+
+  useEffect(() => {
+    startAutoThemeWatcher()
+    return () => stopAutoThemeWatcher()
   }, [])
 
   if (authenticated === null) {

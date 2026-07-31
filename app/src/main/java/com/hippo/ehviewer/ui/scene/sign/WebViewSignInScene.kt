@@ -134,8 +134,9 @@ class WebViewSignInScene : SolidScene() {
 
         override fun shouldInterceptRequest(
             view: WebView,
-            request: WebViewRequest
+            webViewRequest: WebViewRequest
         ): WebResourceResponse? {
+            val request = webViewRequest
             val okRequest: Request
             val builder = EhRequestBuilder(
                 request.headers,

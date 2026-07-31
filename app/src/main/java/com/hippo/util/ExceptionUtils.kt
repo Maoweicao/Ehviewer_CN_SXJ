@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+@file:Suppress("DEPRECATION")
 package com.hippo.util
 
 import com.hippo.ehviewer.GetText
@@ -30,6 +31,7 @@ import javax.net.ssl.SSLException
 object ExceptionUtils {
     private val TAG: String = ExceptionUtils::class.java.getSimpleName()
 
+    @Suppress("DEPRECATION")
     @JvmStatic
     fun getReadableString(e: Throwable): String {
         e.printStackTrace()
@@ -58,10 +60,12 @@ object ExceptionUtils {
             if (e.localizedMessage == null) {
                 return "" + e.message
             }
-            if (e.localizedMessage == e.message) {
-                return e.localizedMessage
+            val localizedMsg = e.localizedMessage
+            val msg = e.message
+            if (localizedMsg == msg) {
+                return localizedMsg ?: ""
             }
-            return e.localizedMessage + "\n" + e.message
+            return (localizedMsg ?: "") + "\n" + (msg ?: "")
         }
     }
 

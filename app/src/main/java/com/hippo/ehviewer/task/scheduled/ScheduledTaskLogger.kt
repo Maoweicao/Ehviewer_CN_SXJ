@@ -59,7 +59,7 @@ class ScheduledTaskLogger(private val context: Context) {
                         LogLevel.INFO
                     },
                     message = json.optString("message", ""),
-                    details = json.optString("details", null)
+                    details = runCatching { json.getString("details") }.getOrNull()
                 )
             }
         }

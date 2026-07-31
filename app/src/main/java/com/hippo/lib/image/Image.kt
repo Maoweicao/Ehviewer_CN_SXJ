@@ -101,8 +101,8 @@ class Image private constructor(
             }
         }
         if (mObtainedDrawable == null) {
-            mObtainedDrawable = drawable!!
-//            throw IllegalArgumentException("数据解码出错")
+            mObtainedDrawable = drawable
+                ?: throw IllegalArgumentException("数据解码出错 (available=${source?.available() ?: -1}, hardware=$hardware)")
         }
     }
 
@@ -222,7 +222,7 @@ class Image private constructor(
             return 0
         }
 
-    @get:SuppressWarnings("deprecation")
+    @Suppress("DEPRECATION")
     val isOpaque: Boolean
         get() {
             return mObtainedDrawable?.opacity == PixelFormat.OPAQUE

@@ -59,7 +59,7 @@ data class ScheduledTask(
                 } catch (e: Exception) {
                     BackgroundTask.TaskType.OTHER
                 },
-                paramData = json.optString("paramData", null),
+                paramData = runCatching { json.getString("paramData") }.getOrNull(),
                 delayCondition = try {
                     DelayCondition.valueOf(json.optString("delayCondition", DelayCondition.IMMEDIATE.name))
                 } catch (e: Exception) {
@@ -70,7 +70,7 @@ data class ScheduledTask(
                 } catch (e: Exception) {
                     RepeatMode.ONCE
                 },
-                cronExpression = json.optString("cronExpression", null),
+                cronExpression = runCatching { json.getString("cronExpression") }.getOrNull(),
                 groupId = json.optString("groupId", TaskGroup.DEFAULT_GROUP_ID),
                 retryConfig = RetryConfig.fromJson(json.optJSONObject("retryConfig") ?: JSONObject()),
                 order = json.optInt("order", 0),

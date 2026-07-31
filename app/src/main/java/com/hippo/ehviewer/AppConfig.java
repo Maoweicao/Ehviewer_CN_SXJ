@@ -44,6 +44,10 @@ public class AppConfig {
     private static final String IMAGE = "image";
     private static final String PARSE_ERROR = "parse_error";
     private static final String LOGCAT = "logcat";
+    private static final String LOGCAT_WATCHDOG = "logcat/watchdog";
+    private static final String LOGCAT_PERFORMANCE = "logcat/performance";
+    private static final String LOGCAT_DIAGNOSTIC = "logcat/diagnostic";
+    private static final String LOGCAT_EXPORT = "logcat/export";
     private static final String DATA = "data";
     private static final String CRASH = "crash";
     private static final String COMPRESS_PLAN = "CompressPlan";
@@ -130,6 +134,26 @@ public class AppConfig {
     @Nullable
     public static File getExternalLogcatDir() {
         return getDirInExternalAppDir(LOGCAT);
+    }
+
+    @Nullable
+    public static File getExternalWatchdogDir() {
+        return getDirInExternalAppDir(LOGCAT_WATCHDOG);
+    }
+
+    @Nullable
+    public static File getExternalPerformanceDir() {
+        return getDirInExternalAppDir(LOGCAT_PERFORMANCE);
+    }
+
+    @Nullable
+    public static File getExternalDiagnosticDir() {
+        return getDirInExternalAppDir(LOGCAT_DIAGNOSTIC);
+    }
+
+    @Nullable
+    public static File getExternalLogcatExportDir() {
+        return getDirInExternalAppDir(LOGCAT_EXPORT);
     }
 
     @Nullable

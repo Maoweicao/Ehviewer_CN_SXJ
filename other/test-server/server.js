@@ -70,6 +70,63 @@ let receiveSettings = {
     pageSize: 50
 };
 
+// 收藏数据（从画廊数据中选取部分作为本地收藏）
+const mockFavorites = mockGalleries.slice(0, 30).map(g => ({
+    gid: g.gid,
+    token: g.token,
+    title: g.title,
+    titleJpn: g.titleJpn,
+    thumb: g.thumb,
+    favCat: 0,
+    favNote: ''
+}));
+
+// 下载任务存储
+const mockDownloads = mockGalleries.slice(0, 20).map(g => {
+    const state = g.state || 3;
+    const downloaded = g.downloaded || g.pages;
+    return {
+        gid: g.gid,
+        token: g.token,
+        title: g.title,
+        titleJpn: g.titleJpn,
+        thumb: g.thumb,
+        category: g.category,
+        posted: g.posted,
+        uploader: g.uploader,
+        rating: g.rating,
+        language: g.language,
+        pages: g.pages,
+        state,
+        stateName: downloadStateToName(state),
+        label: g.label,
+        time: g.time,
+        createdTime: g.time,
+        createdDate: new Date(g.time).toLocaleString(),
+        finished: downloaded,
+        total: g.pages,
+        downloaded,
+        speed: 0,
+        speedFormatted: '0 B/s',
+        remaining: g.pages - downloaded,
+        progress: Math.round(downloaded / g.pages * 1000) / 10,
+        legacy: 0,
+        fileSize: g.fileSize,
+        simpleTags: g.tags || []
+    };
+});
+
+function downloadStateToName(state) {
+    const map = { 0: 'none', 1: 'wait', 2: 'downloading', 3: 'finished', 4: 'failed', 5: 'update' };
+    return map[state] || 'none';
+}
+
+// 已连接设备
+const mockPeers = [];
+
+// 接力任务存储
+const mockRelayTasks = [];
+
 // 生成模拟文件
 function generateMockFiles(folder) {
     const files = [];
@@ -236,6 +293,22 @@ function getDebugPageHTML() {
     <h2>Settings</h2>
     <a class="endpoint" href="/api/v1/settings/receive">GET /api/v1/settings/receive</a>
 
+    <h2>Favorites</h2>
+    <a class="endpoint" href="/api/v1/favorites?page=1&limit=10">GET /api/v1/favorites?page=1&limit=10</a>
+
+    <h2>Downloads</h2>
+    <a class="endpoint" href="/api/v1/downloads?state=all&page=1&limit=10">GET /api/v1/downloads?state=all&page=1&limit=10</a>
+    <a class="endpoint" href="/api/v1/downloads/1001">GET /api/v1/downloads/1001</a>
+
+    <h2>Connect</h2>
+    <a class="endpoint" href="/api/v1/connect/peers">GET /api/v1/connect/peers</a>
+
+    <h2>Relay</h2>
+    <a class="endpoint" href="/api/v1/relay/tasks?status=all&direction=all">GET /api/v1/relay/tasks</a>
+
+    <h2>Tasks</h2>
+    <a class="endpoint" href="/api/v1/tasks?type=all&status=all">GET /api/v1/tasks</a>
+
     <h2>Device</h2>
     <a class="endpoint" href="/api/v1/device/info">GET /api/v1/device/info</a>
 </body>
@@ -352,6 +425,21 @@ const server = http.createServer((req, res) => {
             const filename = decodeURIComponent(parts[6]);
             handleFileDownload(res, folder, filename, requestId);
         }
+        // ==================== Integrity Check ====================
+        else if (pathname.match(/^\/api\/v1\/folders\/[^/]+\/files\/[^/]+\/hash$/) && method === 'GET') {
+            const parts = pathname.split('/');
+            const folder = decodeURIComponent(parts[4]);
+            const filename = decodeURIComponent(parts[6]);
+            const algorithm = url.searchParams.get('algorithm') || 'md5';
+            handleFileHash(res, folder, filename, algorithm, requestId);
+        } else if (pathname.match(/^\/api\/v1\/folders\/downloads\/files\/\d+\/integrity$/) && method === 'GET') {
+            const gid = parseInt(pathname.split('/')[6]);
+            const algorithm = url.searchParams.get('algorithm') || 'md5';
+            handleGalleryIntegrity(res, gid, algorithm, requestId);
+        } else if (pathname.match(/^\/api\/v1\/folders\/downloads\/files\/\d+\/verify$/) && method === 'POST') {
+            const gid = parseInt(pathname.split('/')[6]);
+            handleGalleryVerify(req, res, gid, requestId);
+        }
         // ==================== System ====================
         else if (pathname === '/api/v1/system/info') {
             handleSystemInfo(res, requestId);
@@ -381,6 +469,128 @@ const server = http.createServer((req, res) => {
             handleGetReceiveSettings(res, requestId);
         } else if (pathname === '/api/v1/settings/receive' && method === 'PUT') {
             handleUpdateReceiveSettings(req, res, requestId);
+        }
+        // ==================== Data Export/Import ====================
+        else if (pathname === '/api/v1/data/export/files' && method === 'GET') {
+            handleDataExportFiles(res, requestId);
+        } else if (pathname === '/api/v1/data/export/bookmarks' && method === 'GET') {
+            handleDataExportBookmarks(res, requestId);
+        } else if (pathname === '/api/v1/data/export/favorites' && method === 'GET') {
+            handleDataExportFavorites(res, requestId);
+        } else if (pathname === '/api/v1/data/export/downloads' && method === 'GET') {
+            handleDataExportDownloads(res, requestId);
+        } else if (pathname === '/api/v1/data/export/db' && method === 'GET') {
+            handleDataExportDB(res, requestId);
+        } else if (pathname === '/api/v1/data/export/csv' && method === 'GET') {
+            handleDataExportCSV(res, requestId);
+        } else if (pathname === '/api/v1/data/import/bookmarks' && method === 'POST') {
+            handleDataImport(req, res, 'bookmarks', requestId);
+        } else if (pathname === '/api/v1/data/import/favorites' && method === 'POST') {
+            handleDataImport(req, res, 'favorites', requestId);
+        } else if (pathname === '/api/v1/data/import/downloads' && method === 'POST') {
+            handleDataImport(req, res, 'downloads', requestId);
+        } else if (pathname === '/api/v1/data/import/db' && method === 'POST') {
+            handleDataImportDB(req, res, requestId);
+        } else if (pathname === '/api/v1/data/import/csv' && method === 'POST') {
+            handleDataImportCSV(req, res, requestId);
+        }
+        // ==================== Compress ====================
+        else if (pathname === '/api/v1/compress/create' && method === 'POST') {
+            handleCompressCreate(req, res, requestId);
+        } else if (pathname === '/api/v1/compress/tasks' && method === 'GET') {
+            handleCompressTasks(res, requestId);
+        } else if (pathname.match(/^\/api\/v1\/compress\/tasks\/[^/]+\/download/) && method === 'GET') {
+            const taskId = pathname.split('/')[5];
+            handleCompressDownload(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/compress\/tasks\/[^/]+$/) && method === 'GET') {
+            const taskId = pathname.split('/')[5];
+            handleCompressTaskStatus(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/compress\/tasks\/[^/]+$/) && method === 'DELETE') {
+            const taskId = pathname.split('/')[5];
+            handleCompressTaskDelete(res, taskId, requestId);
+        } else if (pathname === '/api/v1/compress/import' && method === 'POST') {
+            handleCompressImport(req, res, requestId);
+        } else if (pathname === '/api/v1/compress/import/confirm' && method === 'POST') {
+            handleCompressImportConfirm(req, res, requestId);
+        }
+        // ==================== Push Data (POST) ====================
+        else if (pathname.match(/^\/api\/v1\/push\/tasks\/[^/]+\/data$/) && method === 'POST') {
+            const id = pathname.split('/')[5];
+            handlePushTaskDataPost(req, res, id, requestId);
+        }
+        // ==================== Favorites ====================
+        else if (pathname === '/api/v1/favorites' && method === 'GET') {
+            handleFavorites(req, res, url, requestId);
+        } else if (pathname === '/api/v1/favorites' && method === 'QUERY') {
+            handleFavoritesQuery(req, res, requestId);
+        }
+        // ==================== Downloads ====================
+        else if (pathname === '/api/v1/downloads/batch/start' && method === 'POST') {
+            handleBatchStartDownloads(req, res, requestId);
+        } else if (pathname === '/api/v1/downloads/batch/pause' && method === 'POST') {
+            handleBatchPauseDownloads(req, res, requestId);
+        } else if (pathname === '/api/v1/downloads/batch' && method === 'DELETE') {
+            handleBatchDeleteDownloads(req, res, requestId);
+        } else if (pathname === '/api/v1/downloads' && method === 'GET') {
+            handleDownloads(req, res, url, requestId);
+        } else if (pathname === '/api/v1/downloads' && method === 'POST') {
+            handleCreateDownload(req, res, requestId);
+        } else if (pathname.match(/^\/api\/v1\/downloads\/\d+\/start$/) && method === 'POST') {
+            const gid = parseInt(pathname.split('/')[4]);
+            handleStartDownload(res, gid, requestId);
+        } else if (pathname.match(/^\/api\/v1\/downloads\/\d+\/pause$/) && method === 'POST') {
+            const gid = parseInt(pathname.split('/')[4]);
+            handlePauseDownload(res, gid, requestId);
+        } else if (pathname.match(/^\/api\/v1\/downloads\/\d+$/) && method === 'DELETE') {
+            const gid = parseInt(pathname.split('/')[4]);
+            handleDeleteDownload(res, gid, requestId);
+        } else if (pathname.match(/^\/api\/v1\/downloads\/\d+$/) && method === 'GET') {
+            const gid = parseInt(pathname.split('/')[4]);
+            handleDownloadDetail(res, gid, requestId);
+        }
+        // ==================== Connect ====================
+        else if (pathname === '/api/v1/connect' && method === 'POST') {
+            handleConnect(req, res, requestId);
+        } else if (pathname === '/api/v1/connect' && method === 'DELETE') {
+            handleDisconnect(req, res, requestId);
+        } else if (pathname === '/api/v1/connect/peers' && method === 'GET') {
+            handleGetPeers(res, requestId);
+        }
+        // ==================== Relay ====================
+        else if (pathname === '/api/v1/relay/batch' && method === 'POST') {
+            handleRelayBatch(req, res, requestId);
+        } else if (pathname === '/api/v1/relay/create' && method === 'POST') {
+            handleRelayCreate(req, res, requestId);
+        } else if (pathname === '/api/v1/relay/tasks' && method === 'GET') {
+            handleRelayTasks(req, res, url, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+\/status$/) && method === 'GET') {
+            const taskId = pathname.split('/')[4];
+            handleRelayStatus(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+\/accept$/) && method === 'POST') {
+            const taskId = pathname.split('/')[4];
+            handleRelayAccept(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+\/reject$/) && method === 'POST') {
+            const taskId = pathname.split('/')[4];
+            handleRelayReject(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+\/cancel$/) && method === 'POST') {
+            const taskId = pathname.split('/')[4];
+            handleRelayCancel(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+\/download$/) && method === 'GET') {
+            const taskId = pathname.split('/')[4];
+            handleRelayDownload(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/relay\/[^/]+$/) && method === 'DELETE') {
+            const taskId = pathname.split('/')[4];
+            handleRelayDelete(res, taskId, requestId);
+        }
+        // ==================== Unified Tasks ====================
+        else if (pathname === '/api/v1/tasks' && method === 'GET') {
+            handleUnifiedTasks(req, res, url, requestId);
+        } else if (pathname.match(/^\/api\/v1\/tasks\/[^/]+$/) && method === 'GET') {
+            const taskId = pathname.split('/').pop();
+            handleUnifiedTaskDetail(res, taskId, requestId);
+        } else if (pathname.match(/^\/api\/v1\/tasks\/[^/]+$/) && method === 'DELETE') {
+            const taskId = pathname.split('/').pop();
+            handleUnifiedTaskDelete(res, taskId, requestId);
         }
         // ==================== Device ====================
         else if (pathname === '/api/v1/device/info') {
@@ -728,9 +938,13 @@ function handleBatchDelete(req, res, folder, requestId) {
     readBody(req, (body) => {
         let data = {};
         try { data = JSON.parse(body); } catch (e) { }
-        console.log(`[${requestId}] ← 200 batch delete ${folder}: ${data.files?.length}个`);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: true, deleted: data.files?.length || 0, failed: 0 }));
+        const fileCount = data.files?.length || 0;
+        console.log(`[${requestId}] ← 200 batch delete ${folder}: ${fileCount}个`);
+        // 模拟删除延迟
+        setTimeout(() => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, deleted: fileCount, failed: 0 }));
+        }, 500);
     });
 }
 
@@ -756,7 +970,8 @@ function handleSystemInfo(res, requestId) {
         storageFreeFormatted: '59.60 GB',
         authMode: 'none',
         deleteEnabled: true,
-        syncDownloadEnabled: false
+        syncDownloadEnabled: false,
+        remoteManagementEnabled: true
     }));
 }
 
@@ -868,6 +1083,1085 @@ function handleDeviceInfo(res, requestId) {
         deviceType: 'server',
         appVersion: '2.0.2.2'
     }));
+}
+
+// ==================== Integrity Check Handlers ====================
+
+function generateMockHash(length) {
+    const chars = '0123456789abcdef';
+    let result = '';
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
+
+function handleFileHash(res, folder, filename, algorithm, requestId) {
+    const hashLength = algorithm === 'sha256' ? 64 : algorithm === 'sha1' ? 40 : 32;
+    const hash = generateMockHash(hashLength);
+    const size = Math.floor(Math.random() * 5000000) + 100000;
+
+    console.log(`[${requestId}] ← 200 ${folder}/${filename}/hash (${algorithm})`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        filename,
+        path: `/sdcard/EhViewer/${folder}/${filename}`,
+        size,
+        sizeFormatted: formatSize(size),
+        hash,
+        algorithm,
+        lastModified: Date.now() - Math.floor(Math.random() * 86400000 * 30),
+        lastModifiedFormatted: new Date().toLocaleString()
+    }));
+}
+
+function handleGalleryIntegrity(res, gid, algorithm, requestId) {
+    const gallery = mockGalleries.find(g => g.gid === gid);
+    const title = gallery ? gallery.title : `Gallery ${gid}`;
+    const fileCount = gallery ? gallery.pages : 25;
+    const hashLength = algorithm === 'sha256' ? 64 : algorithm === 'sha1' ? 40 : 32;
+
+    const files = [];
+    let totalSize = 0;
+
+    // Add .ehviewer metadata file
+    const metaSize = 1024;
+    files.push({
+        filename: '.ehviewer',
+        size: metaSize,
+        sizeFormatted: formatSize(metaSize),
+        hash: generateMockHash(hashLength)
+    });
+    totalSize += metaSize;
+
+    // Add .ehviewer.extra.json
+    const extraSize = 4096;
+    files.push({
+        filename: '.ehviewer.extra.json',
+        size: extraSize,
+        sizeFormatted: formatSize(extraSize),
+        hash: generateMockHash(hashLength)
+    });
+    totalSize += extraSize;
+
+    // Add image files
+    for (let i = 1; i <= fileCount; i++) {
+        const size = Math.floor(Math.random() * 3000000) + 500000;
+        files.push({
+            filename: String(i).padStart(8, '0') + '.jpg',
+            size,
+            sizeFormatted: formatSize(size),
+            hash: generateMockHash(hashLength)
+        });
+        totalSize += size;
+    }
+
+    console.log(`[${requestId}] ← 200 integrity/${gid}: ${files.length} files`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        gid,
+        title,
+        folderName: `${gid} - ${title}`,
+        totalFiles: files.length,
+        totalSize,
+        totalSizeFormatted: formatSize(totalSize),
+        algorithm,
+        files
+    }));
+}
+
+function handleGalleryVerify(req, res, gid, requestId) {
+    readBody(req, (body) => {
+        let request = {};
+        try { request = JSON.parse(body); } catch (e) { }
+
+        const algorithm = request.algorithm || 'md5';
+        const clientFiles = request.files || [];
+        const hashLength = algorithm === 'sha256' ? 64 : algorithm === 'sha1' ? 40 : 32;
+
+        const gallery = mockGalleries.find(g => g.gid === gid);
+        const totalFiles = gallery ? gallery.pages + 2 : 27; // +2 for metadata files
+
+        const details = [];
+        let match = 0;
+        let mismatch = 0;
+        const missingFiles = [];
+
+        // Process client files
+        clientFiles.forEach(cf => {
+            // Simulate most files matching
+            if (Math.random() > 0.1) {
+                details.push({ filename: cf.filename, status: 'match' });
+                match++;
+            } else {
+                details.push({
+                    filename: cf.filename,
+                    status: 'mismatch',
+                    remoteHash: generateMockHash(hashLength),
+                    localHash: cf.hash,
+                    remoteSize: cf.size,
+                    localSize: cf.size
+                });
+                mismatch++;
+            }
+        });
+
+        // Add some missing files
+        const missingCount = Math.min(3, totalFiles - clientFiles.length);
+        for (let i = 0; i < missingCount; i++) {
+            const name = String(clientFiles.length + i + 1).padStart(8, '0') + '.jpg';
+            missingFiles.push(name);
+        }
+
+        console.log(`[${requestId}] ← 200 verify/${gid}: match=${match}, mismatch=${mismatch}, missing=${missingFiles.length}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            gid,
+            totalFiles,
+            verifiedFiles: clientFiles.length,
+            match,
+            mismatch,
+            missing: missingFiles.length,
+            details,
+            missingFiles
+        }));
+    });
+}
+
+// ==================== Data Export/Import Handlers ====================
+
+function handleDataExportFiles(res, requestId) {
+    console.log(`[${requestId}] ← 200 data/export/files`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        dbFiles: [
+            { name: '1720608000000.db', path: '/data/1720608000000.db', size: 1048576, sizeFormatted: '1.0 MB', lastModified: Date.now(), type: 'db' },
+            { name: '1720607000000.db', path: '/data/1720607000000.db', size: 524288, sizeFormatted: '512.0 KB', lastModified: Date.now() - 86400000, type: 'db' }
+        ],
+        csvFiles: [
+            { name: 'ehviewer-download-20260712.csv', path: '/Output/ehviewer-download-20260712.csv', size: 262144, sizeFormatted: '256.0 KB', lastModified: Date.now(), type: 'csv' }
+        ]
+    }));
+}
+
+function handleDataExportBookmarks(res, requestId) {
+    const items = mockGalleries.slice(0, 10).map(g => ({
+        gid: g.gid, token: g.token, title: g.title, titleJpn: g.titleJpn,
+        thumb: g.thumb, category: g.category, posted: g.posted,
+        uploader: g.uploader, rating: g.rating, pages: g.pages
+    }));
+    console.log(`[${requestId}] ← 200 data/export/bookmarks: ${items.length} items`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ type: 'bookmarks', exportTime: Date.now(), total: items.length, items }));
+}
+
+function handleDataExportFavorites(res, requestId) {
+    // Local favorites - only a few items, not all downloads
+    const items = mockGalleries.slice(0, 3).map(g => ({
+        gid: g.gid, token: g.token, title: g.title, titleJpn: g.titleJpn,
+        thumb: g.thumb, favCat: '默认', favNote: ''
+    }));
+    console.log(`[${requestId}] ← 200 data/export/favorites: ${items.length} items`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        type: 'favorites', exportTime: Date.now(), total: items.length,
+        catNames: ['默认'],
+        catCounts: [items.length],
+        items
+    }));
+}
+
+function handleDataExportDownloads(res, requestId) {
+    const items = mockGalleries.map(g => ({
+        gid: g.gid, token: g.token, title: g.title, titleJpn: g.titleJpn,
+        thumb: g.thumb, category: g.category, posted: g.posted,
+        uploader: g.uploader, rating: g.rating, pages: g.pages,
+        state: g.state, time: g.time, label: g.label
+    }));
+    console.log(`[${requestId}] ← 200 data/export/downloads: ${items.length} items`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ type: 'downloads', exportTime: Date.now(), total: items.length, items }));
+}
+
+function handleDataExportDB(res, requestId) {
+    const content = 'SQLite format 3\0mock database content for testing';
+    console.log(`[${requestId}] ← 200 data/export/db`);
+    res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="ehviewer_export_20260712.db"',
+        'Content-Length': Buffer.byteLength(content)
+    });
+    res.end(content);
+}
+
+function handleDataExportCSV(res, requestId) {
+    let csv = 'GID,Token,Title,TitleJpn,Category,Posted,Uploader,Rating,Pages,State,Label,Time\n';
+    mockGalleries.slice(0, 20).forEach(g => {
+        csv += `${g.gid},${g.token},${g.title},${g.titleJpn},${g.category},${g.posted},${g.uploader},${g.rating},${g.pages},${g.state},${g.label},${g.time}\n`;
+    });
+    console.log(`[${requestId}] ← 200 data/export/csv`);
+    res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': 'attachment; filename="ehviewer-download-20260712.csv"',
+        'Content-Length': Buffer.byteLength(csv)
+    });
+    res.end(csv);
+}
+
+function handleDataImport(req, res, type, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const items = data.items || [];
+        console.log(`[${requestId}] ← 200 data/import/${type}: ${items.length} items`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, imported: items.length, skipped: 0, failed: 0 }));
+    });
+}
+
+function handleDataImportDB(req, res, requestId) {
+    console.log(`[${requestId}] ← 200 data/import/db`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Database imported successfully', tables: { downloads: 100, bookmarks: 50, history: 200 } }));
+}
+
+function handleDataImportCSV(req, res, requestId) {
+    readBody(req, (body) => {
+        console.log(`[${requestId}] ← 200 data/import/csv`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, imported: 20, skipped: 0, failed: 0 }));
+    });
+}
+
+// ==================== Compress Handlers ====================
+
+const mockCompressTasks = [];
+
+function handleCompressCreate(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const task = {
+            taskId: 'compress-' + Date.now(),
+            status: 'completed',
+            totalGalleries: (data.gids || []).length,
+            completedGalleries: (data.gids || []).length,
+            progress: 100,
+            splitSizeMB: data.splitSizeMB || 1024,
+            outputFiles: [
+                { name: 'ehviewer_20260712-part1.zip', path: '/compress/ehviewer_20260712-part1.zip', size: 1073741824, sizeFormatted: '1.00 GB' },
+                { name: 'ehviewer_20260712-part2.zip', path: '/compress/ehviewer_20260712-part2.zip', size: 524288000, sizeFormatted: '500.00 MB' }
+            ],
+            createdTime: Date.now(),
+            completedTime: Date.now()
+        };
+        mockCompressTasks.push(task);
+        console.log(`[${requestId}] ← 200 compress/create: ${task.taskId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(task));
+    });
+}
+
+function handleCompressTasks(res, requestId) {
+    console.log(`[${requestId}] ← 200 compress/tasks: ${mockCompressTasks.length} tasks`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ tasks: mockCompressTasks }));
+}
+
+function handleCompressTaskStatus(res, taskId, requestId) {
+    const task = mockCompressTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    console.log(`[${requestId}] ← 200 compress/tasks/${taskId}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(task));
+}
+
+function handleCompressDownload(res, taskId, requestId) {
+    const content = 'PK mock zip content for testing';
+    console.log(`[${requestId}] ← 200 compress/tasks/${taskId}/download`);
+    res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': 'attachment; filename="ehviewer_20260712-part1.zip"',
+        'Content-Length': Buffer.byteLength(content)
+    });
+    res.end(content);
+}
+
+function handleCompressTaskDelete(res, taskId, requestId) {
+    const idx = mockCompressTasks.findIndex(t => t.taskId === taskId);
+    if (idx >= 0) mockCompressTasks.splice(idx, 1);
+    console.log(`[${requestId}] ← 200 compress/tasks/${taskId} (deleted)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Task cancelled' }));
+}
+
+function handleCompressImport(req, res, requestId) {
+    console.log(`[${requestId}] ← 200 compress/import`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+        importId: 'import-' + Date.now(),
+        fileName: 'ehviewer_backup.zip',
+        fileSize: 1073741824,
+        totalGalleries: 3,
+        galleries: [
+            { folderName: '12345 - Gallery Title', gid: 12345, title: 'Gallery Title', hasMetadata: true, fileCount: 25, totalSize: 52428800, isDuplicate: false },
+            { folderName: '67890 - Another Gallery', gid: 67890, title: 'Another Gallery', hasMetadata: true, fileCount: 30, totalSize: 62914560, isDuplicate: true },
+            { folderName: 'Unknown Gallery', gid: null, title: 'Unknown Gallery', hasMetadata: false, fileCount: 15, totalSize: 31457280, isDuplicate: false }
+        ],
+        duplicates: [{ gid: 67890, existingTitle: '67890 - Another Gallery (existing)', newTitle: '67890 - Another Gallery' }]
+    }));
+}
+
+function handleCompressImportConfirm(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        console.log(`[${requestId}] ← 200 compress/import/confirm`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true, imported: 2, skipped: 1, failed: 0,
+            details: [
+                { gid: 12345, status: 'imported', message: 'Import success' },
+                { gid: 67890, status: 'skipped', message: 'Already exists' },
+                { gid: null, status: 'imported', message: 'Imported as local gallery, GID: 999001' }
+            ]
+        }));
+    });
+}
+
+function handlePushTaskDataPost(req, res, id, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        console.log(`[${requestId}] ← 200 push/tasks/${id}/data (chunk ${data.chunk || 1})`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, received: data.length || 0, totalReceived: data.offset || 0 }));
+    });
+}
+
+// ==================== Unified Tasks Handlers ====================
+
+function handleUnifiedTasks(req, res, url, requestId) {
+    const type = url.searchParams.get('type') || 'all';
+    const status = url.searchParams.get('status') || 'all';
+
+    // Merge push and compress tasks
+    const allTasks = [];
+
+    // Add push tasks
+    mockPushTasks.forEach(t => {
+        allTasks.push({
+            taskId: t.id,
+            type: 'push',
+            subType: t.type,
+            status: t.status,
+            sourceDevice: t.fromDevice,
+            progress: t.progress || 0,
+            total: t.total || 0,
+            completed: t.transferred || 0,
+            createdTime: t.createdTime || Date.now(),
+            updatedTime: t.createdTime,
+            completedTime: null
+        });
+    });
+
+    // Add compress tasks
+    mockCompressTasks.forEach(t => {
+        allTasks.push({
+            taskId: t.taskId,
+            type: 'compress',
+            subType: 'gallery',
+            status: t.status,
+            progress: t.progress,
+            total: t.totalGalleries,
+            completed: t.completedGalleries,
+            createdTime: t.createdTime,
+            updatedTime: t.completedTime || t.createdTime,
+            completedTime: t.completedTime,
+            splitSizeMB: t.splitSizeMB,
+            outputFiles: t.outputFiles
+        });
+    });
+
+    // Add relay tasks
+    mockRelayTasks.forEach(t => {
+        allTasks.push({
+            taskId: t.taskId,
+            type: 'relay',
+            subType: 'gallery',
+            status: t.status,
+            sourceDevice: t.sourceDevice,
+            targetDevice: t.targetDevice,
+            progress: t.progress,
+            total: t.total,
+            completed: t.finished,
+            createdTime: t.createdTime,
+            updatedTime: t.updatedTime,
+            completedTime: t.completedTime
+        });
+    });
+
+    // Filter
+    let filtered = allTasks;
+    if (type !== 'all') {
+        filtered = filtered.filter(t => t.type === type);
+    }
+    if (status !== 'all') {
+        filtered = filtered.filter(t => t.status === status);
+    }
+
+    // Sort by createdTime desc
+    filtered.sort((a, b) => b.createdTime - a.createdTime);
+
+    console.log(`[${requestId}] ← 200 tasks: ${filtered.length} tasks (type=${type}, status=${status})`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ tasks: filtered, total: filtered.length }));
+}
+
+function handleUnifiedTaskDetail(res, taskId, requestId) {
+    // Search in push tasks
+    let task = mockPushTasks.find(t => t.id === taskId);
+    if (task) {
+        const result = {
+            taskId: task.id,
+            type: 'push',
+            subType: task.type,
+            status: task.status,
+            sourceDevice: task.fromDevice,
+            progress: task.progress || 0,
+            total: task.total || 0,
+            completed: task.transferred || 0,
+            createdTime: task.createdTime || Date.now()
+        };
+        console.log(`[${requestId}] ← 200 tasks/${taskId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+    }
+
+    // Search in compress tasks
+    task = mockCompressTasks.find(t => t.taskId === taskId);
+    if (task) {
+        console.log(`[${requestId}] ← 200 tasks/${taskId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            taskId: task.taskId,
+            type: 'compress',
+            subType: 'gallery',
+            status: task.status,
+            progress: task.progress,
+            total: task.totalGalleries,
+            completed: task.completedGalleries,
+            createdTime: task.createdTime,
+            completedTime: task.completedTime,
+            splitSizeMB: task.splitSizeMB,
+            outputFiles: task.outputFiles
+        }));
+        return;
+    }
+
+    // Search in relay tasks
+    task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (task) {
+        console.log(`[${requestId}] ← 200 tasks/${taskId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            taskId: task.taskId,
+            type: 'relay',
+            subType: 'gallery',
+            status: task.status,
+            sourceDevice: task.sourceDevice,
+            targetDevice: task.targetDevice,
+            progress: task.progress,
+            total: task.total,
+            completed: task.finished,
+            createdTime: task.createdTime,
+            updatedTime: task.updatedTime,
+            completedTime: task.completedTime
+        }));
+        return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+}
+
+function handleUnifiedTaskDelete(res, taskId, requestId) {
+    // Try push tasks
+    const pushIdx = mockPushTasks.findIndex(t => t.id === taskId);
+    if (pushIdx >= 0) {
+        mockPushTasks[pushIdx].status = 'cancelled';
+        console.log(`[${requestId}] ← 200 tasks/${taskId} (cancelled push task)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Task cancelled' }));
+        return;
+    }
+
+    // Try compress tasks
+    const compressIdx = mockCompressTasks.findIndex(t => t.taskId === taskId);
+    if (compressIdx >= 0) {
+        mockCompressTasks.splice(compressIdx, 1);
+        console.log(`[${requestId}] ← 200 tasks/${taskId} (removed compress task)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Task removed' }));
+        return;
+    }
+
+    // Try relay tasks
+    const relayIdx = mockRelayTasks.findIndex(t => t.taskId === taskId);
+    if (relayIdx >= 0) {
+        mockRelayTasks[relayIdx].status = 'cancelled';
+        mockRelayTasks[relayIdx].updatedTime = Date.now();
+        console.log(`[${requestId}] ← 200 tasks/${taskId} (cancelled relay task)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Task cancelled' }));
+        return;
+    }
+
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+}
+
+// ==================== Favorites Handlers ====================
+
+function handleFavorites(req, res, url, requestId) {
+    const page = parseInt(url.searchParams.get('page') || '1');
+    const limit = parseInt(url.searchParams.get('limit') || '30');
+    const search = url.searchParams.get('search');
+
+    let items = mockFavorites.map(fav => {
+        const gallery = mockGalleries.find(g => g.gid === fav.gid);
+        if (gallery) {
+            return {
+                ...gallery,
+                favCat: fav.favCat,
+                favNote: fav.favNote,
+                isFavorited: true
+            };
+        }
+        return { ...fav, state: -1, size: 0, isComplete: false, downloadedPages: 0, isFavorited: true };
+    });
+
+    if (search) {
+        const s = search.toLowerCase();
+        items = items.filter(g =>
+            g.title.toLowerCase().includes(s) ||
+            (g.titleJpn && g.titleJpn.toLowerCase().includes(s))
+        );
+    }
+
+    const total = items.length;
+    const start = (page - 1) * limit;
+    const galleries = items.slice(start, start + limit);
+
+    console.log(`[${requestId}] ← 200 favorites: total=${total}, page=${page}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ total, page, limit, galleries }));
+}
+
+function handleFavoritesQuery(req, res, requestId) {
+    readBody(req, (body) => {
+        let query = {};
+        try { query = JSON.parse(body); } catch (e) { }
+        const page = query.page || 1;
+        const limit = query.limit || 30;
+        let items = mockFavorites.map(fav => {
+            const gallery = mockGalleries.find(g => g.gid === fav.gid);
+            if (gallery) {
+                return { ...gallery, favCat: fav.favCat, favNote: fav.favNote, isFavorited: true };
+            }
+            return { ...fav, state: -1, size: 0, isComplete: false, downloadedPages: 0, isFavorited: true };
+        });
+
+        if (query.filter?.category) {
+            items = items.filter(g => query.filter.category.includes(g.category));
+        }
+
+        const total = items.length;
+        const start = (page - 1) * limit;
+        const galleries = items.slice(start, start + limit);
+
+        console.log(`[${requestId}] ← 200 QUERY favorites: total=${total}, page=${page}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ total, page, limit, galleries }));
+    });
+}
+
+// ==================== Downloads Handlers ====================
+
+function handleDownloads(req, res, url, requestId) {
+    const page = parseInt(url.searchParams.get('page') || '1');
+    const limit = parseInt(url.searchParams.get('limit') || '30');
+    const stateFilter = url.searchParams.get('state') || 'all';
+    const label = url.searchParams.get('label');
+    const search = url.searchParams.get('search');
+
+    let filtered = [...mockDownloads];
+
+    if (stateFilter !== 'all') {
+        const states = stateFilter.split(',').map(Number);
+        filtered = filtered.filter(d => states.includes(d.state));
+    }
+    if (label) filtered = filtered.filter(d => d.label === label);
+    if (search) {
+        const s = search.toLowerCase();
+        filtered = filtered.filter(d =>
+            d.title.toLowerCase().includes(s) ||
+            (d.titleJpn && d.titleJpn.toLowerCase().includes(s)) ||
+            (d.uploader && d.uploader.toLowerCase().includes(s))
+        );
+    }
+
+    const total = filtered.length;
+    const start = (page - 1) * limit;
+    const downloads = filtered.slice(start, start + limit);
+
+    console.log(`[${requestId}] ← 200 downloads: total=${total}, page=${page}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ total, page, limit, downloads }));
+}
+
+function handleDownloadDetail(res, gid, requestId) {
+    const download = mockDownloads.find(d => d.gid === gid);
+    if (!download) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Download not found' }));
+        return;
+    }
+    console.log(`[${requestId}] ← 200 downloads/${gid}`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(download));
+}
+
+function handleCreateDownload(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+
+        const existing = mockDownloads.find(d => d.gid === data.gid);
+        if (existing) {
+            console.log(`[${requestId}] ← 409 downloads (already exists)`);
+            res.writeHead(409, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, error: 'Download already exists', code: 409 }));
+            return;
+        }
+
+        const startState = data.startImmediately ? 1 : 0;
+        const download = {
+            gid: data.gid,
+            token: data.token || '',
+            title: data.title || `Gallery ${data.gid}`,
+            titleJpn: data.titleJpn || '',
+            thumb: data.thumb || '',
+            category: data.category || 2,
+            posted: data.posted || '',
+            uploader: data.uploader || '',
+            rating: data.rating || 0,
+            language: data.language || '',
+            pages: data.pages || 0,
+            state: startState,
+            stateName: downloadStateToName(startState),
+            label: data.label || '默认',
+            time: Date.now(),
+            createdTime: Date.now(),
+            createdDate: new Date().toLocaleString(),
+            finished: 0,
+            total: data.pages || 0,
+            downloaded: 0,
+            speed: 0,
+            speedFormatted: '0 B/s',
+            remaining: data.pages || 0,
+            progress: 0,
+            legacy: 0,
+            fileSize: 0,
+            simpleTags: []
+        };
+        mockDownloads.push(download);
+
+        console.log(`[${requestId}] ← 200 downloads (created gid=${data.gid})`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Download added', gid: data.gid, state: downloadStateToName(startState) }));
+    });
+}
+
+function handleStartDownload(res, gid, requestId) {
+    const download = mockDownloads.find(d => d.gid === gid);
+    if (!download) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Download not found' }));
+        return;
+    }
+    if (download.state === 2) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Download is in state downloading, cannot start' }));
+        return;
+    }
+    download.state = 1;
+    download.stateName = 'wait';
+    console.log(`[${requestId}] ← 200 downloads/${gid}/start`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Download started', gid, state: 'wait' }));
+}
+
+function handlePauseDownload(res, gid, requestId) {
+    const download = mockDownloads.find(d => d.gid === gid);
+    if (!download) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Download not found' }));
+        return;
+    }
+    download.state = 0;
+    download.stateName = 'none';
+    download.speed = 0;
+    download.speedFormatted = '0 B/s';
+    console.log(`[${requestId}] ← 200 downloads/${gid}/pause`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Download paused', gid, state: 'none' }));
+}
+
+function handleDeleteDownload(res, gid, requestId) {
+    const idx = mockDownloads.findIndex(d => d.gid === gid);
+    if (idx >= 0) mockDownloads.splice(idx, 1);
+    console.log(`[${requestId}] ← 200 downloads/${gid} (deleted)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Download deleted', gid }));
+}
+
+function handleBatchStartDownloads(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const gids = data.gids || [];
+        let count = 0;
+        gids.forEach(gid => {
+            const d = mockDownloads.find(dl => dl.gid === gid);
+            if (d && d.state !== 2) {
+                d.state = 1;
+                d.stateName = 'wait';
+                count++;
+            }
+        });
+        console.log(`[${requestId}] ← 200 downloads/batch/start: ${count}个`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Batch start completed', count }));
+    });
+}
+
+function handleBatchPauseDownloads(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const gids = data.gids || [];
+        let count = 0;
+        gids.forEach(gid => {
+            const d = mockDownloads.find(dl => dl.gid === gid);
+            if (d) {
+                d.state = 0;
+                d.stateName = 'none';
+                d.speed = 0;
+                d.speedFormatted = '0 B/s';
+                count++;
+            }
+        });
+        console.log(`[${requestId}] ← 200 downloads/batch/pause: ${count}个`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Batch pause completed', count }));
+    });
+}
+
+function handleBatchDeleteDownloads(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const gids = data.gids || [];
+        let count = 0;
+        gids.forEach(gid => {
+            const idx = mockDownloads.findIndex(d => d.gid === gid);
+            if (idx >= 0) { mockDownloads.splice(idx, 1); count++; }
+        });
+        console.log(`[${requestId}] ← 200 downloads/batch: ${count}个 deleted`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Batch delete completed', count }));
+    });
+}
+
+// ==================== Connect Handlers ====================
+
+function handleConnect(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+
+        const peer = {
+            deviceId: data.deviceId || 'unknown-' + Date.now(),
+            deviceName: data.deviceName || 'Unknown Device',
+            deviceType: data.deviceType || 'pc',
+            remoteIp: req.socket.remoteAddress || '127.0.0.1',
+            port: data.port || 8080,
+            connectedAt: Date.now(),
+            lastSeen: Date.now()
+        };
+
+        const existing = mockPeers.findIndex(p => p.deviceId === peer.deviceId);
+        if (existing >= 0) {
+            mockPeers[existing] = peer;
+        } else {
+            mockPeers.push(peer);
+        }
+
+        console.log(`[${requestId}] ← 200 connect: ${peer.deviceId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            message: 'Connected',
+            deviceId: peer.deviceId,
+            serverTime: Date.now()
+        }));
+    });
+}
+
+function handleDisconnect(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const deviceId = data.deviceId;
+        const idx = mockPeers.findIndex(p => p.deviceId === deviceId);
+        if (idx >= 0) mockPeers.splice(idx, 1);
+        console.log(`[${requestId}] ← 200 disconnect: ${deviceId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: 'Disconnected', deviceId }));
+    });
+}
+
+function handleGetPeers(res, requestId) {
+    const now = Date.now();
+    const TIMEOUT = 5 * 60 * 1000;
+    for (let i = mockPeers.length - 1; i >= 0; i--) {
+        if (now - mockPeers[i].lastSeen > TIMEOUT) {
+            mockPeers.splice(i, 1);
+        }
+    }
+    console.log(`[${requestId}] ← 200 connect/peers: ${mockPeers.length}个`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ peers: mockPeers, total: mockPeers.length }));
+}
+
+// ==================== Relay Handlers ====================
+
+function handleRelayCreate(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const task = {
+            taskId: 'relay-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+            gid: data.gid,
+            token: data.token || '',
+            title: data.title || `Gallery ${data.gid}`,
+            titleJpn: data.titleJpn || '',
+            thumb: data.thumb || '',
+            category: data.category || 0,
+            posted: data.posted || '',
+            uploader: data.uploader || '',
+            rating: data.rating || 0,
+            pages: data.pages || 0,
+            status: 'pending',
+            direction: 'outgoing',
+            directionName: '发出的',
+            sourceDevice: data.sourceDevice || 'Test PC',
+            sourceDeviceId: data.sourceDeviceId || '',
+            targetDevice: data.targetDevice || '',
+            targetDeviceId: data.targetDeviceId || '',
+            priority: data.priority || 'normal',
+            autoReturn: data.autoReturn !== false,
+            finished: 0,
+            total: data.pages || 0,
+            speed: 0,
+            speedFormatted: '0 B/s',
+            downloadedSize: 0,
+            downloadedSizeFormatted: '0 B',
+            totalSize: 0,
+            totalSizeFormatted: '0 B',
+            progress: 0,
+            createdTime: Date.now(),
+            updatedTime: Date.now(),
+            completedTime: null,
+            returnedTime: null,
+            createdDate: new Date().toLocaleString(),
+            updatedDate: new Date().toLocaleString()
+        };
+        mockRelayTasks.push(task);
+        console.log(`[${requestId}] ← 200 relay/create: ${task.taskId}`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            success: true,
+            taskId: task.taskId,
+            gid: task.gid,
+            status: task.status,
+            createdTime: task.createdTime
+        }));
+    });
+}
+
+function handleRelayBatch(req, res, requestId) {
+    readBody(req, (body) => {
+        let data = {};
+        try { data = JSON.parse(body); } catch (e) { }
+        const gids = data.gids || [];
+        const tasks = gids.map(gid => {
+            const gallery = mockGalleries.find(g => g.gid === gid);
+            const task = {
+                taskId: 'relay-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+                gid,
+                token: gallery ? gallery.token : '',
+                title: gallery ? gallery.title : `Gallery ${gid}`,
+                titleJpn: gallery ? gallery.titleJpn : '',
+                thumb: gallery ? gallery.thumb : '',
+                category: gallery ? gallery.category : 0,
+                posted: gallery ? gallery.posted : '',
+                uploader: gallery ? gallery.uploader : '',
+                rating: gallery ? gallery.rating : 0,
+                pages: gallery ? gallery.pages : 0,
+                status: 'pending',
+                direction: 'outgoing',
+                directionName: '发出的',
+                sourceDevice: data.sourceDevice || 'Test PC',
+                sourceDeviceId: data.sourceDeviceId || '',
+                targetDevice: data.targetDevice || '',
+                targetDeviceId: data.targetDeviceId || '',
+                priority: data.priority || 'normal',
+                autoReturn: data.autoReturn !== false,
+                finished: 0,
+                total: gallery ? gallery.pages : 0,
+                speed: 0,
+                speedFormatted: '0 B/s',
+                downloadedSize: 0,
+                downloadedSizeFormatted: '0 B',
+                totalSize: gallery ? gallery.fileSize : 0,
+                totalSizeFormatted: gallery ? formatSize(gallery.fileSize) : '0 B',
+                progress: 0,
+                createdTime: Date.now(),
+                updatedTime: Date.now(),
+                completedTime: null,
+                returnedTime: null,
+                createdDate: new Date().toLocaleString(),
+                updatedDate: new Date().toLocaleString()
+            };
+            mockRelayTasks.push(task);
+            return { taskId: task.taskId, gid, status: 'pending' };
+        });
+        console.log(`[${requestId}] ← 200 relay/batch: ${tasks.length}个`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, tasks, total: tasks.length }));
+    });
+}
+
+function handleRelayTasks(req, res, url, requestId) {
+    const statusFilter = url.searchParams.get('status') || 'all';
+    const direction = url.searchParams.get('direction') || 'all';
+
+    let filtered = [...mockRelayTasks];
+    if (statusFilter !== 'all') {
+        filtered = filtered.filter(t => t.status === statusFilter);
+    }
+    if (direction !== 'all') {
+        filtered = filtered.filter(t => t.direction === direction);
+    }
+    filtered.sort((a, b) => b.createdTime - a.createdTime);
+
+    console.log(`[${requestId}] ← 200 relay/tasks: ${filtered.length}个`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ tasks: filtered, total: filtered.length }));
+}
+
+function handleRelayStatus(res, taskId, requestId) {
+    const task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    console.log(`[${requestId}] ← 200 relay/${taskId}/status`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(task));
+}
+
+function handleRelayAccept(res, taskId, requestId) {
+    const task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    task.status = 'downloading';
+    task.updatedTime = Date.now();
+    task.updatedDate = new Date().toLocaleString();
+    console.log(`[${requestId}] ← 200 relay/${taskId}/accept`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Task accepted', taskId }));
+}
+
+function handleRelayReject(res, taskId, requestId) {
+    const task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    task.status = 'rejected';
+    task.updatedTime = Date.now();
+    task.updatedDate = new Date().toLocaleString();
+    console.log(`[${requestId}] ← 200 relay/${taskId}/reject`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Task rejected', taskId }));
+}
+
+function handleRelayCancel(res, taskId, requestId) {
+    const task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    task.status = 'cancelled';
+    task.updatedTime = Date.now();
+    task.updatedDate = new Date().toLocaleString();
+    console.log(`[${requestId}] ← 200 relay/${taskId}/cancel`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Task cancelled', taskId }));
+}
+
+function handleRelayDownload(res, taskId, requestId) {
+    const task = mockRelayTasks.find(t => t.taskId === taskId);
+    if (!task) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task not found' }));
+        return;
+    }
+    if (task.status !== 'returned') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, error: 'Task status is not returned' }));
+        return;
+    }
+    const content = `PK mock relay zip content for gallery ${task.gid}`;
+    console.log(`[${requestId}] ← 200 relay/${taskId}/download`);
+    res.writeHead(200, {
+        'Content-Type': 'application/zip',
+        'Content-Disposition': `attachment; filename="relay_${task.gid}.zip"`,
+        'Content-Length': Buffer.byteLength(content)
+    });
+    res.end(content);
+}
+
+function handleRelayDelete(res, taskId, requestId) {
+    const idx = mockRelayTasks.findIndex(t => t.taskId === taskId);
+    if (idx >= 0) mockRelayTasks.splice(idx, 1);
+    console.log(`[${requestId}] ← 200 relay/${taskId} (deleted)`);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: true, message: 'Task deleted', taskId }));
 }
 
 // 读取请求体

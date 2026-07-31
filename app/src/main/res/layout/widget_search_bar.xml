@@ -22,67 +22,74 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <FrameLayout
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="48dp">
+            android:layout_height="48dp"
+            android:orientation="horizontal"
+            android:baselineAligned="false">
 
             <ImageView
                 android:id="@+id/search_menu"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_gravity="left|center_vertical"
-                android:padding="12dp"/>
-
-            <TextView
-                android:id="@+id/search_title"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:layout_marginLeft="48dp"
-                android:layout_marginRight="48dp"
-                android:textSize="@dimen/text_little_large"
-                android:textColor="?android:attr/textColorSecondary"
-                android:singleLine="true"
-                android:maxLines="1"/>
-
-            <ImageView
-                android:id="@+id/search_action"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:layout_gravity="right|center_vertical"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
                 android:padding="12dp"
-                android:src="@drawable/v_close_dark_x24"
-                android:tint="?attr/drawableColorPrimary"
                 android:background="?attr/selectableItemBackgroundBorderless"/>
+
+            <FrameLayout
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp">
+
+                <TextView
+                    android:id="@+id/search_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:textSize="@dimen/text_little_large"
+                    android:textColor="?android:attr/textColorSecondary"
+                    android:singleLine="true"
+                    android:maxLines="1"/>
+
+                <com.hippo.ehviewer.widget.SearchEditText
+                    android:id="@+id/search_edit_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center_vertical"
+                    android:padding="0dp"
+                    android:paddingStart="0dp"
+                    android:paddingEnd="0dp"
+                    android:textSize="@dimen/text_little_small"
+                    android:background="@null"
+                    android:singleLine="true"
+                    android:maxLines="1"
+                    android:visibility="gone"
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"/>
+
+            </FrameLayout>
 
             <ImageView
                 android:id="@+id/search_advance"
-                android:layout_width="40dp"
-                android:layout_height="48dp"
-                android:layout_gravity="right|center_vertical"
-                android:layout_marginRight="48dp"
-                android:padding="10dp"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:padding="12dp"
                 android:src="@drawable/v_magnify_dark_x24"
                 android:tint="?attr/drawableColorPrimary"
                 android:visibility="gone"
                 android:background="?attr/selectableItemBackgroundBorderless"/>
 
-            <com.hippo.ehviewer.widget.SearchEditText
-                android:id="@+id/search_edit_text"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="center_vertical"
-                android:layout_marginLeft="48dp"
-                android:layout_marginRight="48dp"
-                android:textSize="@dimen/text_little_small"
-                android:background="@null"
-                android:singleLine="true"
-                android:maxLines="1"
-                android:visibility="gone"
-                android:imeOptions="actionSearch"
-                android:inputType="text"/>
+            <ImageView
+                android:id="@+id/search_action"
+                android:layout_width="wrap_content"
+                android:layout_height="match_parent"
+                android:padding="12dp"
+                android:src="@drawable/v_close_dark_x24"
+                android:tint="?attr/drawableColorPrimary"
+                android:background="?attr/selectableItemBackgroundBorderless"/>
 
-        </FrameLayout>
+        </LinearLayout>
 
         <com.hippo.widget.AutoWrapLayout
             android:id="@+id/search_tag_container"

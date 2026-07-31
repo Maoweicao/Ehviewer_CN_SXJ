@@ -17,328 +17,327 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="local_gallery_scan_on_start"
-        android:summary="@string/settings_advanced_local_gallery_scan_on_start_summary"
-        android:title="@string/settings_advanced_local_gallery_scan_on_start" />
+    <PreferenceCategory
+        android:key="category_advanced_local"
+        android:title="@string/settings_category_local"
+        android:summary="@string/settings_category_local_summary"
+        app:allowDividerAbove="false">
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="3"
-        android:key="local_gallery_cache_expire_days"
-        android:summary="%s"
-        android:title="@string/settings_advanced_local_gallery_cache_expire_days"
-        app:entries="@array/local_gallery_cache_expire_entries"
-        app:entryValues="@array/local_gallery_cache_expire_entry_values" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="local_gallery_scan_on_start"
+            android:summary="@string/settings_advanced_local_gallery_scan_on_start_summary"
+            android:title="@string/settings_advanced_local_gallery_scan_on_start" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="local_gallery_scan_cache_enabled"
-        android:summary="@string/settings_advanced_local_gallery_scan_cache_enabled_summary"
-        android:title="@string/settings_advanced_local_gallery_scan_cache_enabled" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="3"
+            android:key="local_gallery_cache_expire_days"
+            android:summary="%s"
+            android:title="@string/settings_advanced_local_gallery_cache_expire_days"
+            app:entries="@array/local_gallery_cache_expire_entries"
+            app:entryValues="@array/local_gallery_cache_expire_entry_values" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="@bool/beta"
-        android:key="save_parse_error_body"
-        android:summary="@string/settings_advanced_save_parse_error_body_summary"
-        android:title="@string/settings_advanced_save_parse_error_body" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="local_gallery_scan_cache_enabled"
+            android:summary="@string/settings_advanced_local_gallery_scan_cache_enabled_summary"
+            android:title="@string/settings_advanced_local_gallery_scan_cache_enabled" />
 
-    <Preference
-        android:key="user_agent"
-        android:title="@string/settings_advanced_user_agent"
-        android:summary="@string/settings_advanced_user_agent_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="@bool/beta"
+            android:key="save_parse_error_body"
+            android:summary="@string/settings_advanced_save_parse_error_body_summary"
+            android:title="@string/settings_advanced_save_parse_error_body" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="save_crash_log"
-        android:summary="@string/settings_advanced_save_crash_log_summary"
-        android:title="@string/settings_advanced_save_crash_log" />
+        <Preference
+            android:key="user_agent"
+            android:title="@string/settings_advanced_user_agent"
+            android:summary="@string/settings_advanced_user_agent_summary" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="show_fab_function_name"
-        android:summary="@string/settings_advanced_show_fab_function_name_summary"
-        android:title="@string/settings_advanced_show_fab_function_name"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="save_crash_log"
+            android:summary="@string/settings_advanced_save_crash_log_summary"
+            android:title="@string/settings_advanced_save_crash_log" />
 
-    <Preference
-        android:key="dump_logcat"
-        android:summary="@string/settings_advanced_dump_logcat_summary"
-        android:title="@string/settings_advanced_dump_logcat"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="show_fab_function_name"
+            android:summary="@string/settings_advanced_show_fab_function_name_summary"
+            android:title="@string/settings_advanced_show_fab_function_name" />
 
-    <Preference
-        android:key="export_database"
-        android:summary="@string/settings_advanced_export_database_summary"
-        android:title="@string/settings_advanced_export_database"
-        app:allowDividerAbove="true" />
+    </PreferenceCategory>
 
-    <Preference
-        android:key="export_path"
-        android:title="@string/settings_advanced_export_path"
-        android:summary="@string/settings_advanced_export_path_summary"
-        app:allowDividerAbove="true" />
+    <PreferenceCategory
+        android:key="category_advanced_diagnostics"
+        android:title="@string/settings_category_diagnostics"
+        android:summary="@string/settings_category_diagnostics_summary">
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="1024"
-        android:key="compress_split_size_mb"
-        android:title="@string/settings_advanced_compress_split_size"
-        android:summary="@string/settings_advanced_compress_split_size_summary"
-        app:allowDividerAbove="true"
-        app:entries="@array/compress_split_size_entries"
-        app:entryValues="@array/compress_split_size_entry_values" />
+        <Preference
+            android:key="dump_logcat"
+            android:summary="@string/settings_advanced_dump_logcat_summary"
+            android:title="@string/settings_advanced_dump_logcat" />
 
-    <com.hippo.ehviewer.preference.ClearDownloadPathCachePreference
-        android:key="clear_download_path_cache"
-        android:summary="@string/settings_advanced_clear_download_path_cache_summary"
-        android:title="@string/settings_advanced_clear_download_path_cache"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="performance_monitor_enabled"
+            android:summary="@string/settings_advanced_performance_monitor_summary"
+            android:title="@string/settings_advanced_performance_monitor" />
 
-    <Preference
-        android:key="clear_memory_cache"
-        android:summary="@string/settings_advanced_clear_memory_cache_summary"
-        android:title="@string/settings_advanced_clear_memory_cache"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="performance_monitor_log"
+            android:summary="@string/settings_advanced_performance_monitor_log_summary"
+            android:title="@string/settings_advanced_performance_monitor_log"
+            android:dependency="performance_monitor_enabled" />
 
-    <!-- ========== 性能监测 ========== -->
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="pre_anr_detection_enabled"
+            android:summary="@string/settings_advanced_pre_anr_detection_summary"
+            android:title="@string/settings_advanced_pre_anr_detection" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="performance_monitor_enabled"
-        android:summary="@string/settings_advanced_performance_monitor_summary"
-        android:title="@string/settings_advanced_performance_monitor" />
+        <Preference
+            android:key="export_diagnostic"
+            android:summary="@string/settings_advanced_export_diagnostic_summary"
+            android:title="@string/settings_advanced_export_diagnostic" />
 
-    <Preference
-        android:key="performance_monitor_log"
-        android:summary="@string/settings_advanced_performance_monitor_log_summary"
-        android:title="@string/settings_advanced_performance_monitor_log"
-        android:dependency="performance_monitor_enabled" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="traffic_capture_enabled"
+            android:summary="@string/settings_advanced_traffic_capture_summary"
+            android:title="@string/settings_advanced_traffic_capture" />
 
-    <!-- ========== 性能监测 END ========== -->
+        <Preference
+            android:key="traffic_capture_page"
+            android:summary="@string/settings_advanced_traffic_capture_page_summary"
+            android:title="@string/settings_advanced_traffic_capture_page"
+            android:dependency="traffic_capture_enabled" />
 
-    <!-- ========== 无响应预判与诊断 ========== -->
+    </PreferenceCategory>
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="pre_anr_detection_enabled"
-        android:summary="@string/settings_advanced_pre_anr_detection_summary"
-        android:title="@string/settings_advanced_pre_anr_detection" />
+    <PreferenceCategory
+        android:key="category_advanced_cache"
+        android:title="@string/settings_category_cache"
+        android:summary="@string/settings_category_cache_summary">
 
-    <Preference
-        android:key="export_diagnostic"
-        android:summary="@string/settings_advanced_export_diagnostic_summary"
-        android:title="@string/settings_advanced_export_diagnostic"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="1024"
+            android:key="compress_split_size_mb"
+            android:title="@string/settings_advanced_compress_split_size"
+            android:summary="@string/settings_advanced_compress_split_size_summary"
+            app:entries="@array/compress_split_size_entries"
+            app:entryValues="@array/compress_split_size_entry_values" />
 
-    <!-- ========== 无响应预判与诊断 END ========== -->
+        <com.hippo.ehviewer.preference.ClearDownloadPathCachePreference
+            android:key="clear_download_path_cache"
+            android:summary="@string/settings_advanced_clear_download_path_cache_summary"
+            android:title="@string/settings_advanced_clear_download_path_cache" />
 
-    <!-- ========== 网络流量抓包 ========== -->
+        <Preference
+            android:key="clear_memory_cache"
+            android:summary="@string/settings_advanced_clear_memory_cache_summary"
+            android:title="@string/settings_advanced_clear_memory_cache" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="traffic_capture_enabled"
-        android:summary="@string/settings_advanced_traffic_capture_summary"
-        android:title="@string/settings_advanced_traffic_capture" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="zh-CN"
+            android:key="app_language"
+            android:summary="%s"
+            android:title="@string/settings_advanced_app_language_title"
+            app:entries="@array/app_language_entries"
+            app:entryValues="@array/app_language_entry_values" />
 
-    <Preference
-        android:key="traffic_capture_page"
-        android:summary="@string/settings_advanced_traffic_capture_page_summary"
-        android:title="@string/settings_advanced_traffic_capture_page"
-        android:dependency="traffic_capture_enabled" />
+    </PreferenceCategory>
 
-    <!-- ========== 网络流量抓包 END ========== -->
+    <PreferenceCategory
+        android:key="category_advanced_network"
+        android:title="@string/settings_category_network"
+        android:summary="@string/settings_category_network_summary">
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="160"
-        android:key="read_cache_size"
-        android:title="@string/settings_advanced_read_cache_size"
-        app:allowDividerAbove="true"
-        app:sliderEntries="@array/read_cache_size_entries"
-        app:sliderEntryValues="@array/read_cache_size_entry_values"
-        app:showValue="true" />
+        <com.hippo.ehviewer.preference.ProxyPreference
+            android:key="proxy"
+            android:title="@string/settings_advanced_proxy" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="zh-CN"
-        android:key="app_language"
-        android:summary="%s"
-        android:title="@string/settings_advanced_app_language_title"
-        app:allowDividerAbove="true"
-        app:entries="@array/app_language_entries"
-        app:entryValues="@array/app_language_entry_values" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="built_in_hosts"
+            android:summary="@string/settings_advanced_built_in_hosts_summary"
+            android:title="@string/settings_advanced_built_in_hosts_title" />
 
-    <com.hippo.ehviewer.preference.ProxyPreference
-        android:key="proxy"
-        android:title="@string/settings_advanced_proxy"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="built_ex_hosts"
+            android:summary="@string/settings_advanced_built_ex_hosts_summary"
+            android:title="@string/settings_advanced_built_ex_hosts_title" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="built_in_hosts"
-        android:summary="@string/settings_advanced_built_in_hosts_summary"
-        android:title="@string/settings_advanced_built_in_hosts_title" />
+        <com.hippo.preference.ActivityPreference
+            android:key="custom_hosts"
+            android:summary="@string/settings_advanced_custom_hosts_summary"
+            android:title="@string/settings_advanced_custom_hosts_title"
+            app:activity="com.hippo.ehviewer.ui.HostsActivity" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="built_ex_hosts"
-        android:summary="@string/settings_advanced_built_ex_hosts_summary"
-        android:title="@string/settings_advanced_built_ex_hosts_title" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="vpn_aware_mode"
+            android:title="@string/settings_vpn_aware_mode_title"
+            android:summary="@string/settings_vpn_aware_mode_summary"
+            app:entries="@array/vpn_aware_mode_entries"
+            app:entryValues="@array/vpn_aware_mode_entry_values" />
 
-    <com.hippo.preference.ActivityPreference
-        android:key="custom_hosts"
-        android:summary="@string/settings_advanced_custom_hosts_summary"
-        android:title="@string/settings_advanced_custom_hosts_title"
-        app:activity="com.hippo.ehviewer.ui.HostsActivity"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="vpn_status_indicator"
+            android:title="@string/settings_vpn_status_title"
+            android:summary="@string/settings_vpn_status_summary"
+            android:selectable="false" />
 
-    <!-- ========== VPN 联动设置 ========== -->
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="dns_over_https"
+            android:summary="@string/settings_advanced_dns_over_http_summary"
+            android:title="@string/settings_advanced_dns_over_http_title" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="vpn_aware_mode"
-        android:title="@string/settings_vpn_aware_mode_title"
-        android:summary="@string/settings_vpn_aware_mode_summary"
-        app:allowDividerAbove="true"
-        app:entries="@array/vpn_aware_mode_entries"
-        app:entryValues="@array/vpn_aware_mode_entry_values" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="domain_fronting"
+            android:summary="@string/settings_advanced_domain_fronting_summary"
+            android:title="@string/settings_advanced_domain_fronting_title" />
 
-    <Preference
-        android:key="vpn_status_indicator"
-        android:title="@string/settings_vpn_status_title"
-        android:summary="@string/settings_vpn_status_summary"
-        android:selectable="false" />
+    </PreferenceCategory>
 
-    <!-- ========== VPN 联动设置 END ========== -->
+    <PreferenceCategory
+        android:key="category_advanced_download_prefetch"
+        android:title="@string/settings_category_download_prefetch"
+        android:summary="@string/settings_category_download_prefetch_summary">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="dns_over_https"
-        android:summary="@string/settings_advanced_dns_over_http_summary"
-        android:title="@string/settings_advanced_dns_over_http_title" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="160"
+            android:key="read_cache_size"
+            android:title="@string/settings_advanced_read_cache_size"
+            app:sliderEntries="@array/read_cache_size_entries"
+            app:sliderEntryValues="@array/read_cache_size_entry_values"
+            app:showValue="true" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="domain_fronting"
-        android:summary="@string/settings_advanced_domain_fronting_summary"
-        android:title="@string/settings_advanced_domain_fronting_title" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_treat_removed_as_complete"
+            android:summary="@string/settings_advanced_download_treat_removed_as_complete_summary"
+            android:title="@string/settings_advanced_download_treat_removed_as_complete" />
 
-    <!--    <com.hippo.preference.SwitchPreference-->
-    <!--        android:defaultValue="false"-->
-    <!--        android:key="url_replace"-->
-    <!--        android:summary="@string/settings_advanced_url_replace_summary"-->
-    <!--        android:title="@string/settings_advanced_url_replace_title" />-->
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="download_prefetch_pages_enabled"
+            android:summary="@string/settings_advanced_download_prefetch_pages_summary"
+            android:title="@string/settings_advanced_download_prefetch_pages" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="download_treat_removed_as_complete"
-        android:summary="@string/settings_advanced_download_treat_removed_as_complete_summary"
-        android:title="@string/settings_advanced_download_treat_removed_as_complete" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="5"
+            android:key="download_prefetch_pages_concurrency"
+            android:title="@string/settings_advanced_download_prefetch_pages_concurrency"
+            android:dependency="download_prefetch_pages_enabled"
+            app:minValue="1"
+            app:maxValue="10"
+            app:stepSize="1"
+            app:showValue="true" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="download_prefetch_pages_enabled"
-        android:summary="@string/settings_advanced_download_prefetch_pages_summary"
-        android:title="@string/settings_advanced_download_prefetch_pages" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="download_inherit_pages"
+            android:summary="@string/settings_advanced_download_inherit_pages_summary"
+            android:title="@string/settings_advanced_download_inherit_pages" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="5"
-        android:key="download_prefetch_pages_concurrency"
-        android:title="@string/settings_advanced_download_prefetch_pages_concurrency"
-        android:dependency="download_prefetch_pages_enabled"
-        app:minValue="1"
-        app:maxValue="10"
-        app:stepSize="1"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_always_complete"
+            android:summary="@string/settings_advanced_download_always_complete_summary"
+            android:title="@string/settings_advanced_download_always_complete" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="download_inherit_pages"
-        android:summary="@string/settings_advanced_download_inherit_pages_summary"
-        android:title="@string/settings_advanced_download_inherit_pages" />
+    </PreferenceCategory>
 
-    <!-- ========== 高级下载排序 END ========== -->
+    <PreferenceCategory
+        android:key="category_advanced_data_transfer"
+        android:title="@string/settings_category_data_transfer"
+        android:summary="@string/settings_category_data_transfer_summary">
 
-    <com.hippo.ehviewer.preference.ExportDataPreference
-        android:key="export_data"
-        android:summary="@string/settings_advanced_export_data_summary"
-        android:title="@string/settings_advanced_export_data"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.ExportDataPreference
+            android:key="export_data"
+            android:summary="@string/settings_advanced_export_data_summary"
+            android:title="@string/settings_advanced_export_data" />
 
-    <Preference
-        android:key="import_data"
-        android:summary="@string/settings_advanced_import_data_summary"
-        android:title="@string/settings_advanced_import_data"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="export_database"
+            android:summary="@string/settings_advanced_export_database_summary"
+            android:title="@string/settings_advanced_export_database" />
 
-    <Preference
-        android:key="wifi_server"
-        android:summary="@string/settings_advanced_wifi_sander_summary"
-        android:title="@string/settings_advanced_wifi_sender"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="export_path"
+            android:title="@string/settings_advanced_export_path"
+            android:summary="@string/settings_advanced_export_path_summary" />
 
-    <Preference
-        android:key="wifi_client"
-        android:summary="@string/settings_advanced_wifi_client_summary"
-        android:title="@string/settings_advanced_wifi_client"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="import_data"
+            android:summary="@string/settings_advanced_import_data_summary"
+            android:title="@string/settings_advanced_import_data" />
 
-    <Preference
-        android:key="background_tasks"
-        android:summary="@string/settings_advanced_background_tasks_summary"
-        android:title="@string/settings_advanced_background_tasks"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="wifi_server"
+            android:summary="@string/settings_advanced_wifi_sander_summary"
+            android:title="@string/settings_advanced_wifi_sender" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="10"
-        android:key="background_concurrent_tasks"
-        android:summary="@string/settings_advanced_background_concurrent_tasks_summary"
-        android:title="@string/settings_advanced_background_concurrent_tasks"
-        app:minValue="1"
-        app:maxValue="32"
-        app:stepSize="1"
-        app:showValue="true" />
+        <Preference
+            android:key="wifi_client"
+            android:summary="@string/settings_advanced_wifi_client_summary"
+            android:title="@string/settings_advanced_wifi_client" />
 
-    <Preference
-        android:key="scheduled_tasks"
-        android:summary="@string/settings_advanced_scheduled_tasks_summary"
-        android:title="@string/settings_advanced_scheduled_tasks"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="background_tasks"
+            android:summary="@string/settings_advanced_background_tasks_summary"
+            android:title="@string/settings_advanced_background_tasks" />
 
-    <Preference
-        android:key="transfer_service"
-        android:summary="@string/settings_transfer_summary"
-        android:title="@string/settings_transfer"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="10"
+            android:key="background_concurrent_tasks"
+            android:summary="@string/settings_advanced_background_concurrent_tasks_summary"
+            android:title="@string/settings_advanced_background_concurrent_tasks"
+            app:minValue="1"
+            app:maxValue="32"
+            app:stepSize="1"
+            app:showValue="true" />
 
-    <Preference
-        android:key="network_diagnostic"
-        android:summary="@string/settings_advanced_network_diagnostic_summary"
-        android:title="@string/settings_advanced_network_diagnostic"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="scheduled_tasks"
+            android:summary="@string/settings_advanced_scheduled_tasks_summary"
+            android:title="@string/settings_advanced_scheduled_tasks" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="network_log_enabled"
-        android:summary="@string/settings_advanced_network_log_enabled_summary"
-        android:title="@string/settings_advanced_network_log_enabled"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="transfer_service"
+            android:summary="@string/settings_transfer_summary"
+            android:title="@string/settings_transfer" />
 
-    <com.hippo.ehviewer.preference.DatabaseViewerPreference
-        android:key="database_viewer"
-        android:summary="@string/settings_advanced_database_viewer_summary"
-        android:title="@string/settings_advanced_database_viewer"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="network_diagnostic"
+            android:summary="@string/settings_advanced_network_diagnostic_summary"
+            android:title="@string/settings_advanced_network_diagnostic" />
 
-    <Preference
-        android:key="local_gallery"
-        android:summary="@string/settings_advanced_local_gallery_summary"
-        android:title="@string/settings_advanced_local_gallery"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="network_log_enabled"
+            android:summary="@string/settings_advanced_network_log_enabled_summary"
+            android:title="@string/settings_advanced_network_log_enabled" />
 
-    <Preference
-        android:key="recycle_bin"
-        android:summary="@string/settings_advanced_recycle_bin_summary"
-        android:title="@string/settings_advanced_recycle_bin"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.DatabaseViewerPreference
+            android:key="database_viewer"
+            android:summary="@string/settings_advanced_database_viewer_summary"
+            android:title="@string/settings_advanced_database_viewer" />
+
+        <Preference
+            android:key="local_gallery"
+            android:summary="@string/settings_advanced_local_gallery_summary"
+            android:title="@string/settings_advanced_local_gallery" />
+
+        <Preference
+            android:key="recycle_bin"
+            android:summary="@string/settings_advanced_recycle_bin_summary"
+            android:title="@string/settings_advanced_recycle_bin" />
+
+    </PreferenceCategory>
 
 </PreferenceScreen>

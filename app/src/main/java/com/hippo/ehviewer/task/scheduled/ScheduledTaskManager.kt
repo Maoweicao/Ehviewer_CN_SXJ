@@ -12,6 +12,8 @@ import com.hippo.ehviewer.task.TaskRegistry
 import com.hippo.ehviewer.task.scheduled.holiday.CdnHolidayDataProvider
 import com.hippo.ehviewer.task.scheduled.holiday.HolidayDataProvider
 import com.hippo.ehviewer.task.scheduled.holiday.WeekdayConfig
+import com.hippo.ehviewer.ui.task.BackgroundTaskInfo
+import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -70,6 +72,11 @@ class ScheduledTaskManager private constructor(private val context: Context) {
     private val backgroundTaskManager: BackgroundTaskManager by lazy {
         BackgroundTaskManager.getInstance()
     }
+    private val backgroundTaskStatusManager: BackgroundTaskStatusManager by lazy {
+        BackgroundTaskStatusManager.getInstance()
+    }
+    // 记录正在运行的 BackgroundTask id -> ScheduledTask id 的映射
+    private val runningTaskMap = ConcurrentHashMap<String, String>()
 
     // 延时条件检查器
     private val conditionChecker = DelayConditionChecker(downloadManager, backgroundTaskManager)
@@ -383,6 +390,7 @@ class ScheduledTaskManager private constructor(private val context: Context) {
         // 创建并提交实际任务
         val backgroundTask = createBackgroundTask(task)
         if (backgroundTask != null) {
+            runningTaskMap[backgroundTask.getTaskId()] = task.id
             backgroundTaskManager.submitBackgroundTask(backgroundTask)
             Log.d(TAG, "Submitted task: ${task.taskDisplayName}")
         } else {
@@ -541,7 +549,7 @@ class ScheduledTaskManager private constructor(private val context: Context) {
      * 注册下载监听器
      */
     private fun registerDownloadListener() {
-        downloadManager.setDownloadListener(object : DownloadManager.DownloadListener {
+        downloadManager.addDownloadListener(object : DownloadManager.DownloadListener {
             override fun onGet509() {}
 
             override fun onStart(info: com.hippo.ehviewer.dao.DownloadInfo) {}
@@ -551,7 +559,6 @@ class ScheduledTaskManager private constructor(private val context: Context) {
             override fun onGetPage(info: com.hippo.ehviewer.dao.DownloadInfo) {}
 
             override fun onFinish(info: com.hippo.ehviewer.dao.DownloadInfo) {
-                // 下载完成，检查是否所有下载都完成了
                 if (downloadManager.getDownloadingCount() == 0 && downloadManager.getWaitingCount() == 0) {
                     mainHandler.post {
                         onDownloadsCompleted()
@@ -564,11 +571,20 @@ class ScheduledTaskManager private constructor(private val context: Context) {
     }
 
     /**
-     * 注册后台任务监听器
+     * 注册后台任务监听器，监听任务完成/失败/取消事件
      */
     private fun registerBackgroundTaskListener() {
-        // 这里需要在 BackgroundTaskManager 中添加监听机制
-        // 暂时使用轮询方式
+        backgroundTaskStatusManager.addTaskChangeListener(object : BackgroundTaskStatusManager.TaskChangeListener {
+            override fun onTaskStateChanged(taskId: String) {
+                val scheduledTaskId = runningTaskMap.remove(taskId)
+                if (scheduledTaskId != null) {
+                    val info: BackgroundTaskInfo = backgroundTaskStatusManager.getTaskInfo(taskId) ?: return
+                    val success = info.isCompleted && !info.isCancelled && info.errorMessage == null
+                    handleTaskCompleted(scheduledTaskId, success)
+                }
+                onBackgroundTaskCompleted(taskId)
+            }
+        })
     }
 
     /**

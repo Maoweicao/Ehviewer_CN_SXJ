@@ -21,3 +21,7 @@ open_source_licenses.html
 /伪代码
 /.vscode/settings.json
 /scripts/__pycache__/
+/other/test-server/node_modules/
+*.tsbuildinfo
+/build_err.txt
+/analyze_settings.py

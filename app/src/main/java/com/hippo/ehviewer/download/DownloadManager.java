@@ -34,6 +34,8 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhUrl;
+import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.cache.GalleryCacheManager;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
@@ -41,6 +43,7 @@ import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
+import com.hippo.ehviewer.task.PtokenIndexUpdater;
 import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.Image1;
 import com.hippo.unifile.UniFile;
@@ -63,6 +66,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
@@ -90,8 +94,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     private final SpeedReminder mSpeedReminder;
 
-    @Nullable
-    private DownloadListener mDownloadListener;
+    private final List<DownloadListener> mDownloadListeners;
     private final List<DownloadInfoListener> mDownloadInfoListeners;
 
     @Nullable
@@ -165,13 +168,22 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
         mWaitList = new LinkedList<>();
         mSpeedReminder = new SpeedReminder();
+        mDownloadListeners = new CopyOnWriteArrayList<>();
         mDownloadInfoListeners = new ArrayList<>();
 
         // Restore interrupted downloads: re-add STATE_WAIT items to the wait list
+        // Also reset any stuck STATE_DOWNLOAD items back to STATE_WAIT
         for (DownloadInfo info : mAllInfoList) {
             if (info.state == DownloadInfo.STATE_WAIT) {
                 mWaitList.add(info);
+            } else if (info.state == DownloadInfo.STATE_DOWNLOAD) {
+                info.state = DownloadInfo.STATE_WAIT;
+                mWaitList.add(info);
+                EhDB.putDownloadInfo(info);
             }
+        }
+        if (Settings.getAdvancedDownloadSortEnabled()) {
+            applyAdvancedSort(mWaitList);
         }
     }
 
@@ -248,6 +260,17 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
     }
 
+    private void updateLabelCount(@Nullable String label, long delta) {
+        if (label != null && mLabelCountMap.containsKey(label)) {
+            long newCount = mLabelCountMap.get(label) + delta;
+            if (newCount <= 0) {
+                mLabelCountMap.remove(label);
+            } else {
+                mLabelCountMap.put(label, newCount);
+            }
+        }
+    }
+
     public List<DownloadInfo> getAllDownloadInfoList() {
         return mAllInfoList;
     }
@@ -316,7 +339,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     public void addDownloadInfoListener(@Nullable DownloadInfoListener downloadInfoListener) {
-        mDownloadInfoListeners.add(downloadInfoListener);
+        if (downloadInfoListener != null && !mDownloadInfoListeners.contains(downloadInfoListener)) {
+            mDownloadInfoListeners.add(downloadInfoListener);
+        }
     }
 
     public void removeDownloadInfoListener(@Nullable DownloadInfoListener downloadInfoListener) {
@@ -324,7 +349,21 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     public void setDownloadListener(@Nullable DownloadListener listener) {
-        mDownloadListener = listener;
+        if (listener == null) {
+            mDownloadListeners.clear();
+        } else if (!mDownloadListeners.contains(listener)) {
+            mDownloadListeners.add(listener);
+        }
+    }
+
+    public void addDownloadListener(@NonNull DownloadListener listener) {
+        if (!mDownloadListeners.contains(listener)) {
+            mDownloadListeners.add(listener);
+        }
+    }
+
+    public void removeDownloadListener(@NonNull DownloadListener listener) {
+        mDownloadListeners.remove(listener);
     }
 
     public void ensureDownload() {
@@ -336,6 +375,20 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Get download from wait list
         if (!mWaitList.isEmpty()) {
             DownloadInfo info = mWaitList.removeFirst();
+
+            // Route to SystemDMBackend if user enabled it and not origin image
+            if (Settings.getUseSystemDownloadManager()
+                    && !Settings.getDownloadOriginImage()) {
+                int sysDmResult = tryEnsureSystemDM(info);
+                if (sysDmResult == 1) {
+                    return;                     // SystemDM started
+                } else if (sysDmResult == -1) {
+                    // Pages unknown, re-queued with async fetch; don't fall through
+                    return;
+                }
+                // sysDmResult == 0: fall through to SpiderBackend
+            }
+
             SpiderQueen spider = SpiderQueen.obtainSpiderQueen(mContext, info, SpiderQueen.MODE_DOWNLOAD);
             mCurrentTask = info;
             mCurrentSpider = spider;
@@ -354,8 +407,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             // Start speed count
             mSpeedReminder.start();
             // Notify start downloading
-            if (mDownloadListener != null) {
-                mDownloadListener.onStart(info);
+            for (DownloadListener l : mDownloadListeners) {
+                l.onStart(info);
             }
             // Notify state update
             List<DownloadInfo> list = getInfoListForLabel(info.label);
@@ -364,6 +417,154 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     l.onUpdate(info, list, mWaitList);
                 }
             }
+        }
+    }
+
+    /**
+     * 尝试把当前任务交给 SystemDMBackend。
+     *
+     * @return 1 = SystemDM started; -1 = pages unknown (re-queued, async fetch pending); 0 = fallback to SpiderBackend
+     */
+    private int tryEnsureSystemDM(DownloadInfo info) {
+        int pages = info.pages;
+
+        // 1. 如果 page 数未知，先尝试从磁盘 SpiderInfo 拿
+        if (pages <= 0) {
+            com.hippo.ehviewer.spider.SpiderInfo si =
+                    com.hippo.ehviewer.spider.SpiderInfo.getSpiderInfo(info);
+            if (si != null && si.pages > 0) {
+                pages = si.pages;
+                info.pages = pages;
+                info.total = pages;
+                EhDB.putDownloadInfo(info);
+            }
+        }
+
+        // 2. 等不到 pages 就先异步拉一次，现在返回 -1 阻止 fallthrough
+        if (pages <= 0) {
+            info.state = DownloadInfo.STATE_WAIT;
+            mWaitList.addFirst(info);
+            fetchPagesAndReroute(info);
+            return -1;
+        }
+
+        mCurrentTask = info;
+        info.state = DownloadInfo.STATE_DOWNLOAD;
+        info.speed = -1;
+        info.remaining = -1;
+        info.total = pages;
+        info.finished = 0;
+        info.downloaded = 0;
+        info.legacy = -1;
+        EhDB.putDownloadInfo(info);
+        DownloadLogger.getInstance().logDownloadStart(info);
+
+        // 启动系统 DM 后端（解析 URL + enqueue）
+        try {
+            int enqueued = SystemDMBackend.getInstance(mContext).start(info, pages);
+            if (enqueued == 0 && !SystemDMBackend.getInstance(mContext).hasTasksForGid(info.gid)) {
+                mCurrentTask = null;
+                info.state = DownloadInfo.STATE_NONE;
+                EhDB.putDownloadInfo(info);
+                Log.w(TAG, "SystemDM did not enqueue any page for gid=" + info.gid + ", falling back");
+                return 0;
+            }
+        } catch (Throwable t) {
+            Log.e(TAG, "ensureSystemDM failed for gid=" + info.gid, t);
+        }
+
+        // 触发最小通知
+        for (DownloadListener l : mDownloadListeners) {
+            l.onStart(info);
+        }
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
+        }
+
+        return 1;
+    }
+
+    /**
+     * 异步拉取 gallery page 数，拉完后重新调用 ensureDownload()。
+     */
+    private void fetchPagesAndReroute(DownloadInfo info) {
+        long gid = info.gid;
+        IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+            try {
+                // 从 E-Hentai 拿 GalleryDetail 获取 pages
+                String url = EhUrl.getGalleryDetailUrl(gid, info.token);
+                com.hippo.ehviewer.client.data.GalleryDetail detail =
+                        com.hippo.ehviewer.client.EhEngine.getGalleryDetail(
+                                null, EhApplication.getOkHttpClient(mContext), url);
+                if (detail != null && detail.pages > 0) {
+                    info.pages = detail.pages;
+                    EhDB.putDownloadInfo(info);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "fetchPagesAndReroute failed for gid=" + gid, t);
+            }
+            // 回到主线程触发 ensureDownload
+            SimpleHandler.getInstance().post(() -> {
+                // 如果 info 已经被 stop / delete 了，跳过
+                if (!mWaitList.contains(info) && mCurrentTask != null && mCurrentTask.gid != gid) {
+                    return;
+                }
+                ensureDownload();
+            });
+        });
+    }
+
+    /**
+     * 由 SystemDownloadFinalizeWorker 在某 gid 的所有 page 都 SUCCESS 后调用。
+     * 走与 SpiderQueen.onFinish() 等价的路径：刷 state、触发 onFinish 通知、清除 mCurrentTask、
+     * 调度下一项。
+     */
+    public void onSystemDMGalleryFinished(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) return;
+        if (mCurrentTask == null || mCurrentTask.gid != gid) return;
+
+        info.finished = info.pages;
+        info.state = DownloadInfo.STATE_FINISH;
+        EhDB.putDownloadInfo(info);
+
+        for (DownloadListener l : mDownloadListeners) {
+            l.onFinish(info);
+        }
+
+        mCurrentTask = null;
+        ensureDownload();
+    }
+
+    /**
+     * 检查 gid 是否还有未完成的 SystemDM 任务。
+     * 用于 FinalizeWorker 完成单张图后判断是否需要调用 onSystemDMGalleryFinished。
+     */
+    public boolean isSystemDMAllDone(long gid) {
+        java.util.List<com.hippo.ehviewer.dao.SystemDownloadTask> tasks =
+                EhDB.getSystemDownloadTasksForGid(gid);
+        if (tasks == null || tasks.isEmpty()) return false;
+        for (com.hippo.ehviewer.dao.SystemDownloadTask t : tasks) {
+            String s = t.getStatus();
+            if (!com.hippo.ehviewer.dao.SystemDownloadTask.STATUS_SUCCESS.equals(s)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Marks a system-delegated gallery as retryable when Android DownloadManager cannot finish it. */
+    public void onSystemDMGalleryFailed(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) return;
+        info.state = DownloadInfo.STATE_FAILED;
+        EhDB.putDownloadInfo(info);
+        if (mCurrentTask != null && mCurrentTask.gid == gid) {
+            mCurrentTask = null;
+            ensureDownload();
         }
     }
 
@@ -541,6 +742,44 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     public void startAllDownload() {
+        // Check for items with unknown page count
+        List<DownloadInfo> unknownPages = new ArrayList<>();
+        for (DownloadInfo info : mAllInfoList) {
+            if (info.pages <= 0 && info.total <= 0 &&
+                    (info.state == DownloadInfo.STATE_NONE || info.state == DownloadInfo.STATE_FAILED)) {
+                unknownPages.add(info);
+            }
+        }
+
+        if (!unknownPages.isEmpty()) {
+            startAllDownloadWithPrefetch(unknownPages);
+            return;
+        }
+
+        startAllDownloadInternal();
+    }
+
+    private void startAllDownloadWithPrefetch(List<DownloadInfo> unknownPages) {
+        List<Long> fetchGids = new ArrayList<>();
+        for (DownloadInfo info : unknownPages) {
+            fetchGids.add(info.gid);
+        }
+
+        IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+            try {
+                GalleryPageFetcher.fetchPagesBatch(mContext, unknownPages,
+                        Settings.getDownloadPrefetchPagesConcurrency());
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to prefetch pages for startAllDownload", e);
+            }
+            SimpleHandler.getInstance().post(() -> {
+                handleFetchedResults(fetchGids, new ArrayList<>());
+                startAllDownloadInternal();
+            });
+        });
+    }
+
+    private void startAllDownloadInternal() {
         boolean update = false;
         // Start all STATE_NONE and STATE_FAILED item
         LinkedList<DownloadInfo> allInfoList = mAllInfoList;
@@ -627,9 +866,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      * Notify that network is lost - pause active downloads
      */
     public void notifyNetworkLost() {
-        Log.w(TAG, "Network lost, pausing active downloads");
-        // Stop all downloads
-        stopAllDownload();
+        Log.w(TAG, "Network lost, stopping active downloads");
+        stopCurrentDownloadInternal();
     }
 
     /**
@@ -637,7 +875,6 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      */
     public void notifyNetworkRecovered() {
         Log.i(TAG, "Network recovered, resuming downloads");
-        // Resume download
         ensureDownload();
     }
 
@@ -659,7 +896,20 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 info.category = galleryDetail.category;
                 info.thumb = galleryDetail.thumb;
                 info.pages = galleryDetail.pages;
+                info.rating = galleryDetail.rating;
+                info.simpleLanguage = galleryDetail.simpleLanguage;
+                info.simpleTags = galleryDetail.simpleTags;
+                info.tgList = galleryDetail.tgList;
+                info.posted = galleryDetail.posted;
+                info.uploader = galleryDetail.uploader;
                 EhDB.putDownloadInfo(info);
+                // 保存 .ehviewer.extra.json 缓存文件
+                try {
+                    GalleryCacheManager cacheManager = GalleryCacheManager.getInstance(mContext);
+                    cacheManager.saveGalleryCache(galleryDetail);
+                } catch (Throwable cacheErr) {
+                    Log.e(TAG, "repairGalleryInfo: failed to save cache for gid=" + gid, cacheErr);
+                }
                 Log.i(TAG, "repairGalleryInfo: success for gid=" + gid);
                 return true;
             }
@@ -775,6 +1025,16 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Save to
         EhDB.putDownloadInfo(info);
 
+        // 保存 .ehviewer.extra.json 缓存文件（仅当传入的是 GalleryDetail 时，包含完整的上传者和远程状态）
+        if (galleryInfo instanceof GalleryDetail) {
+            try {
+                GalleryCacheManager cacheManager = GalleryCacheManager.getInstance(mContext);
+                cacheManager.saveGalleryCache((GalleryDetail) galleryInfo);
+            } catch (Throwable cacheErr) {
+                Log.e(TAG, "addDownload: failed to save cache for gid=" + galleryInfo.gid, cacheErr);
+            }
+        }
+
         // Add to wait list if state is WAIT
         if (state == DownloadInfo.STATE_WAIT) {
             mWaitList.add(info);
@@ -816,9 +1076,22 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
         list.addFirst(info);
 
+        // Add to all download list
+        mAllInfoList.addFirst(info);
+
         // Save to
         EhDB.putDownloadInfo(info);
         mAllInfoMap.put(galleryInfo.gid, info);
+
+        // 保存 .ehviewer.extra.json 缓存文件（仅当传入的是 GalleryDetail 时，包含完整的上传者和远程状态）
+        if (galleryInfo instanceof GalleryDetail) {
+            try {
+                GalleryCacheManager cacheManager = GalleryCacheManager.getInstance(mContext);
+                cacheManager.saveGalleryCache((GalleryDetail) galleryInfo);
+            } catch (Throwable cacheErr) {
+                Log.e(TAG, "addDownloadInfo: failed to save cache for gid=" + galleryInfo.gid, cacheErr);
+            }
+        }
     }
 
 
@@ -883,6 +1156,18 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 mCurrentTask.state = DownloadInfo.STATE_NONE;
                 EhDB.putDownloadInfo(mCurrentTask);
             }
+            if (mCurrentSpider != null) {
+                try {
+                    mCurrentSpider.removeOnSpiderListener(DownloadManager.this);
+                } catch (Exception ex) {
+                    Log.w(TAG, "Failed to remove spider listener", ex);
+                }
+                try {
+                    SpiderQueen.releaseSpiderQueen(mCurrentSpider, SpiderQueen.MODE_DOWNLOAD);
+                } catch (Exception ex) {
+                    Log.w(TAG, "Failed to release spider", ex);
+                }
+            }
             mCurrentTask = null;
             mCurrentSpider = null;
         }
@@ -890,6 +1175,139 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Notify mDownloadInfoListener
         for (DownloadInfoListener l : mDownloadInfoListeners) {
             l.onUpdateAll();
+        }
+    }
+
+    /**
+     * 将画廊设为接力下载状态。
+     * 如果正在下载则先停止，如果在等待队列则移除。
+     * 设为接力下载后，下载管理器不再管理该画廊，直到用户主动切回。
+     */
+    public void setRelayDownload(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) {
+            Log.w(TAG, "setRelayDownload: download info not found for gid=" + gid);
+            return;
+        }
+        if (info.state == DownloadInfo.STATE_RELAY_DOWNLOAD) {
+            // Already in relay download state
+            return;
+        }
+
+        // If currently downloading, stop it first
+        if (mCurrentTask != null && mCurrentTask.gid == gid) {
+            stopCurrentDownloadInternal();
+        }
+
+        // If in wait list, remove it
+        for (Iterator<DownloadInfo> iterator = mWaitList.iterator(); iterator.hasNext(); ) {
+            DownloadInfo waitInfo = iterator.next();
+            if (waitInfo.gid == gid) {
+                iterator.remove();
+                break;
+            }
+        }
+
+        // Set relay download state
+        info.state = DownloadInfo.STATE_RELAY_DOWNLOAD;
+        info.speed = 0;
+        info.remaining = 0;
+        EhDB.putDownloadInfo(info);
+
+        // Notify listeners
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
+        }
+
+        // Start next download if needed
+        ensureDownload();
+
+        Log.i(TAG, "Set relay download for gid=" + gid);
+    }
+
+    /**
+     * 取消接力下载状态，将画廊恢复为STATE_NONE。
+     * 用户可通过此方法主动切回本机下载。
+     */
+    public void cancelRelayDownload(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) {
+            Log.w(TAG, "cancelRelayDownload: download info not found for gid=" + gid);
+            return;
+        }
+        if (info.state != DownloadInfo.STATE_RELAY_DOWNLOAD) {
+            Log.w(TAG, "cancelRelayDownload: gid=" + gid + " is not in relay download state");
+            return;
+        }
+
+        info.state = DownloadInfo.STATE_NONE;
+        info.speed = 0;
+        info.remaining = 0;
+        EhDB.putDownloadInfo(info);
+
+        // Notify listeners
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
+        }
+
+        Log.i(TAG, "Cancelled relay download for gid=" + gid);
+    }
+
+    /**
+     * 检查画廊是否处于接力下载状态
+     */
+    public boolean isRelayDownload(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        return info != null && info.state == DownloadInfo.STATE_RELAY_DOWNLOAD;
+    }
+
+    /**
+     * 标记某画廊的指定页（0-indexed）为已下载，更新 finished 计数字段，并通知监听器。
+     * 供远程上传页面（POST /api/v1/galleries/{gid}/pages/{page}/upload）等场景使用。
+     *
+     * @param gid        画廊 GID
+     * @param pageIndex  0-indexed 页码
+     * @param infoIn     可选：已知的 DownloadInfo（避免重复查询）；传 null 时自动查询
+     * @return 更新后的 finished 计数值，-1 表示画廊不存在
+     */
+    public synchronized int markPageDownloaded(long gid, int pageIndex, DownloadInfo infoIn) {
+        DownloadInfo info = infoIn != null ? infoIn : mAllInfoMap.get(gid);
+        if (info == null) {
+            Log.w(TAG, "markPageDownloaded: download info not found for gid=" + gid);
+            return -1;
+        }
+        if (pageIndex < 0) {
+            Log.w(TAG, "markPageDownloaded: invalid pageIndex=" + pageIndex + " for gid=" + gid);
+            return info.finished;
+        }
+        int newFinished = Math.max(info.finished, pageIndex + 1);
+        if (newFinished > info.finished) {
+            info.finished = newFinished;
+            if (info.total <= 0 && info.pages > 0) {
+                info.total = info.pages;
+            }
+            EhDB.putDownloadInfo(info);
+        }
+        notifyDownloadInfoUpdated(info);
+        return info.finished;
+    }
+
+    /**
+     * 触发画廊信息的更新通知（内部使用）
+     */
+    private void notifyDownloadInfoUpdated(DownloadInfo info) {
+        if (info == null) return;
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
         }
     }
 
@@ -910,6 +1328,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 int index = list.indexOf(info);
                 if (index >= 0) {
                     list.remove(info);
+                    updateLabelCount(info.label, -1);
                     // Update listener
                     for (DownloadInfoListener l : mDownloadInfoListeners) {
                         l.onRemove(info, list, index);
@@ -945,6 +1364,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             if (list != null) {
                 list.remove(info);
             }
+            updateLabelCount(info.label, -1);
         }
 
         // Update listener
@@ -1025,7 +1445,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     // Update in DB
-    // Update mDownloadListener
+    // Notify DownloadListeners
     private DownloadInfo stopCurrentDownloadInternal() {
         DownloadInfo info = mCurrentTask;
         SpiderQueen spider = mCurrentSpider;
@@ -1045,6 +1465,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             } catch (Exception e) {
                 Log.w(TAG, "Failed to release spider", e);
             }
+        } else if (info != null) {
+            // SystemDM-managed gallery：调用 SystemDMBackend 清理
+            try {
+                SystemDMBackend.getInstance(mContext).cleanupForGid(info.gid);
+            } catch (Exception e) {
+                Log.w(TAG, "SystemDMBackend.cleanupForGid failed for " + info.gid, e);
+            }
         }
         if (info == null) {
             return null;
@@ -1055,14 +1482,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         // Update in DB
         EhDB.putDownloadInfo(info);
         // Listener
-        if (mDownloadListener != null) {
-            mDownloadListener.onCancel(info);
+        for (DownloadListener l : mDownloadListeners) {
+            l.onCancel(info);
         }
         return info;
     }
 
     // Update in DB
-    // Update mDownloadListener
+    // Update DownloadListeners
     private void stopRangeDownloadInternal(LongList gidList) {
         // Two way
         if (gidList.size() < mWaitList.size()) {
@@ -1106,6 +1533,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             return;
         }
 
+        boolean moved = false;
         for (DownloadInfo info : list) {
             if (ObjectUtils.equal(info.label, label)) {
                 continue;
@@ -1119,16 +1547,33 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
             srcList.remove(info);
             dstList.add(info);
+            updateLabelCount(info.label, -1);
             info.label = label;
-            Collections.sort(dstList, DATE_DESC_COMPARATOR);
+            updateLabelCount(label, 1);
 
             // Save to DB
             EhDB.putDownloadInfo(info);
+            moved = true;
+        }
+        if (moved) {
+            Collections.sort(dstList, DATE_DESC_COMPARATOR);
         }
 
         for (DownloadInfoListener l : mDownloadInfoListeners) {
             l.onReload();
         }
+    }
+
+    public void moveDownloadInfo(long gid, int deltaPosition) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) return;
+        int index = mAllInfoList.indexOf(info);
+        if (index < 0) return;
+        int newIndex = index + deltaPosition;
+        if (newIndex < 0 || newIndex >= mAllInfoList.size()) return;
+        mAllInfoList.remove(index);
+        mAllInfoList.add(newIndex, info);
+        Collections.sort(mAllInfoList, DATE_DESC_COMPARATOR);
     }
 
     public void addLabel(String label) {
@@ -1239,6 +1684,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     boolean isIdle() {
         return mCurrentTask == null && mWaitList.isEmpty();
+    }
+
+    public int getDownloadingCount() {
+        return mCurrentTask != null ? 1 : 0;
+    }
+
+    public int getWaitingCount() {
+        return mWaitList.size();
     }
 
     @Override
@@ -1393,8 +1846,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     break;
                 }
                 case TYPE_ON_GET_509: {
-                    if (mDownloadListener != null) {
-                        mDownloadListener.onGet509();
+                    DownloadInfo info = mCurrentTask;
+                    if (info != null) {
+                        DownloadLogger.getInstance().logDownloadError(
+                                String.valueOf(info.gid), EhUtils.getSuitableTitle(info),
+                                "509 限流，页码: " + mIndex, null);
+                    }
+                    for (DownloadListener l : mDownloadListeners) {
+                        l.onGet509();
                     }
                     break;
                 }
@@ -1411,8 +1870,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         info.finished = mFinished;
                         info.downloaded = mDownloaded;
                         info.total = mTotal;
-                        if (mDownloadListener != null) {
-                            mDownloadListener.onGetPage(info);
+                        DownloadLogger.getInstance().log(
+                                DownloadLogger.LogLevel.INFO,
+                                TAG,
+                                "内置下载页面完成 | 页码:" + mIndex + " | 已完成:" + mFinished + "/" + mTotal,
+                                String.valueOf(info.gid), EhUtils.getSuitableTitle(info));
+                        for (DownloadListener l : mDownloadListeners) {
+                            l.onGetPage(info);
                         }
                         List<DownloadInfo> list = getInfoListForLabel(info.label);
                         if (list != null) {
@@ -1432,6 +1896,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         info.finished = mFinished;
                         info.downloaded = mDownloaded;
                         info.total = mTotal;
+                        DownloadLogger.getInstance().logDownloadError(
+                                String.valueOf(info.gid), EhUtils.getSuitableTitle(info),
+                                "内置下载页面失败 | 页码:" + mIndex + " | 已完成:" + mFinished + "/" + mTotal + " | 原因:" + mError,
+                                null);
                         List<DownloadInfo> list = getInfoListForLabel(info.label);
                         if (list != null) {
                             for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -1456,6 +1924,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     // Check null
                     if (info == null || spider == null) {
                         Log.e(TAG, "Current stuff is null, but it should not be");
+                        mSpeedReminder.stop();
+                        ensureDownload();
                         break;
                     }
                     // Stop speed count
@@ -1464,7 +1934,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     info.finished = mFinished;
                     info.downloaded = mDownloaded;
                     info.total = mTotal;
-                    info.legacy = mTotal - mFinished;
+                    // Verify actual file integrity before marking as complete
+                    int verifiedFinished = verifyDownloadedFiles(info);
+                    info.legacy = mTotal - verifiedFinished;
                     if (info.legacy == 0) {
                         info.state = DownloadInfo.STATE_FINISH;
                     } else if (Settings.getDownloadTreatRemovedAsComplete()) {
@@ -1472,11 +1944,25 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     } else {
                         info.state = DownloadInfo.STATE_FAILED;
                     }
+                    // Cleanup empty files if download completed successfully
+                    if (info.state == DownloadInfo.STATE_FINISH) {
+                        cleanupEmptyFiles(info);
+                    }
                     // Update in DB
                     EhDB.putDownloadInfo(info);
+                    DownloadLogger.getInstance().logDownloadComplete(
+                            String.valueOf(info.gid), EhUtils.getSuitableTitle(info), 0,
+                            verifiedFinished, mTotal - verifiedFinished);
+                    // Update ptoken index for progressive detection (async)
+                    if (info.state == DownloadInfo.STATE_FINISH) {
+                        final long gid = info.gid;
+                        IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+                            PtokenIndexUpdater.updateOnFinish(gid);
+                        });
+                    }
                     // Notify
-                    if (mDownloadListener != null) {
-                        mDownloadListener.onFinish(info);
+                    for (DownloadListener l : mDownloadListeners) {
+                        l.onFinish(info);
                     }
                     List<DownloadInfo> list = getInfoListForLabel(info.label);
                     if (list != null) {
@@ -1486,11 +1972,111 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     }
                     // Start next download
                     ensureDownload();
+                    // Auto-retry: if enabled and idle but still have incomplete tasks, stop all and restart all
+                    if (Settings.getDownloadAlwaysComplete() && isIdle()) {
+                        boolean hasIncomplete = false;
+                        for (DownloadInfo i : mAllInfoList) {
+                            if (i.state == DownloadInfo.STATE_NONE || i.state == DownloadInfo.STATE_FAILED) {
+                                hasIncomplete = true;
+                                break;
+                            }
+                        }
+                        if (hasIncomplete) {
+                            Log.i(TAG, "Always-complete enabled: incomplete tasks detected, scheduling retry");
+                            SimpleHandler.getInstance().postDelayed(() -> {
+                                if (!isIdle()) {
+                                    return;
+                                }
+                                Log.i(TAG, "Always-complete: executing stopAll → startAll cycle");
+                                stopAllDownload();
+                                startAllDownload();
+                            }, 3000);
+                        }
+                    }
                     break;
                 }
             }
 
             mNotifyTaskPool.push(this);
+        }
+    }
+
+    /**
+     * Verify downloaded files integrity by checking actual file existence and size.
+     * Returns the count of valid (non-empty) files.
+     */
+    private int verifyDownloadedFiles(DownloadInfo info) {
+        int verifiedCount = 0;
+        try {
+            UniFile downloadDir = SpiderDen.getExistingGalleryDownloadDir(info);
+            if (downloadDir == null) {
+                Log.w(TAG, "verifyDownloadedFiles: download directory not found for gid=" + info.gid);
+                return 0;
+            }
+
+            SpiderInfo spiderInfo = SpiderInfo.read(downloadDir);
+            if (spiderInfo == null || spiderInfo.pages <= 0) {
+                Log.w(TAG, "verifyDownloadedFiles: SpiderInfo invalid for gid=" + info.gid);
+                return 0;
+            }
+
+            int totalPages = spiderInfo.pages;
+            for (int i = 0; i < totalPages; i++) {
+                UniFile imageFile = SpiderDen.findImageFile(downloadDir, i);
+                if (imageFile != null && imageFile.isFile()) {
+                    long fileSize = imageFile.length();
+                    if (fileSize > 0) {
+                        verifiedCount++;
+                    } else {
+                        Log.w(TAG, "verifyDownloadedFiles: empty file at index " + i + " for gid=" + info.gid);
+                    }
+                } else {
+                    Log.w(TAG, "verifyDownloadedFiles: missing file at index " + i + " for gid=" + info.gid);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "verifyDownloadedFiles: error verifying files for gid=" + info.gid, e);
+            // Fall back to using the original finished count
+            return info.finished;
+        }
+        return verifiedCount;
+    }
+
+    /**
+     * Cleanup empty (0-byte) files from download directory.
+     * Called after download completes to remove any invalid files.
+     */
+    private void cleanupEmptyFiles(DownloadInfo info) {
+        try {
+            UniFile downloadDir = SpiderDen.getExistingGalleryDownloadDir(info);
+            if (downloadDir == null) {
+                return;
+            }
+
+            SpiderInfo spiderInfo = SpiderInfo.read(downloadDir);
+            if (spiderInfo == null || spiderInfo.pages <= 0) {
+                return;
+            }
+
+            int deletedCount = 0;
+            int totalPages = spiderInfo.pages;
+            for (int i = 0; i < totalPages; i++) {
+                UniFile imageFile = SpiderDen.findImageFile(downloadDir, i);
+                if (imageFile != null && imageFile.isFile()) {
+                    long fileSize = imageFile.length();
+                    if (fileSize == 0) {
+                        if (imageFile.delete()) {
+                            deletedCount++;
+                            Log.w(TAG, "cleanupEmptyFiles: deleted empty file at index " + i + " for gid=" + info.gid);
+                        }
+                    }
+                }
+            }
+            if (deletedCount > 0) {
+                Log.i(TAG, "cleanupEmptyFiles: deleted " + deletedCount + " empty files for gid=" + info.gid);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "cleanupEmptyFiles: error cleaning up files for gid=" + info.gid, e);
         }
     }
 
@@ -1568,11 +2154,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     }
                     if (downloadingCount != 0) {
                         totalSize += downloadingContentLengthSum * (info.total - info.downloaded - downloadingCount) / downloadingCount;
-                        info.remaining = totalSize / newSpeed * 1000;
+                        info.remaining = totalSize * 1000 / newSpeed;
                     }
                 }
-                if (mDownloadListener != null) {
-                    mDownloadListener.onDownload(info);
+                for (DownloadListener l : mDownloadListeners) {
+                    l.onDownload(info);
                 }
                 List<DownloadInfo> list = getInfoListForLabel(info.label);
                 if (list != null) {
@@ -1590,7 +2176,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
     }
 
-    private static final Comparator<DownloadInfo> DATE_DESC_COMPARATOR = new Comparator<>() {
+    public static final Comparator<DownloadInfo> DATE_DESC_COMPARATOR = new Comparator<>() {
         @Override
         public int compare(DownloadInfo lhs, DownloadInfo rhs) {
             long dif = lhs.time - rhs.time;
@@ -1608,47 +2194,180 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private static final Comparator<DownloadInfo> PAGES_ASC_COMPARATOR = new Comparator<>() {
         @Override
         public int compare(DownloadInfo lhs, DownloadInfo rhs) {
-            return Integer.compare(lhs.pages, rhs.pages);
+            int lhsPages = lhs.pages > 0 ? lhs.pages : Integer.MAX_VALUE;
+            int rhsPages = rhs.pages > 0 ? rhs.pages : Integer.MAX_VALUE;
+            return Integer.compare(lhsPages, rhsPages);
         }
     };
 
     private static final Comparator<DownloadInfo> PAGES_DESC_COMPARATOR = new Comparator<>() {
         @Override
         public int compare(DownloadInfo lhs, DownloadInfo rhs) {
-            return Integer.compare(rhs.pages, lhs.pages);
+            int lhsPages = lhs.pages > 0 ? lhs.pages : Integer.MIN_VALUE;
+            int rhsPages = rhs.pages > 0 ? rhs.pages : Integer.MIN_VALUE;
+            return Integer.compare(rhsPages, lhsPages);
         }
     };
+
+    private Comparator<DownloadInfo> createCompositeComparator(boolean pagesAsc) {
+        int[] priorityMap = getCategoryPriorityMap();
+        return (lhs, rhs) -> {
+            int lhsPages = lhs.pages > 0 ? lhs.pages : (pagesAsc ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+            int rhsPages = rhs.pages > 0 ? rhs.pages : (pagesAsc ? Integer.MAX_VALUE : Integer.MIN_VALUE);
+            int pageCmp = pagesAsc
+                    ? Integer.compare(lhsPages, rhsPages)
+                    : Integer.compare(rhsPages, lhsPages);
+            if (pageCmp != 0) return pageCmp;
+            int lhsP = priorityMap != null ? getCategoryPriority(lhs.category, priorityMap) : 0;
+            int rhsP = priorityMap != null ? getCategoryPriority(rhs.category, priorityMap) : 0;
+            return Integer.compare(lhsP, rhsP);
+        };
+    }
 
     private void applyAdvancedSort(List<DownloadInfo> list) {
         if (list.isEmpty()) return;
 
-        int queueOrder = Settings.getDownloadQueueOrder();
-
-        int secondary = Settings.getDownloadQueueOrderSecondary();
-        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY
-                && secondary != Settings.DOWNLOAD_QUEUE_SECONDARY_NONE) {
-            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST) {
-                Collections.sort(list, PAGES_ASC_COMPARATOR);
-            } else if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST) {
-                Collections.sort(list, PAGES_DESC_COMPARATOR);
+        // Step 1: Check if any items need page count fetching
+        List<DownloadInfo> needFetch = new ArrayList<>();
+        for (DownloadInfo info : list) {
+            if (info.pages <= 0 && info.total <= 0) {
+                needFetch.add(info);
             }
-            sortByCategoryPriority(list);
+        }
+
+        if (!needFetch.isEmpty() && Settings.getAdvancedDownloadSortEnabled()) {
+            // Fetch pages in background, then re-sort
+            fetchPagesAndReSort(needFetch, list);
             return;
         }
 
-        switch (queueOrder) {
-            case Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST:
+        int queueOrder = Settings.getDownloadQueueOrder();
+        int secondary = Settings.getDownloadQueueOrderSecondary();
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_DEFAULT) return;
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST) {
                 Collections.sort(list, PAGES_ASC_COMPARATOR);
-                break;
-            case Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST:
-                Collections.sort(list, PAGES_DESC_COMPARATOR);
-                break;
-            case Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY:
                 sortByCategoryPriority(list);
-                break;
-            case Settings.DOWNLOAD_QUEUE_ORDER_DEFAULT:
-            default:
-                break;
+            } else if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST) {
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+                sortByCategoryPriority(list);
+            } else {
+                sortByCategoryPriority(list);
+            }
+            return;
+        }
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_CATEGORY_PRIORITY) {
+                Collections.sort(list, createCompositeComparator(true));
+            } else {
+                Collections.sort(list, PAGES_ASC_COMPARATOR);
+            }
+            return;
+        }
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_CATEGORY_PRIORITY) {
+                Collections.sort(list, createCompositeComparator(false));
+            } else {
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+            }
+            return;
+        }
+    }
+
+    private void fetchPagesAndReSort(List<DownloadInfo> needFetch, List<DownloadInfo> fullList) {
+        List<Long> fetchGids = new ArrayList<>();
+        for (DownloadInfo info : needFetch) {
+            fetchGids.add(info.gid);
+        }
+
+        IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+            try {
+                GalleryPageFetcher.fetchPagesBatch(mContext, needFetch,
+                        Settings.getDownloadPrefetchPagesConcurrency());
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to fetch pages for sorting", e);
+            }
+            SimpleHandler.getInstance().post(() -> {
+                handleFetchedResults(fetchGids, fullList);
+                doSort(fullList);
+                notifyWaitListChanged();
+            });
+        });
+    }
+
+    private void handleFetchedResults(List<Long> fetchGids, List<DownloadInfo> fullList) {
+        for (long gid : fetchGids) {
+            DownloadInfo current = mAllInfoMap.get(gid);
+            if (current == null) continue;
+
+            if (current.state == DownloadInfo.STATE_FINISH && current.pages <= 0) {
+                // Gallery confirmed deleted from remote (returned -2)
+                Log.i(TAG, "Gallery GID=" + gid + " was deleted from remote, finishing download");
+                if (mCurrentTask != null && mCurrentTask.gid == gid) {
+                    stopCurrentDownload();
+                    current.state = DownloadInfo.STATE_FINISH;
+                    EhDB.putDownloadInfo(current);
+                }
+                fullList.remove(current);
+                mWaitList.remove(current);
+            } else if (current.pages <= 0 && current.total <= 0 &&
+                    (current.state == DownloadInfo.STATE_NONE ||
+                     current.state == DownloadInfo.STATE_WAIT ||
+                     current.state == DownloadInfo.STATE_FAILED)) {
+                // Couldn't determine page count after fetch, delete from local
+                Log.w(TAG, "Deleting download GID=" + gid + " (cannot determine page count)");
+                deleteDownload(gid);
+            }
+        }
+    }
+
+    private void doSort(List<DownloadInfo> list) {
+        if (list.isEmpty()) return;
+
+        int queueOrder = Settings.getDownloadQueueOrder();
+        int secondary = Settings.getDownloadQueueOrderSecondary();
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_DEFAULT) return;
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_CATEGORY_PRIORITY) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST) {
+                Collections.sort(list, PAGES_ASC_COMPARATOR);
+                sortByCategoryPriority(list);
+            } else if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST) {
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+                sortByCategoryPriority(list);
+            } else {
+                sortByCategoryPriority(list);
+            }
+            return;
+        }
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_FEWEST_FIRST) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_CATEGORY_PRIORITY) {
+                Collections.sort(list, createCompositeComparator(true));
+            } else {
+                Collections.sort(list, PAGES_ASC_COMPARATOR);
+            }
+            return;
+        }
+
+        if (queueOrder == Settings.DOWNLOAD_QUEUE_ORDER_MOST_FIRST) {
+            if (secondary == Settings.DOWNLOAD_QUEUE_SECONDARY_CATEGORY_PRIORITY) {
+                Collections.sort(list, createCompositeComparator(false));
+            } else {
+                Collections.sort(list, PAGES_DESC_COMPARATOR);
+            }
+            return;
+        }
+    }
+
+    private void notifyWaitListChanged() {
+        for (DownloadInfoListener l : mDownloadInfoListeners) {
+            l.onUpdateAll();
         }
     }
 

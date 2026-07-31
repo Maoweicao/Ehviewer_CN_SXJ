@@ -748,6 +748,11 @@ public final class GalleryView extends GLView implements GestureRecognizer.Liste
             mLayoutManager.onPageLeft();
         } else if (mRightArea.contains((int) x, (int) y)) {
             mLayoutManager.onPageRight();
+        } else if (mAdapter != null && mAdapter.size() <= 0) {
+            // Full-screen error or empty, treat tap as error tap
+            if (mListener != null) {
+                mListener.onTapErrorText(GalleryPageView.INVALID_INDEX);
+            }
         }
     }
 

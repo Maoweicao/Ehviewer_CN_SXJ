@@ -186,7 +186,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         int posInList = mCallback.positionInList(position);
         List<DownloadInfo> list = mCallback.getList();
         if (list == null || posInList < 0 || posInList >= list.size()) {
-            return 0;
+            return RecyclerView.NO_ID;
         }
         return list.get(posInList).gid;
     }
@@ -254,7 +254,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             }
 
             TextView category = holder.category;
-            String newCategoryText = EhUtils.getCategory(info.category);
+            String newCategoryText = EhUtils.getCategoryName(category.getContext(), info.category);
             int categoryColor;
             // Special handling for imported archives - prioritize archiveUri over category field
             if (info.archiveUri != null && info.archiveUri.startsWith("content://")) {
@@ -262,7 +262,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 categoryColor = 0xFF4CAF50; // Green color for imported archives
             } else {
                 // 显示原有分类，不区分增量更新
-                newCategoryText = EhUtils.getCategory(info.category);
+                newCategoryText = EhUtils.getCategoryName(category.getContext(), info.category);
                 categoryColor = EhUtils.getCategoryColor(info.category);
             }
 
@@ -373,6 +373,10 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 stateText = resources.getString(R.string.download_state_finish);
                 bindState(holder, info, stateText);
                 break;
+            case DownloadInfo.STATE_RELAY_DOWNLOAD:
+                stateText = resources.getString(R.string.download_state_relay_download);
+                bindState(holder, info, stateText);
+                break;
         }
     }
 
@@ -407,6 +411,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             }
         } else if (info.state == DownloadInfo.STATE_DOWNLOAD) {
             holder.queuePosition.setText("↓");
+            holder.queuePosition.setVisibility(View.VISIBLE);
+        } else if (info.state == DownloadInfo.STATE_RELAY_DOWNLOAD) {
+            holder.queuePosition.setText("⇄");
             holder.queuePosition.setVisibility(View.VISIBLE);
         } else {
             holder.queuePosition.setVisibility(View.GONE);
@@ -625,6 +632,13 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 list.add(toPosInList, item);
             } catch (UnsupportedOperationException e) {
                 Log.w(TAG, "onMoveItem: list is unmodifiable, only DB order updated", e);
+            }
+
+            // Also re-sort the DownloadManager's allInfoList to keep consistency
+            DownloadManager manager = mCallback.getDownloadManager();
+            if (manager != null) {
+                java.util.Collections.sort(manager.getAllDownloadInfoList(),
+                        DownloadManager.DATE_DESC_COMPARATOR);
             }
 
             // 通知适配器刷新界面

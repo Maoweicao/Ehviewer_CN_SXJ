@@ -52,16 +52,24 @@ class BackgroundTaskService : Service() {
         const val EXTRA_TASK_NAME = "task_name"
 
         @JvmStatic
-        fun start(context: Context, taskName: String?, activeCount: Int) {
-            val intent = Intent(context, BackgroundTaskService::class.java).apply {
-                putExtra(EXTRA_ACTIVE_TASK_COUNT, activeCount)
-                putExtra(EXTRA_TASK_NAME, taskName)
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                @Suppress("DEPRECATION")
-                context.startService(intent)
+        fun start(context: Context, taskName: String?, activeCount: Int): Boolean {
+            return try {
+                val intent = Intent(context, BackgroundTaskService::class.java).apply {
+                    putExtra(EXTRA_ACTIVE_TASK_COUNT, activeCount)
+                    putExtra(EXTRA_TASK_NAME, taskName)
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.startService(intent)
+                }
+                true
+            } catch (e: Exception) {
+                // ForegroundServiceStartNotAllowedException (Android 12+),
+                // SecurityException (Android 14 dataSync restrictions), etc.
+                Log.e(TAG, "Failed to start foreground service", e)
+                false
             }
         }
 
@@ -115,17 +123,18 @@ class BackgroundTaskService : Service() {
 
     @SuppressLint("WakelockTimeout")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Re-call startForeground to satisfy the system requirement after
+        // startForegroundService() when the service is already running.
+        // Without this, Android throws ForegroundServiceDidNotStartInTimeException.
+        val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_TASK_COUNT, 0) ?: 0
+        val taskName = intent?.getStringExtra(EXTRA_TASK_NAME)
+        startForeground(NOTIFICATION_ID, buildNotification(activeCount, taskName))
+
         // Acquire WakeLock to prevent CPU sleep
         acquireWakeLock()
 
         // Start lock refresh timer
         startLockRefresh()
-
-        // Update foreground notification with actual task info
-        val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_TASK_COUNT, 0) ?: 0
-        val taskName = intent?.getStringExtra(EXTRA_TASK_NAME)
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIFICATION_ID, buildNotification(activeCount, taskName))
 
         Log.d(TAG, "Service started, activeTasks=$activeCount, taskName=$taskName")
         return START_NOT_STICKY

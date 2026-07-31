@@ -956,8 +956,9 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             mThumb.load(EhCacheKeyFactory.getThumbKey(gi.gid), gi.thumb);
             mTitle.setText(EhUtils.getSuitableTitle(gi));
             mUploader.setText(gi.uploader);
-            mCategory.setText(EhUtils.getCategory(gi.category));
-            mCategory.setTextColor(EhUtils.getCategoryColor(gi.category));
+            mCategory.setText(EhUtils.getCategoryName(requireContext(), gi.category));
+            mCategory.setBackgroundColor(EhUtils.getCategoryColor(gi.category));
+            mCategory.setTextColor(android.graphics.Color.WHITE);
             updateDownloadText();
         }
     }
@@ -1017,8 +1018,9 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
 
         mTitle.setText(EhUtils.getSuitableTitle(gd));
         mUploader.setText(gd.uploader);
-        mCategory.setText(EhUtils.getCategory(gd.category));
-        mCategory.setTextColor(EhUtils.getCategoryColor(gd.category));
+        mCategory.setText(EhUtils.getCategoryName(requireContext(), gd.category));
+        mCategory.setBackgroundColor(EhUtils.getCategoryColor(gd.category));
+        mCategory.setTextColor(android.graphics.Color.WHITE);
         updateDownloadText();
 
         mLanguage.setText(gd.language);

@@ -121,6 +121,9 @@ import com.hippo.ehviewer.ui.scene.download.part.CheckboxAdapter;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadAdapter;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadCategoryTable;
 import com.hippo.ehviewer.ui.scene.download.part.MyPageChangeListener;
+import com.hippo.ehviewer.transfer.core.TransferClientManager;
+import com.hippo.ehviewer.transfer.core.RelayTaskManager;
+import com.hippo.ehviewer.transfer.data.ConnectedDevice;
 import com.hippo.ehviewer.util.TagTranslationUtil;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.widget.MyEasyRecyclerView;
@@ -176,6 +179,8 @@ public class DownloadsScene extends ToolbarScene
     private static final String KEY_SELECTED_CATEGORY = "selected_category";
     private static final String KEY_INDEX_PAGE = "index_page";
     private static final String KEY_PAGE_SIZE = "page_size";
+    private static final String KEY_SEARCH_KEY = "search_key";
+    private static final String KEY_LAST_FILTER_SORT_ID = "last_filter_sort_id";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
@@ -251,7 +256,10 @@ public class DownloadsScene extends ToolbarScene
     @ViewLifeCircle
     private SearchBarMover mSearchBarMover;
     private boolean mSearchMode = false;
+    @Nullable
+    private DownloadListInfosExecutor mCurrentExecutor;
     public String searchKey = null;
+    private int mLastFilterSortId = 0;
 
     private int mInitPosition = -1;
 
@@ -339,6 +347,7 @@ public class DownloadsScene extends ToolbarScene
     @Override
     public void onDestroy() {
         super.onDestroy();
+        cancelCurrentExecutor();
         mList = null;
 
         DownloadManager manager = mDownloadManager;
@@ -434,7 +443,12 @@ public class DownloadsScene extends ToolbarScene
         mSelectedCategory = savedInstanceState.getInt(KEY_SELECTED_CATEGORY, EhUtils.ALL_CATEGORY);
         indexPage = savedInstanceState.getInt(KEY_INDEX_PAGE, 1);
         pageSize = savedInstanceState.getInt(KEY_PAGE_SIZE, 1);
+        searchKey = savedInstanceState.getString(KEY_SEARCH_KEY);
+        mLastFilterSortId = savedInstanceState.getInt(KEY_LAST_FILTER_SORT_ID, 0);
         updateForLabel();
+        if (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default) {
+            gotoFilterAndSort(mLastFilterSortId);
+        }
     }
 
     @Override
@@ -444,6 +458,8 @@ public class DownloadsScene extends ToolbarScene
         outState.putInt(KEY_SELECTED_CATEGORY, mSelectedCategory);
         outState.putInt(KEY_INDEX_PAGE, indexPage);
         outState.putInt(KEY_PAGE_SIZE, pageSize);
+        outState.putString(KEY_SEARCH_KEY, searchKey);
+        outState.putInt(KEY_LAST_FILTER_SORT_ID, mLastFilterSortId);
     }
 
     @Nullable
@@ -651,7 +667,7 @@ public class DownloadsScene extends ToolbarScene
         mFabLayout.setOnExpandListener(this);
         mActionFabDrawable = new AddDeleteDrawable(context, resources.getColor(R.color.primary_drawable_dark, null));
         mFabLayout.getPrimaryFab().setImageDrawable(mActionFabDrawable);
-        FloatingActionButton fab = mFabLayout.getSecondaryFabAt(6);
+        FloatingActionButton fab = mFabLayout.getSecondaryFabAt(7);
         if (DRAG_ENABLE) {
             fab.setImageDrawable(ResourcesCompat.getDrawable(getResources(), R.drawable.v_mobile_hand_left_x24, context.getTheme()));
         } else {
@@ -770,17 +786,19 @@ public class DownloadsScene extends ToolbarScene
             mRecyclerView.stopScroll();
             mRecyclerView = null;
         }
+        if (mDragDropManager != null) {
+            mDragDropManager.release();
+            mDragDropManager = null;
+        }
         if (null != mFabLayout) {
             removeAboveSnackView(mFabLayout);
             mFabLayout = null;
         }
 
-        mRecyclerView = null;
         mViewTransition = null;
         mAdapter = null;
         mOriginalAdapter = null;
         mLayoutManager = null;
-        mDragDropManager = null;
         EventBus.getDefault().unregister(this);
     }
 
@@ -867,6 +885,7 @@ public class DownloadsScene extends ToolbarScene
             case R.id.waiting:
             case R.id.downloading:
             case R.id.failed:
+            case R.id.relay_download:
             case R.id.sort_by_gallery_id_asc:
             case R.id.sort_by_gallery_id_desc:
             case R.id.sort_by_create_time_asc:
@@ -893,6 +912,15 @@ public class DownloadsScene extends ToolbarScene
                 return true;
             case R.id.import_local_archive:
                 importLocalArchive();
+                return true;
+            case R.id.action_relay_center: {
+                Intent intent = new Intent(activity, com.hippo.ehviewer.ui.transfer.TransferActivity.class);
+                intent.putExtra("open_tab", "relay");
+                activity.startActivity(intent);
+                return true;
+            }
+            case R.id.repair_thumbnails:
+                repairThumbnails();
                 return true;
 //            case R.id.misc:
 //            case R.id.doujinshi:
@@ -1024,7 +1052,9 @@ public class DownloadsScene extends ToolbarScene
             int sortId = selectedSortId[0];
 
         if (mSearchDialog != null) {
+        if (mSearchDialog != null) {
             mSearchDialog.dismiss();
+        }
         }
             mSearchMode = false;
 
@@ -1065,6 +1095,8 @@ public class DownloadsScene extends ToolbarScene
         statusIds.add(DownloadInfo.STATE_FINISH);
         statusNames.add(context.getString(R.string.download_state_failed));
         statusIds.add(DownloadInfo.STATE_FAILED);
+        statusNames.add(context.getString(R.string.download_state_relay_download));
+        statusIds.add(DownloadInfo.STATE_RELAY_DOWNLOAD);
         final CheckboxAdapter statusAdapter = new CheckboxAdapter(statusNames, statusIds);
         statusRecyclerView.setAdapter(statusAdapter);
         // Select all by default
@@ -1218,7 +1250,9 @@ public class DownloadsScene extends ToolbarScene
 
             DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
             executor.setDownloadSearchingListener(this);
+            cancelCurrentExecutor();
             executor.executeFilterAndSort(categoryIds, selectedStatusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, pageFrom, pageTo, duplicateOnly, ratFrom, ratTo);
+            mCurrentExecutor = executor;
             searching = true;
         });
     }
@@ -1411,17 +1445,40 @@ public class DownloadsScene extends ToolbarScene
         }
 
         boolean favourited = di.favoriteSlot != -2;
+        boolean isRelayDownload = di.state == DownloadInfo.STATE_RELAY_DOWNLOAD;
 
-        CharSequence[] items = new CharSequence[]{
-                context.getString(R.string.read),
-                context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
-                context.getString(R.string.delete),
-        };
-        int[] icons = new int[]{
-                R.drawable.v_book_open_x24,
-                favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
-                R.drawable.v_delete_x24,
-        };
+        CharSequence[] items;
+        int[] icons;
+
+        if (isRelayDownload) {
+            // 接力下载状态：显示取消接力下载
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+                    context.getString(R.string.relay_cancel_download),
+                    context.getString(R.string.delete),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+                    R.drawable.v_send_dark_x24,
+                    R.drawable.v_delete_x24,
+            };
+        } else {
+            // 正常状态：显示接力到设备
+            items = new CharSequence[]{
+                    context.getString(R.string.read),
+                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
+                    context.getString(R.string.relay_send_to_device),
+                    context.getString(R.string.delete),
+            };
+            icons = new int[]{
+                    R.drawable.v_book_open_x24,
+                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
+                    R.drawable.v_send_dark_x24,
+                    R.drawable.v_delete_x24,
+            };
+        }
 
         @SuppressLint("InflateParams") LinearLayout linearLayout = (LinearLayout) getLayoutInflater2().inflate(R.layout.gallery_item_dialog_coustom_title, null);
 
@@ -1437,7 +1494,7 @@ public class DownloadsScene extends ToolbarScene
         textView.setText(EhUtils.getSuitableTitle(di));
         textView.setOnClickListener(l -> {
             AppHelper.copyPlainText(EhUtils.getSuitableTitle(di), getEHContext());
-            Toast toast = Toast.makeText(getEHContext(), "标题文本已复制", Toast.LENGTH_SHORT);
+            Toast toast = Toast.makeText(getEHContext(), R.string.title_text_copied, Toast.LENGTH_SHORT);
             toast.setGravity(Gravity.CENTER, 0, 0);
             toast.show();
         });
@@ -1473,7 +1530,19 @@ public class DownloadsScene extends ToolbarScene
                                 }, false);
                             }
                             break;
-                        case 2: // Delete
+                        case 2: // Relay Download / Cancel Relay
+                            if (isRelayDownload) {
+                                // 取消接力下载，恢复为本机下载
+                                if (mDownloadManager != null) {
+                                    mDownloadManager.cancelRelayDownload(di.gid);
+                                    Toast.makeText(context, R.string.relay_cancel_download, Toast.LENGTH_SHORT).show();
+                                }
+                            } else {
+                                // 接力到设备：检查已连接设备并弹出选择对话框
+                                handleRelayDownload(activity, di);
+                            }
+                            break;
+                        case 3: // Delete
                             new AlertDialog.Builder(getDialogContext())
                                     .setTitle(R.string.download_remove_dialog_title)
                                     .setMessage(getString(R.string.download_remove_dialog_message, di.title))
@@ -1485,10 +1554,81 @@ public class DownloadsScene extends ToolbarScene
         return true;
     }
 
+    /**
+     * 处理接力下载：检查已连接设备，弹出选择对话框，调用接力API
+     */
+    private void handleRelayDownload(MainActivity activity, DownloadInfo di) {
+        // 获取已连接设备
+        TransferClientManager clientManager = TransferClientManager.getInstance(getEHContext());
+        if (clientManager == null || clientManager.getConnectedDevices().isEmpty()) {
+            Toast.makeText(getEHContext(), R.string.relay_no_connected_devices, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        java.util.List<ConnectedDevice> devices = clientManager.getConnectedDevices();
+
+        if (devices.size() == 1) {
+            // 只有一台设备，直接确认
+            showRelayConfirmDialog(activity, di, clientManager, devices.get(0));
+        } else {
+            // 多台设备，弹出选择对话框
+            String[] deviceNames = new String[devices.size()];
+            for (int i = 0; i < devices.size(); i++) {
+                ConnectedDevice d = devices.get(i);
+                deviceNames[i] = d.getName() + " (" + d.getHost() + ":" + d.getPort() + ")";
+            }
+            new AlertDialog.Builder(getDialogContext())
+                    .setTitle(R.string.relay_device_select)
+                    .setItems(deviceNames, (dialog, which) -> {
+                        showRelayConfirmDialog(activity, di, clientManager, devices.get(which));
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+        }
+    }
+
+    /**
+     * 显示接力确认对话框
+     */
+    private void showRelayConfirmDialog(MainActivity activity, DownloadInfo di,
+                                         TransferClientManager clientManager, ConnectedDevice device) {
+        String title = EhUtils.getSuitableTitle(di);
+        new AlertDialog.Builder(getDialogContext())
+                .setTitle(R.string.relay_confirm_relay)
+                .setMessage(getString(R.string.relay_confirm_message, title, device.getName()))
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    // 调用接力API
+                    clientManager.createRelayTask(device, di, new TransferClientManager.RelayTaskCallback() {
+                        @Override
+                        public void onSuccess(String taskId) {
+                            RelayTaskManager relayTaskManager = RelayTaskManager.getInstance(getEHContext());
+                            relayTaskManager.createTask(
+                                di.gid, di.token, di.title, di.titleJpn,
+                                di.thumb, di.category, di.posted, di.uploader,
+                                di.rating, di.pages,
+                                null, null, null, 0,
+                                device.getName(), device.getDeviceId(),
+                                null, true);
+                            if (mDownloadManager != null) {
+                                mDownloadManager.setRelayDownload(di.gid);
+                            }
+                            Toast.makeText(getEHContext(), R.string.relay_task_created, Toast.LENGTH_SHORT).show();
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            Toast.makeText(getEHContext(), "Relay failed: " + error, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
     private void buildChipGroup(GalleryInfo gi, ChipGroup tagFlowLayout) {
         int colorTag = AttrResources.getAttrColor(getContext(), R.attr.tagBackgroundColor);
         if (null == gi.tgList) {
-            String tagName = "暂无预览标签";
+            String tagName = getString(R.string.gallery_list_no_preview_tag);
             @SuppressLint("InflateParams") Chip chip = (Chip) getLayoutInflater().inflate(R.layout.item_chip_tag, null);
             chip.setChipBackgroundColor(ColorStateList.valueOf(colorTag));
             chip.setTextColor(Color.WHITE);
@@ -1538,11 +1678,13 @@ public class DownloadsScene extends ToolbarScene
             mRecyclerView.outOfCustomChoiceMode();
             return;
         }
-        if (mRecyclerView != null && !mRecyclerView.isInCustomChoice()) {
-            mRecyclerView.intoCustomChoiceMode();
+        if (!view.isExpanded()) {
+            view.toggle();
             return;
         }
-        view.toggle();
+        if (mRecyclerView != null) {
+            mRecyclerView.intoCustomChoiceMode();
+        }
     }
 
     private void setupFabContentDescriptions() {
@@ -1561,15 +1703,16 @@ public class DownloadsScene extends ToolbarScene
             }
             String desc = null;
             switch (i) {
-                case 0 -> desc = context.getString(R.string.select_all);
-                case 1 -> desc = context.getString(R.string.fab_start);
-                case 2 -> desc = context.getString(R.string.pause);
-                case 3 -> desc = context.getString(R.string.delete);
-                case 4 -> desc = context.getString(R.string.move_download);
-                case 5 -> desc = context.getString(R.string.random_download);
-                case 6 -> desc = context.getString(R.string.drag_mode);
-                case 7 -> desc = context.getString(R.string.fab_compress);
-                case 8 -> desc = context.getString(R.string.refresh);
+                case 0 -> desc = context.getString(R.string.multi_select_mode);
+                case 1 -> desc = context.getString(R.string.select_all);
+                case 2 -> desc = context.getString(R.string.fab_start);
+                case 3 -> desc = context.getString(R.string.pause);
+                case 4 -> desc = context.getString(R.string.delete);
+                case 5 -> desc = context.getString(R.string.move_download);
+                case 6 -> desc = context.getString(R.string.random_download);
+                case 7 -> desc = context.getString(R.string.drag_mode);
+                case 8 -> desc = context.getString(R.string.fab_compress);
+                case 9 -> desc = context.getString(R.string.refresh);
             }
             if (desc != null) {
                 fab.setContentDescription(desc);
@@ -1587,6 +1730,8 @@ public class DownloadsScene extends ToolbarScene
         }
 
         if (0 == position) {
+            recyclerView.intoCustomChoiceMode();
+        } else if (1 == position) {
             recyclerView.checkAll();
         } else {
             List<DownloadInfo> list = mList;
@@ -1596,8 +1741,8 @@ public class DownloadsScene extends ToolbarScene
 
             LongList gidList = null;
             List<DownloadInfo> downloadInfoList = null;
-            boolean collectGid = position == 1 || position == 2 || position == 3; // Start, Stop, Delete
-            boolean collectDownloadInfo = position == 3 || position == 4 || position == 7; // Delete, Move, or Compress
+            boolean collectGid = position == 2 || position == 3 || position == 4; // Start, Stop, Delete
+            boolean collectDownloadInfo = position == 4 || position == 5 || position == 8; // Delete, Move, or Compress
             if (collectGid) {
                 gidList = new LongList();
             }
@@ -1619,7 +1764,7 @@ public class DownloadsScene extends ToolbarScene
             }
 
             switch (position) {
-                case 1: { // Start
+                case 2: { // Start
                     if (gidList.isEmpty()) {
                         break;
                     }
@@ -1631,7 +1776,7 @@ public class DownloadsScene extends ToolbarScene
                     recyclerView.outOfCustomChoiceMode();
                     break;
                 }
-                case 2: { // Stop
+                case 3: { // Stop
                     if (gidList.isEmpty()) {
                         break;
                     }
@@ -1642,7 +1787,7 @@ public class DownloadsScene extends ToolbarScene
                     recyclerView.outOfCustomChoiceMode();
                     break;
                 }
-                case 3: { // Delete
+                case 4: { // Delete
                     if (downloadInfoList.isEmpty()) {
                         break;
                     }
@@ -1657,7 +1802,7 @@ public class DownloadsScene extends ToolbarScene
                             .show();
                     break;
                 }
-                case 4: {// Move
+                case 5: {// Move
                     if (downloadInfoList.isEmpty()) {
                         break;
                     }
@@ -1677,17 +1822,17 @@ public class DownloadsScene extends ToolbarScene
                             .show();
                     break;
                 }
-                case 5:
+                case 6:
                     if (mList == null || mList.isEmpty()) {
                         return;
                     }
                     onClickPrimaryFab(mFabLayout, null);
                     viewRandom();
                     break;
-                case 6:
+                case 7:
                     setDragEnable(fab);
                     break;
-                case 7: { // Compress
+                case 8: { // Compress
                     if (downloadInfoList == null || downloadInfoList.isEmpty()) {
                         Toast.makeText(context, R.string.compress_no_downloaded_galleries, Toast.LENGTH_SHORT).show();
                         break;
@@ -1739,8 +1884,16 @@ public class DownloadsScene extends ToolbarScene
         }
 
         Intent intent = new Intent(activity, GalleryActivity.class);
-        intent.setAction(GalleryActivity.ACTION_EH);
-        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, list.get(position));
+        DownloadInfo downloadInfo = list.get(position);
+        if (downloadInfo.archiveUri != null && downloadInfo.archiveUri.startsWith("content://")) {
+            intent.setAction(GalleryActivity.ACTION_EH);
+            intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, downloadInfo);
+            intent.setData(Uri.parse(downloadInfo.archiveUri));
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            intent.setAction(GalleryActivity.ACTION_EH);
+            intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, downloadInfo);
+        }
         galleryActivityLauncher.launch(intent);
     }
 
@@ -2007,10 +2160,20 @@ public class DownloadsScene extends ToolbarScene
 
         executor.setDownloadSearchingListener(this);
 
+        cancelCurrentExecutor();
         executor.executeSearching();
+        mCurrentExecutor = executor;
+    }
+
+    private void cancelCurrentExecutor() {
+        if (mCurrentExecutor != null) {
+            mCurrentExecutor.cancel();
+            mCurrentExecutor = null;
+        }
     }
 
     private void gotoFilterAndSort(int id) {
+        mLastFilterSortId = id;
         mProgressView.setVisibility(View.VISIBLE);
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.GONE);
@@ -2022,7 +2185,9 @@ public class DownloadsScene extends ToolbarScene
 
         executor.setDownloadSearchingListener(this);
 
+        cancelCurrentExecutor();
         executor.executeFilterAndSort(id);
+        mCurrentExecutor = executor;
     }
 
     private void updateAdapter() {
@@ -2079,11 +2244,11 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onDownloadSearchSuccess(List<DownloadInfo> list) {
-        // 检查 Fragment 是否已附加，如果未附加则忽略回调
         if (!isAdded()) {
             return;
         }
         mList = list;
+        mBackList = new ArrayList<>(list);
         indexPage = 1;
         updateAdapter();
         updateTitle();
@@ -2099,11 +2264,11 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onDownloadListHandleSuccess(List<DownloadInfo> list) {
-        // 检查 Fragment 是否已附加，如果未附加则忽略回调
         if (!isAdded()) {
             return;
         }
         mList = list;
+        mBackList = new ArrayList<>(list);
         indexPage = 1;
         updateAdapter();
         updateTitle();
@@ -2118,6 +2283,9 @@ public class DownloadsScene extends ToolbarScene
 
     @Override
     public void onDownloadSearchFailed(List<DownloadInfo> list) {
+        if (!isAdded()) {
+            return;
+        }
         Toast.makeText(getEHContext(), R.string.download_searching_failed, Toast.LENGTH_LONG).show();
         mList = list;
         indexPage = 1;
@@ -2178,6 +2346,8 @@ public class DownloadsScene extends ToolbarScene
         }
     }
 
+    private static final int SPIDER_INFO_QUERY_BATCH_LIMIT = 200;
+
     private void queryUnreadSpiderInfo() {
         if (mList == null) {
             return;
@@ -2187,7 +2357,13 @@ public class DownloadsScene extends ToolbarScene
             DownloadInfo info = mList.get(i);
             if (!mSpiderInfoMap.containsKey(info.gid) || mSpiderInfoMap.get(info.gid) == null) {
                 requestList.add(info);
+                if (requestList.size() >= SPIDER_INFO_QUERY_BATCH_LIMIT) {
+                    break;
+                }
             }
+        }
+        if (requestList.isEmpty()) {
+            return;
         }
         DownloadSpiderInfoExecutor executor = new DownloadSpiderInfoExecutor(requestList, this::spiderInfoResultCallBack);
         executor.execute();
@@ -2277,6 +2453,24 @@ public class DownloadsScene extends ToolbarScene
         }
     }
 
+    private void repairThumbnails() {
+        Context context = getEHContext();
+        Activity activity = getActivity2();
+        if (context == null || activity == null) return;
+
+        new AlertDialog.Builder(activity)
+                .setTitle(R.string.repair_thumbnail_menu)
+                .setMessage(R.string.repair_thumbnail_confirm)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    com.hippo.ehviewer.task.RepairDownloadedThumbnailTask task =
+                            new com.hippo.ehviewer.task.RepairDownloadedThumbnailTask(context, true);
+                    com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+                    Toast.makeText(context, R.string.repair_thumbnail_start, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
     private void handleSelectedFile(ActivityResult result) {
         if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
             return;
@@ -2312,7 +2506,9 @@ public class DownloadsScene extends ToolbarScene
         Toast.makeText(context, R.string.import_archive_processing, Toast.LENGTH_LONG).show();
 
         // Process the archive file in background
-        new Thread(() -> processArchiveFile(uri)).start();
+        Thread thread = new Thread(() -> processArchiveFile(uri));
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private void processArchiveFile(Uri uri) {
@@ -2414,7 +2610,7 @@ public class DownloadsScene extends ToolbarScene
             downloadInfo.thumb = null; // No thumbnail for imported archives
             downloadInfo.category = EhUtils.UNKNOWN; // Keep as UNKNOWN, will be handled in display logic
             downloadInfo.posted = null;
-            downloadInfo.uploader = "Local Archive";
+            downloadInfo.uploader = getString(R.string.local_archive);
             downloadInfo.rating = -1.0f; // Keep default rating to not affect other downloads
             downloadInfo.state = DownloadInfo.STATE_FINISH;
             downloadInfo.legacy = 0;
@@ -2568,6 +2764,9 @@ public class DownloadsScene extends ToolbarScene
             if (mFabLayout != null) {
                 mFabLayout.setExpanded(true);
             }
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
+            }
             // Lock drawer
             setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED, Gravity.LEFT);
             setDrawerLockMode(DrawerLayout.LOCK_MODE_LOCKED_CLOSED, Gravity.RIGHT);
@@ -2583,6 +2782,9 @@ public class DownloadsScene extends ToolbarScene
             }
             if (mFabLayout != null) {
                 mFabLayout.setExpanded(false);
+            }
+            if (mAdapter != null) {
+                mAdapter.notifyDataSetChanged();
             }
             // Unlock drawer
             setDrawerLockMode(DrawerLayout.LOCK_MODE_UNLOCKED, Gravity.LEFT);

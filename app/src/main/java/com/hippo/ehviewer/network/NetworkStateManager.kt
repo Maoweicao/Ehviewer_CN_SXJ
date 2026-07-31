@@ -58,6 +58,37 @@ object NetworkStateManager {
 
     fun isMetered(): Boolean = currentState == State.ONLINE_METERED
 
+    /**
+     * Actively scan ALL networks for VPN transport.
+     * This is more reliable than just checking isVpnActive flag.
+     */
+    fun isVpnConnected(): Boolean {
+        val cm = connectivityManager ?: return false
+        return try {
+            // Check all networks for VPN
+            @Suppress("DEPRECATION")
+            val networks = cm.allNetworks
+            for (network in networks) {
+                val capabilities = cm.getNetworkCapabilities(network)
+                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return true
+                }
+            }
+            // Also check active network as fallback
+            val activeNetwork = cm.activeNetwork
+            if (activeNetwork != null) {
+                val capabilities = cm.getNetworkCapabilities(activeNetwork)
+                if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                    return true
+                }
+            }
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "VPN check failed", e)
+            false
+        }
+    }
+
     fun addListener(listener: Listener) {
         synchronized(listeners) {
             if (!listeners.contains(listener)) {
@@ -88,12 +119,34 @@ object NetworkStateManager {
                 super.onAvailable(network)
                 Log.i(TAG, "Network available: $network")
                 handleNetworkAvailable(network)
+
+                // Check if this new network is VPN
+                try {
+                    val capabilities = connectivityManager?.getNetworkCapabilities(network)
+                    if (capabilities != null && capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+                        if (!isVpnActive) {
+                            isVpnActive = true
+                            Log.i(TAG, "VPN network detected onAvailable")
+                            NetworkLogger.logBackground("NetworkStateManager: VPN network detected")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error checking VPN on available", e)
+                }
             }
 
             override fun onLost(network: Network) {
                 super.onLost(network)
                 Log.w(TAG, "Network lost: $network")
                 handleNetworkLost(network)
+
+                // Rescan all networks for VPN after network loss
+                val vpnStillActive = isVpnConnected()
+                if (isVpnActive != vpnStillActive) {
+                    isVpnActive = vpnStillActive
+                    Log.i(TAG, "VPN state after network lost: $vpnStillActive")
+                    NetworkLogger.logBackground("NetworkStateManager: VPN state after network lost: $vpnStillActive")
+                }
             }
 
             override fun onCapabilitiesChanged(
@@ -108,10 +161,11 @@ object NetworkStateManager {
                 Log.i(TAG, "Network caps: network=$network, unmetered=$isUnmetered, internet=$hasInternet, validated=$isValidated, vpn=$hasVpn")
 
                 // Detect VPN state change and update proxy selector
-                if (hasVpn != isVpnActive) {
-                    isVpnActive = hasVpn
-                    Log.i(TAG, "VPN state changed: active=$hasVpn")
-                    NetworkLogger.logBackground("NetworkStateManager: VPN state changed: active=$hasVpn")
+                val currentVpnState = isVpnConnected()
+                if (currentVpnState != isVpnActive) {
+                    isVpnActive = currentVpnState
+                    Log.i(TAG, "VPN state changed: active=$currentVpnState")
+                    NetworkLogger.logBackground("NetworkStateManager: VPN state changed: active=$currentVpnState")
                 }
 
                 // Only transition when capabilities are fully validated,

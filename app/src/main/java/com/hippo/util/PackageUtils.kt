@@ -30,8 +30,11 @@ object PackageUtils {
     @JvmStatic
     fun getSignature(context: Context, packageName: String): String? {
         try {
-            @SuppressLint("PackageManagerGetSignatures") val pi = context.packageManager
+            @Suppress("DEPRECATION")
+            @SuppressLint("PackageManagerGetSignatures")
+            val pi = context.packageManager
                 .getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
+            @Suppress("DEPRECATION")
             val ss = pi.signatures
             if (ss != null && ss.size >= 1) {
                 return computeSHA1(ss[0]!!.toByteArray())

@@ -135,8 +135,9 @@ class GetProfileScene : SolidScene() {
 
         override fun shouldInterceptRequest(
             view: WebView,
-            request: WebViewRequest,
+            webViewRequest: WebViewRequest,
         ): WebResourceResponse? {
+            val request = webViewRequest
             // 方案五：URL Scheme 过滤 - 只处理 HTTP/HTTPS 请求
             val url = request.url
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
@@ -160,6 +161,7 @@ class GetProfileScene : SolidScene() {
             }
 
             // 处理不同类型的请求
+            @Suppress("REDUNDANT_ELSE_IN_WHEN")
             when (type) {
                 WebViewRequestType.FETCH, WebViewRequestType.HTML, 
                 WebViewRequestType.XML_HTTP -> {

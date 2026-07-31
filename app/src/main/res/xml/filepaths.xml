@@ -38,4 +38,8 @@
     <external-cache-path
         name="external_cache_path"
         path="EhViewer/temp/cache" />
+
+    <external-path
+        name="networkcapture"
+        path="EhViewer/networkcapture/" />
 </path>

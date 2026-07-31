@@ -43,16 +43,22 @@ export default function FileBrowser() {
     }
   }, [])
 
-  const loadFiles = useCallback(async (folder: string, page: number, s: string, o: string, keyword: string) => {
+  const loadFiles = useCallback(async (folder: string, page: number, s: string, o: string, keyword: string, append = false) => {
     setLoading(true)
     try {
       const data = await api.getFiles(folder, page, 50, s, o, keyword)
-      setFiles(data.files || [])
+      if (append) {
+        setFiles(prev => [...prev, ...(data.files || [])])
+      } else {
+        setFiles(data.files || [])
+      }
       setTotalFiles(data.total || 0)
     } catch (e: unknown) {
       console.error('loadFiles error:', e)
-      setFiles([])
-      setTotalFiles(0)
+      if (!append) {
+        setFiles([])
+        setTotalFiles(0)
+      }
     } finally {
       setLoading(false)
     }
@@ -91,6 +97,14 @@ export default function FileBrowser() {
     setFilePage(1)
     loadFiles(currentFolder, 1, sort, val, search)
   }
+
+  const handleLoadMore = () => {
+    const nextPage = filePage + 1
+    setFilePage(nextPage)
+    loadFiles(currentFolder, nextPage, sort, order, search, true)
+  }
+
+  const hasMore = files.length < totalFiles
 
   const handlePreview = async (file: FileItem) => {
     try {
@@ -144,6 +158,14 @@ export default function FileBrowser() {
     setSelectedFiles(newSet)
   }
 
+  const toggleSelectAll = () => {
+    if (selectedFiles.size === files.length) {
+      setSelectedFiles(new Set())
+    } else {
+      setSelectedFiles(new Set(files.map(f => f.name)))
+    }
+  }
+
   const handleBatchDelete = async () => {
     if (selectedFiles.size === 0) {
       Toast.show({ content: '请先选择文件' })
@@ -154,13 +176,14 @@ export default function FileBrowser() {
     })
     if (result) {
       try {
+        Toast.show({ content: '正在删除...', icon: 'loading' })
         await api.batchDeleteFiles(currentFolder, Array.from(selectedFiles))
-        Toast.show({ content: `删除 ${selectedFiles.size} 个文件`, icon: 'success' })
+        Toast.show({ content: `成功删除 ${selectedFiles.size} 个文件`, icon: 'success' })
         setBatchMode(false)
         setSelectedFiles(new Set())
-        loadFiles(currentFolder, filePage, sort, order, search)
-      } catch {
-        Toast.show({ content: '删除失败', icon: 'fail' })
+        loadFiles(currentFolder, 1, sort, order, search)
+      } catch (e: any) {
+        Toast.show({ content: e?.message || '删除失败', icon: 'fail' })
       }
     }
   }
@@ -250,7 +273,7 @@ export default function FileBrowser() {
             onClear={() => handleSearch('')}
             style={{ padding: '8px 12px' }}
           />
-          <div style={{ display: 'flex', padding: '0 12px', gap: 8 }}>
+          <div style={{ display: 'flex', padding: '0 12px', gap: 8, alignItems: 'center' }}>
             <Dropdown>
               <Dropdown.Item key="sort" title={sortLabel}>
                 <List>
@@ -268,6 +291,14 @@ export default function FileBrowser() {
                 </List>
               </Dropdown.Item>
             </Dropdown>
+            {batchMode && (
+              <Button size="mini" onClick={toggleSelectAll}>
+                {selectedFiles.size === files.length ? '取消全选' : '全选'}
+              </Button>
+            )}
+            <span style={{ fontSize: 12, color: 'var(--text-light, #666)', marginLeft: 'auto' }}>
+              {files.length}/{totalFiles}
+            </span>
           </div>
           <div className="page-content">
             {loading && files.length === 0 ? (
@@ -337,6 +368,13 @@ export default function FileBrowser() {
                   </List.Item>
                 ))}
               </List>
+            )}
+            {hasMore && !loading && (
+              <div style={{ padding: '16px', textAlign: 'center' }}>
+                <Button onClick={handleLoadMore} loading={loading}>
+                  加载更多
+                </Button>
+              </div>
             )}
           </div>
           {batchMode && selectedFiles.size > 0 && (

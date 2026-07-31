@@ -49,7 +49,8 @@ class ResetMediaScanTask(
             }
 
             val downloadUri = downloadLocation.uri
-            if (downloadUri != null && downloadUri.path != null) {
+            val downloadPath = downloadUri.path
+            if (downloadPath != null) {
                 val downloadPath = downloadUri.path!!
                 val downloadDir = File(downloadPath)
                 if (downloadDir.exists()) {

@@ -248,6 +248,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
         if (null == gi) {
             return;
         }
+        holder.boundGid = gi.gid;
 
         switch (mType) {
             default:
@@ -262,7 +263,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                 }
 
                 TextView category = holder.category;
-                String newCategoryText = EhUtils.getCategory(gi.category);
+                String newCategoryText = EhUtils.getCategoryName(category.getContext(), gi.category);
                 if (!newCategoryText.equals(category.getText().toString())) {
                     category.setText(newCategoryText);
                     category.setBackgroundColor(EhUtils.getCategoryColor(gi.category));
@@ -272,23 +273,11 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                     holder.pages.setText(null);
                     holder.pages.setVisibility(View.GONE);
                 } else {
-                    if (showReadProgress){
-                        executor.submit(()->{
-                            int startPage = SpiderQueen.findStartPage(mInflater.getContext(), gi);
-                            handler.post(()->{
-                                String text;
-                                if (startPage > 0) {
-                                    text = startPage + 1 + "/" + gi.pages + "P";
-                                    holder.pages.setText(text);
-                                } else {
-                                    text = "0/" + gi.pages + "P";
-                                    holder.pages.setText(text);
-                                }
-                            });
-                        });
-                    }
                     holder.pages.setText(new StringBuffer(gi.pages + "P"));
                     holder.pages.setVisibility(View.VISIBLE);
+                    if (showReadProgress){
+                        bindReadProgress(holder, gi);
+                    }
                 }
                 if (TextUtils.isEmpty(gi.simpleLanguage)) {
                     holder.simpleLanguage.setText(null);
@@ -324,12 +313,51 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
         myOnThumbItemClickListener = listener;
     }
 
+    /**
+     * Shows "startPage+1/totalPages" on the pages label. Served from the
+     * in-memory start-page cache when possible; otherwise a single deduped
+     * background lookup per gid is submitted (disk I/O must stay off the
+     * main thread and off the unbounded shared pool's hot path).
+     */
+    private void bindReadProgress(@NonNull GalleryHolder holder, @NonNull GalleryInfo gi) {
+        final long gid = gi.gid;
+        final int totalPages = gi.pages;
+        int cachedPage = SpiderQueen.getCachedStartPage(gid);
+        if (cachedPage >= 0) {
+            holder.pages.setText(formatReadProgress(cachedPage, totalPages));
+            return;
+        }
+        if (!SpiderQueen.markStartPageInFlight(gid)) {
+            return;
+        }
+        executor.submit(() -> {
+            try {
+                int startPage = SpiderQueen.findStartPage(mInflater.getContext(), gi);
+                SpiderQueen.cacheStartPage(gid, startPage);
+                handler.post(() -> {
+                    // The holder may have been recycled for another item meanwhile
+                    if (holder.boundGid == gid) {
+                        holder.pages.setText(formatReadProgress(startPage, totalPages));
+                    }
+                });
+            } finally {
+                SpiderQueen.unmarkStartPageInFlight(gid);
+            }
+        });
+    }
+
+    private static String formatReadProgress(int startPage, int totalPages) {
+        return (startPage > 0 ? (startPage + 1) : 0) + "/" + totalPages + "P";
+    }
+
     public interface OnThumbItemClickListener {
         void onThumbItemClick(int position, View view, GalleryInfo gi);
     }
 
     public class GalleryHolder extends RecyclerView.ViewHolder {
 
+        /** Gid of the item currently bound to this holder (for stale async writes). */
+        public long boundGid = -1;
         public final LoadImageViewNew thumb;
         public TextView title;
         public final TextView uploader;

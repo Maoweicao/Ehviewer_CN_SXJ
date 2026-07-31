@@ -16,7 +16,6 @@
 
 package com.hippo.ehviewer.spider;
 
-import static com.hippo.ehviewer.spider.SpiderDen.getGalleryDownloadDir;
 import static com.hippo.ehviewer.spider.SpiderQueen.SPIDER_INFO_FILENAME;
 
 import android.content.Context;
@@ -274,7 +273,9 @@ public class SpiderInfo {
 
     public static SpiderInfo getSpiderInfo(GalleryInfo info) {
         SpiderInfo spiderInfo;
-        UniFile mDownloadDir = getGalleryDownloadDir(info);
+        // Read-only lookup: never creates a dirname DB record for galleries
+        // that were never downloaded.
+        UniFile mDownloadDir = SpiderDen.getExistingGalleryDownloadDir(info);
         if (mDownloadDir != null && mDownloadDir.isDirectory()) {
             UniFile file = mDownloadDir.findFile(SPIDER_INFO_FILENAME);
             spiderInfo = SpiderInfo.read(file);

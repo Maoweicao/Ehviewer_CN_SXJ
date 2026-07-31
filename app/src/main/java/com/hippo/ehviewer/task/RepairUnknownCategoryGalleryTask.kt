@@ -7,6 +7,7 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.DownloadManager
+import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -20,22 +21,18 @@ import kotlin.coroutines.coroutineContext
  * 批量修复所有分类显示为未知的已下载画廊的元数据信息
  */
 class RepairUnknownCategoryGalleryTask(
-    private val context: Context
-) : BackgroundTask {
+    context: Context
+) : BaseBackgroundTask(context) {
     
     companion object {
         private const val TAG = "RepairUnknownCategoryTask"
         private const val CONCURRENT_REQUESTS = 20 // 并发请求数量
     }
     
-    private val taskId = "repair_unknown_category_${System.currentTimeMillis()}"
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var progressListener: BackgroundTask.ProgressListener? = null
     private var statusListener: StatusListener? = null
-    private var logListener: LogListener? = null
     
-    private var currentProgress = 0
     private var totalProgress = 0
     private var successCount = 0
     private var failedCount = 0
@@ -43,12 +40,8 @@ class RepairUnknownCategoryGalleryTask(
     private fun notifyStatus() {
         statusListener?.onStatus(currentProgress, totalProgress, successCount, failedCount)
     }
-
-    private fun logStep(message: String) {
-        logListener?.onLog(message)
-    }
     
-    override fun getTaskId(): String = taskId
+    override fun getTaskId(): String = "repair_unknown_category"
     
     override fun getTaskName(): String = context.getString(R.string.settings_download_repair_unknown_category_gallery)
     
@@ -58,8 +51,9 @@ class RepairUnknownCategoryGalleryTask(
     
     override suspend fun execute(): Result<Unit> {
         return try {
+            updateState(TaskState.RUNNING)
             Log.d(TAG, "开始修复分类未知的下载画廊信息")
-            logStep("开始修复分类未知的下载画廊信息")
+            appendTaskLog("开始修复分类未知的下载画廊信息")
             
             // 检查是否已取消
             coroutineContext[Job]?.ensureActive()
@@ -69,8 +63,8 @@ class RepairUnknownCategoryGalleryTask(
             
             if (downloadInfoList.isNullOrEmpty()) {
                 Log.d(TAG, "没有需要修复的下载画廊")
-                logStep("没有需要修复的下载画廊")
-                progressListener?.onCompleted()
+                appendTaskLog("没有需要修复的下载画廊")
+                notifyCompleted()
                 notifyStatus()
                 return Result.success(Unit)
             }
@@ -80,19 +74,19 @@ class RepairUnknownCategoryGalleryTask(
             
             if (unknownCategoryGalleries.isEmpty()) {
                 Log.d(TAG, "没有分类为未知的下载画廊")
-                logStep("没有分类为未知的下载画廊")
-                progressListener?.onCompleted()
+                appendTaskLog("没有分类为未知的下载画廊")
+                notifyCompleted()
                 notifyStatus()
                 return Result.success(Unit)
             }
             
             totalProgress = unknownCategoryGalleries.size
-            currentProgress = 0
             successCount = 0
             failedCount = 0
             notifyStatus()
             
             Log.d(TAG, "总共需要修复 $totalProgress 个分类未知的画廊")
+            appendTaskLog("总共需要修复 $totalProgress 个分类未知的画廊")
             
             // 分批处理，每批CONCURRENT_REQUESTS个
             val batches = unknownCategoryGalleries.chunked(CONCURRENT_REQUESTS)
@@ -108,7 +102,7 @@ class RepairUnknownCategoryGalleryTask(
                     Thread.sleep(100)
                 }
                 
-                logStep("开始处理第 ${batchIndex + 1}/${batches.size} 批 (${batch.size} 个画廊)")
+                appendTaskLog("开始处理第 ${batchIndex + 1}/${batches.size} 批 (${batch.size} 个画廊)")
                 
                 // 并发处理当前批次
                 val batchResults = coroutineScope {
@@ -132,7 +126,7 @@ class RepairUnknownCategoryGalleryTask(
                 val progressPercent = if (totalProgress > 0) currentProgress * 100 / totalProgress else 0
                 val progressDetail = "修复中 $currentProgress/$totalProgress (成功: $successCount, 失败: $failedCount)"
                 
-                progressListener?.onProgressChanged(progressPercent, progressDetail)
+                updateProgress(currentProgress, totalProgress, progressDetail)
                 notifyStatus()
                 
                 // 检查是否已取消
@@ -146,8 +140,8 @@ class RepairUnknownCategoryGalleryTask(
             
             val finalResult = "修复完成: 成功 $successCount 个, 失败 $failedCount 个"
             Log.i(TAG, finalResult)
-            logStep(finalResult)
-            progressListener?.onCompleted()
+            appendTaskLog(finalResult)
+            notifyCompleted()
             
             if (failedCount == 0) {
                 Result.success(Unit)
@@ -156,11 +150,13 @@ class RepairUnknownCategoryGalleryTask(
             }
         } catch (e: CancellationException) {
             Log.d(TAG, "修复任务被取消")
-            logStep("修复任务被取消")
+            appendTaskLog("修复任务被取消")
+            notifyCancelled()
             Result.failure(e)
         } catch (e: Exception) {
             Log.e(TAG, "修复任务出错", e)
-            logStep("修复任务出错: ${e.message}")
+            appendTaskLog("修复任务出错: ${e.message}")
+            notifyError(e)
             Result.failure(e)
         }
     }
@@ -168,20 +164,20 @@ class RepairUnknownCategoryGalleryTask(
     private suspend fun repairSingleGallery(info: DownloadInfo, downloadManager: DownloadManager): Boolean {
         return try {
             Log.d(TAG, "修复画廊: ${info.title} (${info.gid})")
-            logStep("开始修复: ${info.title} (${info.gid})")
+            appendTaskLog("开始修复: ${info.title} (${info.gid})")
             
             val success = downloadManager.repairGalleryInfo(info.gid)
             if (success) {
                 Log.d(TAG, "修复成功: ${info.title}")
-                logStep("修复成功: ${info.title}")
+                appendTaskLog("修复成功: ${info.title}")
             } else {
                 Log.w(TAG, "修复失败: ${info.title}")
-                logStep("修复失败: ${info.title}")
+                appendTaskLog("修复失败: ${info.title}")
             }
             success
         } catch (e: Exception) {
             Log.e(TAG, "修复画廊时出错: ${info.title}", e)
-            logStep("修复画廊时出错: ${info.title} - ${e.message}")
+            appendTaskLog("修复画廊时出错: ${info.title} - ${e.message}")
             false
         }
     }
@@ -191,27 +187,24 @@ class RepairUnknownCategoryGalleryTask(
     override suspend fun pause() {
         Log.d(TAG, "暂停修复任务")
         isPaused = true
+        updateState(TaskState.PAUSED)
+        appendTaskLog("任务已暂停")
     }
     
     override suspend fun resume() {
         Log.d(TAG, "恢复修复任务")
         isPaused = false
+        updateState(TaskState.RUNNING)
+        appendTaskLog("任务已恢复")
     }
     
     override suspend fun cancel() {
         Log.d(TAG, "取消修复任务")
         isCancelled = true
         isPaused = false
+        notifyCancelled()
     }
-    
-    override fun getProgress(): Int {
-        return if (totalProgress > 0) {
-            (currentProgress * 100 / totalProgress)
-        } else {
-            -1
-        }
-    }
-    
+
     override fun getProgressDetail(): String? {
         return if (totalProgress > 0) {
             "$currentProgress/$totalProgress (成功: $successCount, 失败: $failedCount)"
@@ -219,25 +212,13 @@ class RepairUnknownCategoryGalleryTask(
             null
         }
     }
-    
-    override fun setProgressListener(listener: BackgroundTask.ProgressListener?) {
-        this.progressListener = listener
-    }
 
     fun setStatusListener(listener: StatusListener?) {
         statusListener = listener
     }
 
-    fun setLogListener(listener: LogListener?) {
-        logListener = listener
-    }
-
     interface StatusListener {
         fun onStatus(current: Int, total: Int, success: Int, failed: Int)
-    }
-
-    interface LogListener {
-        fun onLog(message: String)
     }
     
     /**

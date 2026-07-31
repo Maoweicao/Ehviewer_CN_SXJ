@@ -1,17 +1,16 @@
 package com.hippo.ehviewer.ui.scene.topList
 
 import android.content.Context
-import android.graphics.Color
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.AdapterView
-import android.widget.FrameLayout
-import android.widget.Spinner
+import android.widget.Button
+import android.widget.TextView
 import androidx.annotation.IntDef
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.tabs.TabLayout
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhClient
@@ -31,21 +30,30 @@ import com.hippo.ehviewer.util.ClipboardUtil.createAnnouncerFromClipboardUrl
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.view.ViewTransition
-import java.util.Random
 
 private const val STATE_INIT = -1
 private const val STATE_NORMAL = 0
-private const val STATE_REFRESH = 1
-private const val STATE_REFRESH_HEADER = 2
 private const val STATE_FAILED = 3
-private const val BACK_PRESSED_INTERVAL = 2000
-private const val TRANSITION_ANIMATION_DISABLED = true
+private const val STATE_EMPTY = 4
+private const val BACK_PRESSED_INTERVAL = 2000L
 
-private var mPosition = 0
+private const val CATEGORY_TAB_COUNT = 7
+private const val TIME_BUCKET_COUNT = 4
+
+// Time bucket ordering matches TopListInfo.get(): 0=yesterday,1=past-month,2=past-year,3=all-time
+private val TIME_BUCKET_LABELS = intArrayOf(
+    R.string.top_list_tab_yesterday,
+    R.string.top_list_tab_past_month,
+    R.string.top_list_tab_past_year,
+    R.string.top_list_tab_all_time,
+)
+
+private var mCategory = 0
+private var mTimeBucket = 0
 
 class EhTopListScene : BaseScene() {
 
-    @IntDef(STATE_INIT, STATE_NORMAL, STATE_REFRESH, STATE_REFRESH_HEADER, STATE_FAILED)
+    @IntDef(STATE_INIT, STATE_NORMAL, STATE_FAILED, STATE_EMPTY)
     @Retention(AnnotationRetention.SOURCE)
     private annotation class State
 
@@ -55,10 +63,18 @@ class EhTopListScene : BaseScene() {
     private var state = STATE_INIT
 
     private var ehTopListDetail: EhTopListDetail? = null
+
     private var viewTransition: ViewTransition? = null
     private var recyclerView: RecyclerView? = null
+    private var categoryTabLayout: TabLayout? = null
+    private var timeBucketTabLayout: TabLayout? = null
+
+    private var emptyStateView: View? = null
+    private var emptyStateText: TextView? = null
+    private var emptyStateRetry: Button? = null
+
     private var client: EhClient? = null
-    private var request: EhRequest? = null
+    private var topListRequest: EhRequest? = null
     private var hasFirstRefresh = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,30 +90,118 @@ class EhTopListScene : BaseScene() {
     ): View {
         val view = inflater.inflate(R.layout.scene_gallery_top_list, container, false)
 
-        val spinner = view.findViewById<Spinner>(R.id.top_list_spinner)
-        spinner.setSelection(0)
-        spinner.onItemSelectedListener = TopListKindSelectedListener()
+        val loadingView = view.findViewById<View>(R.id.data_loading_view)
+        val detailView = view.findViewById<View>(R.id.page_detail_view)
+        viewTransition = ViewTransition(loadingView, detailView)
 
-        val frameLayout = view.findViewById<FrameLayout>(R.id.page_detail_view)
-        val transitionView = view.findViewById<View>(R.id.data_loading_view)
-        viewTransition = ViewTransition(transitionView, frameLayout)
+        emptyStateView = view.findViewById(R.id.empty_state_view)
+        emptyStateText = view.findViewById(R.id.empty_state_text)
+        emptyStateRetry = view.findViewById(R.id.empty_state_retry)
+        emptyStateRetry?.setOnClickListener { retryLoad() }
 
-        recyclerView = view.findViewById(R.id.top_list_recycler_view)
-        recyclerView?.layoutManager = LinearLayoutManager(ehContext)
+        bindCategoryTabLayout(view)
+        bindTimeBucketTabLayout(view)
+        bindList(view)
 
         if (!hasFirstRefresh) {
             hasFirstRefresh = true
             try {
-                loadData()
+                loadTopListData()
             } catch (e: EhException) {
                 e.printStackTrace()
             }
         } else {
-            bindViewSecond(mPosition)
+            rebindListAdapter()
             adjustViewVisibility(STATE_NORMAL, true)
         }
 
         return view
+    }
+
+    private fun retryLoad() {
+        // 取消上次请求
+        topListRequest?.cancel()
+        // 重置 UI
+        emptyStateView?.visibility = View.GONE
+        emptyStateRetry?.visibility = View.GONE
+        adjustViewVisibility(STATE_INIT, true)
+        // 重新发请求
+        loadTopListData()
+    }
+
+    private fun isEmptyDetail(detail: EhTopListDetail): Boolean {
+        for (i in 0 until CATEGORY_TAB_COUNT) {
+            val info = detail[i] ?: continue
+            for (j in 0 until TIME_BUCKET_COUNT) {
+                val bucket = info[j]
+                if (bucket != null && bucket.length() > 0) return false
+            }
+        }
+        return true
+    }
+
+    private fun bindCategoryTabLayout(root: View) {
+        categoryTabLayout = root.findViewById(R.id.top_list_tab_layout)
+        val tabs = categoryTabLayout ?: return
+        val array = resources.getStringArray(R.array.top_list_type)
+        for (i in 0 until CATEGORY_TAB_COUNT) {
+            val tab = tabs.newTab()
+            if (i < array.size) {
+                tab.text = array[i]
+            }
+            tab.tag = i
+            tabs.addTab(tab)
+        }
+        tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                val pos = (tab.tag as? Int) ?: 0
+                if (pos != mCategory) {
+                    mCategory = pos
+                    // Switching category resets the time bucket to "Yesterday" so the
+                    // list immediately reflects the new category without confusion.
+                    mTimeBucket = 0
+                    syncTimeBucketTabSelection()
+                    rebindListAdapter()
+                }
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
+    }
+
+    private fun bindTimeBucketTabLayout(root: View) {
+        timeBucketTabLayout = root.findViewById(R.id.top_list_sub_tab_layout)
+        val tabs = timeBucketTabLayout ?: return
+        for (i in 0 until TIME_BUCKET_COUNT) {
+            val tab = tabs.newTab()
+            tab.text = getString(TIME_BUCKET_LABELS[i])
+            tab.tag = i
+            tabs.addTab(tab)
+        }
+        tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
+            override fun onTabSelected(tab: TabLayout.Tab) {
+                val pos = (tab.tag as? Int) ?: 0
+                if (pos != mTimeBucket) {
+                    mTimeBucket = pos
+                    rebindListAdapter()
+                }
+            }
+            override fun onTabUnselected(tab: TabLayout.Tab) {}
+            override fun onTabReselected(tab: TabLayout.Tab) {}
+        })
+    }
+
+    private fun bindList(root: View) {
+        recyclerView = root.findViewById(R.id.top_list_recycler_view)
+        recyclerView?.layoutManager = LinearLayoutManager(ehContext)
+    }
+
+    private fun syncTimeBucketTabSelection() {
+        val tabs = timeBucketTabLayout ?: return
+        if (mTimeBucket in 0 until tabs.tabCount) {
+            val tab = tabs.getTabAt(mTimeBucket)
+            if (tab != null && !tab.isSelected) tab.select()
+        }
     }
 
     override fun onDestroyView() {
@@ -106,10 +210,9 @@ class EhTopListScene : BaseScene() {
     }
 
     override fun onBackPressed() {
-        val handle = checkDoubleClickExit()
-        if (!handle) {
+        if (!checkDoubleClickExit()) {
             if (state == STATE_INIT) {
-                request?.cancel()
+                topListRequest?.cancel()
             }
             finish()
         }
@@ -119,7 +222,6 @@ class EhTopListScene : BaseScene() {
         if (stackIndex != 0) {
             return false
         }
-
         val time = System.currentTimeMillis()
         return if (time - pressBackTime > BACK_PRESSED_INTERVAL) {
             pressBackTime = time
@@ -131,52 +233,76 @@ class EhTopListScene : BaseScene() {
     }
 
     @Throws(EhException::class)
-    private fun loadData() {
-        val requested = request()
-        if (!requested) {
+    private fun loadTopListData() {
+        if (!requestTopList()) {
             throw EhException("请求数据失败请更换IP地址或检查网络设置是否正确~")
         }
     }
 
-    private fun request(): Boolean {
+    private fun requestTopList(): Boolean {
         val context = ehContext ?: return false
         val activity = activity2 ?: return false
         val ehClient = client ?: return false
         val url = EhUrl.getTopListUrl()
 
         val callback = GetTopListDetailListener(context, activity.stageId, tag)
-
-        request = EhRequest()
+        topListRequest = EhRequest()
             .setMethod(EhClient.METHOD_GET_TOP_LIST)
             .setArgs(url)
             .setCallback(callback)
-
-        ehClient.execute(request)
+        ehClient.execute(topListRequest)
         return true
     }
 
-    private fun onGetEhTopListDetailSuccess(detail: EhTopListDetail, index: Int) {
+    private fun onGetEhTopListDetailSuccess(detail: EhTopListDetail) {
         ehTopListDetail = detail
-        bindViewSecond(index)
-        adjustViewVisibility(STATE_NORMAL, true)
+        if (isEmptyDetail(detail)) {
+            showEmptyState(false)
+        } else {
+            rebindListAdapter()
+            adjustViewVisibility(STATE_NORMAL, true)
+        }
     }
 
-    private fun bindViewSecond(index: Int) {
+    private fun showEmptyState(isError: Boolean) {
+        val textView = emptyStateText ?: return
+        val retryBtn = emptyStateRetry ?: return
+        val emptyView = emptyStateView ?: return
+
+        if (isError) {
+            textView.text = getString(R.string.top_list_load_failed)
+            retryBtn.visibility = View.VISIBLE
+        } else {
+            textView.text = getString(R.string.top_list_empty)
+            retryBtn.visibility = View.GONE
+        }
+        emptyView.visibility = View.VISIBLE
+        adjustViewVisibility(STATE_EMPTY, true)
+    }
+
+    /**
+     * Re-binds the RecyclerView using the currently selected category +
+     * time bucket. Called when the data first arrives, when the category
+     * TabLayout changes, or when the secondary time-bucket TabLayout changes.
+     */
+    private fun rebindListAdapter() {
         val detail = ehTopListDetail ?: return
         val rv = recyclerView ?: return
-        val context = ehContext ?: return
-        val adapter = EhTopListAdapterView(context, rv, detail[index], this, index)
+        val ctx = ehContext ?: return
+        val info = detail[mCategory] ?: return
+        // searchType 0 = GALLERY, anything else = UPLOADER-like (ListUrlBuilder.MODE_UPLOADER).
+        val searchType = if (info.type == EhTopListDetail.ListType.GALLERY) 0 else 1
+        val adapter = EhTopListAdapterView(ctx, info, this, searchType, mTimeBucket)
         rv.adapter = adapter
+        emptyStateView?.visibility = View.GONE
     }
 
     private fun adjustViewVisibility(@State newState: Int, animation: Boolean) {
         val transition = viewTransition ?: return
         state = newState
-        val shouldAnimate = !TRANSITION_ANIMATION_DISABLED && animation
-
         when (newState) {
-            STATE_INIT, STATE_REFRESH -> transition.showView(0, shouldAnimate)
-            else -> transition.showView(1, shouldAnimate)
+            STATE_INIT -> transition.showView(0, animation)
+            else -> transition.showView(1, animation)
         }
     }
 
@@ -188,40 +314,25 @@ class EhTopListScene : BaseScene() {
         override fun isInstance(scene: SceneFragment): Boolean = scene is EhTopListScene
 
         override fun onSuccess(result: EhTopListDetail) {
-            onGetEhTopListDetailSuccess(result, 0)
+            onGetEhTopListDetailSuccess(result)
         }
 
         override fun onFailure(e: Exception) {
+            // 网络错误时隐藏 loading view，显示空状态 + 重试按钮
+            adjustViewVisibility(STATE_FAILED, true)
+            showEmptyState(true)
         }
 
-        override fun onCancel() {
-        }
+        override fun onCancel() {}
     }
 
     private inner class EhTopListAdapterView(
-        context: Context,
-        recyclerView: RecyclerView,
+        ctx: Context,
         topListInfo: TopListInfo,
         private val sceneFragment: SceneFragment,
         searchType: Int,
-    ) : EhTopListAdapter(context, topListInfo, searchType) {
-
-        private val hashMap = HashMap<Int, Int>()
-
-        override fun clickTitle(urlFollow: String) {
-            val urlBuilder = ListUrlBuilder()
-            urlBuilder.mode = ListUrlBuilder.MODE_TOP_LIST
-            urlBuilder.setFollow(urlFollow)
-            GalleryListScene.startScene(sceneFragment, urlBuilder)
-        }
-
-        override fun getRandomColor(position: Int): Int {
-            hashMap[position]?.let { return it }
-            val random = Random()
-            val color = Color.argb(160, random.nextInt(256), random.nextInt(256), random.nextInt(256))
-            hashMap[position] = color
-            return color
-        }
+        timeBucketIndex: Int,
+    ) : EhTopListAdapter(ctx, topListInfo, searchType, timeBucketIndex) {
 
         override fun onItemClick(topListItem: TopListItem, searchType: Int) {
             val urlBuilder = ListUrlBuilder()
@@ -249,16 +360,6 @@ class EhTopListScene : BaseScene() {
 
             urlBuilder.keyword = topListItem.value
             GalleryListScene.startScene(sceneFragment, urlBuilder)
-        }
-    }
-
-    private inner class TopListKindSelectedListener : AdapterView.OnItemSelectedListener {
-        override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-            mPosition = position
-            bindViewSecond(mPosition)
-        }
-
-        override fun onNothingSelected(parent: AdapterView<*>?) {
         }
     }
 

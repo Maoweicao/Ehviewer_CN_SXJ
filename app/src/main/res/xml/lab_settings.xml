@@ -22,20 +22,16 @@
             android:key="lab_ip_switch"
             android:title="@string/lab_ip_switch"
             android:summary="@string/lab_ip_switch_summary"
-            app:allowDividerAbove="true"
             app:fragment="com.hippo.ehviewer.ui.fragment.lab.IpSwitchFragment" />
 
         <com.hippo.ehviewer.ui.fragment.lab.LabPreference
             android:key="lab_ai_translate"
             android:title="@string/lab_ai_translate"
             android:summary="@string/lab_ai_translate_summary"
-            app:allowDividerAbove="true"
             app:fragment="com.hippo.ehviewer.ui.fragment.lab.AiTranslateFragment" />
 
         <com.hippo.ehviewer.preference.ProgressiveManagerPreference
-            android:key="lab_progressive_manager"
-            app:allowDividerAbove="true"
-            app:iconSpaceReserved="false" />
+            android:key="lab_progressive_manager" />
 
     </PreferenceCategory>
 

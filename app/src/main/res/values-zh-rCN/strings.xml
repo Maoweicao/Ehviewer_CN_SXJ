@@ -88,6 +88,50 @@
     <string name="downloads">下载</string>
     <string name="news">新闻</string>
     <string name="settings">设置</string>
+    <string name="settings_search_hint">搜索设置项…</string>
+    <string name="settings_search_no_results">未找到与「%1$s」匹配的设置</string>
+    <string name="settings_category_account">账号与站点</string>
+    <string name="settings_category_account_summary">登录状态、EHentai 站点选择与身份 Cookie</string>
+    <string name="settings_category_appearance">外观</string>
+    <string name="settings_category_appearance_summary">主题、启动页面与整体外观</string>
+    <string name="settings_category_gallery_list">画廊列表</string>
+    <string name="settings_category_gallery_list_summary">画廊列表的列表模式、缩略图与元数据显示</string>
+    <string name="settings_category_gallery_detail">画廊详情</string>
+    <string name="settings_category_gallery_detail_summary">画廊详情页显示的页数、评分、评论等</string>
+    <string name="settings_category_filter">屏蔽与过滤</string>
+    <string name="settings_category_filter_summary">屏蔽画廊、标签、评论以及排除语言</string>
+    <string name="settings_category_reading_display">阅读显示</string>
+    <string name="settings_category_reading_display_summary">屏幕方向、缩放、阅读方向与阅读界面元素</string>
+    <string name="settings_category_reading_gesture">阅读手势</string>
+    <string name="settings_category_reading_gesture_summary">点击、手势、音量键翻页以及全屏手势</string>
+    <string name="settings_category_reading_brightness">阅读亮度</string>
+    <string name="settings_category_reading_brightness_summary">阅读时的自定义屏幕亮度</string>
+    <string name="settings_category_download_basic">下载基础</string>
+    <string name="settings_category_download_basic_summary">下载位置、媒体扫描与预加载</string>
+    <string name="settings_category_download_speed">速度与线程</string>
+    <string name="settings_category_download_speed_summary">多线程下载、超时与最低速度限制</string>
+    <string name="settings_category_download_queue">队列与排序</string>
+    <string name="settings_category_download_queue_summary">队列顺序、类型优先级与边看边存</string>
+    <string name="settings_category_download_maintenance">下载维护</string>
+    <string name="settings_category_download_maintenance_summary">恢复、合并、清理与校验下载数据</string>
+    <string name="settings_category_local">本地画廊</string>
+    <string name="settings_category_local_summary">本地画廊的扫描、缓存与管理</string>
+    <string name="settings_category_diagnostics">诊断与日志</string>
+    <string name="settings_category_diagnostics_summary">性能监测、ANR 预判、流量抓包与日志</string>
+    <string name="settings_category_cache">缓存与存储</string>
+    <string name="settings_category_cache_summary">内存缓存、下载路径缓存与数据库</string>
+    <string name="settings_category_network">网络</string>
+    <string name="settings_category_network_summary">代理、hosts、VPN 联动、DNS 与语言</string>
+    <string name="settings_category_download_prefetch">下载与预取</string>
+    <string name="settings_category_download_prefetch_summary">预取页数、继承页数与下载行为</string>
+    <string name="settings_category_data_transfer">数据传输与任务</string>
+    <string name="settings_category_data_transfer_summary">WiFi 迁移、后台与定时任务、传输服务</string>
+    <string name="settings_category_app_info">应用信息</string>
+    <string name="settings_category_app_info_summary">关于、版本、声明与开源许可</string>
+    <string name="settings_category_security">安全与隐私</string>
+    <string name="settings_category_security_summary">图案保护、安全截屏开关与数据分析</string>
+    <string name="settings_category_help">帮助</string>
+    <string name="settings_category_help_summary">查看搜索帮助文档</string>
     <string name="settings_advanced_local_gallery">本地画廊管理</string>
     <string name="settings_advanced_local_gallery_summary">管理本地画廊和回收站</string>
     <string name="local_gallery_title">本地画廊</string>
@@ -176,6 +220,7 @@
     <string name="error_cant_find_activity">找不到该应用程序</string>
     <string name="error_cannot_parse_the_url">无法解析该网址</string>
     <string name="error_not_folder_path">不是文件夹路径</string>
+    <string name="error_spider_not_started">图库加载失败</string>
     <string name="error_no_provider">无提供商</string>
     <string name="error_decoding_failed">解码失败</string>
     <string name="error_not_found">未找到</string>
@@ -232,6 +277,19 @@
     <string name="no_updates_available">已是最新版本</string>
     <string name="gallery_list_search_bar_hint_exhentai">搜索ExHentai</string>
     <string name="gallery_list_search_bar_hint_e_hentai">搜索E-Hentai</string>
+    <string name="search_keyword_editor">高级关键词编辑</string>
+    <string name="search_keyword_input_hint">添加关键词</string>
+    <string name="search_keyword_add">添加</string>
+    <string name="search_keyword_relation_hint">分组仅用于视觉区分；关键词最终按 AND 连接，排除项请使用 - 前缀。</string>
+    <string name="search_keyword_empty">暂无关键词，请在上方添加。</string>
+    <string name="search_keyword_edit">编辑关键词</string>
+    <string name="search_keyword_change_group">切换关键词分组</string>
+    <string name="search_keyword_toggle_relation">切换关键词关系</string>
+    <string name="search_keyword_group_separator">第 %1$d 组（与上一组 %2$s）· 点击切换</string>
+    <string name="search_keyword_and">包含</string>
+    <string name="search_keyword_not">排除</string>
+    <string name="search_expand_suggestions">展开搜索建议</string>
+    <string name="search_collapse_suggestions">收缩搜索建议</string>
     <string name="gallery_list_search_bar_open_gallery">打开画廊</string>
     <string name="gallery_list_empty_hit">世界之大，熊猫独坐。</string>
     <string name="gallery_list_empty_hit_subscription">在设置-&gt;EH-&gt;我的标签中订阅标签</string>
@@ -432,6 +490,25 @@
     <string name="download_state_failed">失败</string>
     <string name="download_state_failed_2">%1$d 项未完成</string>
     <string name="download_state_finish">完成</string>
+    <string name="download_state_relay_download">接力下载中</string>
+    <string name="relay_download">接力下载</string>
+    <string name="relay_cancel_download">取消接力下载</string>
+    <string name="relay_send_to_device">接力到设备…</string>
+    <string name="relay_confirm_relay">确认接力</string>
+    <string name="relay_confirm_message">将「%1$s」委托给 %2$s 下载？</string>
+    <string name="relay_device_select">选择目标设备</string>
+    <string name="relay_task_created">接力任务已创建</string>
+    <string name="relay_no_connected_devices">没有已连接的设备，请先连接设备。</string>
+    <string name="relay_incoming">收到的</string>
+    <string name="relay_outgoing">发出的</string>
+    <string name="relay_no_tasks">暂无接力任务</string>
+    <string name="relay_accept">接受</string>
+    <string name="relay_reject">拒绝</string>
+    <string name="relay_cancel">取消</string>
+    <string name="relay_retrieve_file">取回文件</string>
+    <string name="relay_delete_task">删除任务</string>
+    <string name="relay_push_back">推送回传</string>
+    <string name="relay_clear_completed">清空已完成</string>
     <string name="stat_509_alert_title">509 警报</string>
     <string name="stat_509_alert_text">图片下载已达上限，请暂停下载，稍作休息。</string>
     <string name="stat_download_done_title">下载完成</string>
@@ -611,6 +688,35 @@
     <string name="settings_eh_show_tag_translations_summary">显示标签翻译而非原文（下载数据文件需要时间）</string>
     <string name="settings_eh_tag_translations_source">占位符</string>
     <string name="settings_eh_tag_translations_source_url">https://占位符</string>
+    <string name="settings_eh_tag_database">标签数据库管理</string>
+    <string name="settings_eh_tag_database_summary">检查标签数据库状态、重新下载与校验完整性</string>
+    <string name="tag_database_status_loaded">已加载（%1$d 条标签）</string>
+    <string name="tag_database_status_not_loaded">未加载</string>
+    <string name="tag_database_status_no_metadata">当前语言没有可用的数据库元数据</string>
+    <string name="tag_database_data_file">数据文件</string>
+    <string name="tag_database_data_file_exists">已缓存到本地</string>
+    <string name="tag_database_data_file_missing">尚无本地缓存</string>
+    <string name="tag_database_data_file_size">大小：%1$s</string>
+    <string name="tag_database_data_file_modified">最后修改：%1$s</string>
+    <string name="tag_database_sha1_expected">期望 SHA-1</string>
+    <string name="tag_database_sha1_expected_format">%1$s</string>
+    <string name="tag_database_sha1_expected_missing">尚未下载</string>
+    <string name="tag_database_sha1_computed">实际 SHA-1</string>
+    <string name="tag_database_sha1_computed_missing">数据文件不存在，无法计算</string>
+    <string name="tag_database_source_url">下载地址</string>
+    <string name="tag_database_integrity_ok">校验通过</string>
+    <string name="tag_database_integrity_mismatch">SHA-1 不匹配，文件可能损坏或已过期</string>
+    <string name="tag_database_integrity_pending">点击「校验完整性」以验证</string>
+    <string name="tag_database_integrity_incomplete">缺少校验文件或数据，无法校验</string>
+    <string name="tag_database_action_check">校验完整性</string>
+    <string name="tag_database_action_redownload">重新下载</string>
+    <string name="tag_database_action_clear">删除本地缓存</string>
+    <string name="tag_database_action_check_done_ok">校验完成：文件完好</string>
+    <string name="tag_database_action_check_done_mismatch">校验完成：文件可能损坏</string>
+    <string name="tag_database_action_redownload_started">已加入后台下载队列</string>
+    <string name="tag_database_action_clear_done">已清除本地缓存</string>
+    <string name="tag_database_action_redownload_hint">后台将重新下载一份全新的数据文件。</string>
+    <string name="tag_database_action_clear_hint">将清空内存中的实例并删除本地缓存文件。</string>
     <string name="settings_eh_filter">屏蔽画廊</string>
     <string name="settings_eh_filter_summary">按标题、上传者和标签屏蔽画廊</string>
     <string name="settings_eh_cellular_network_warning">蜂窝网络警告</string>
@@ -676,6 +782,22 @@
     <string name="settings_download_download_list_pagination">列表分页</string>
     <string name="settings_download_download_list_pagination_summary">在列表长度大于500时分页功能才会生效</string>
     <string name="settings_download_download_origin_image_summary">这很危险！勾选此项会导致下载配额与GP迅速流失</string>
+    <string name="settings_download_use_system_download_manager">委托系统下载服务</string>
+    <string name="settings_download_use_system_download_manager_summary">将图片下载交给 Android 系统 DownloadManager（com.android.providers.downloads）执行，运行在系统进程内，国产 ROM 后台保活更稳定。下载原图的画廊会自动回退到内置下载引擎。</string>
+    <string name="settings_download_use_system_download_manager_unavailable">此设备系统下载服务不可用，该功能已禁用。</string>
+    <string name="settings_download_check_system_service">检测系统下载服务</string>
+    <string name="settings_download_check_system_service_summary">点此测试设备上的 Android 系统 DownloadManager 是否正常工作</string>
+    <string name="settings_download_check_result_title">系统下载服务检测</string>
+    <string name="settings_download_check_result_available">◎ 系统 DownloadManager 可用</string>
+    <string name="settings_download_check_result_unavailable">◎ 系统 DownloadManager 不可用</string>
+    <string name="settings_download_check_result_detail">Provider: %1$s\nService: %2$s\nQuery 测试: %3$s</string>
+    <string name="settings_download_check_result_passed">通过</string>
+    <string name="settings_download_check_result_failed">失败</string>
+    <string name="settings_download_private_mode">隐私下载模式</string>
+    <string name="settings_download_private_mode_summary">在使用系统下载服务时，下载完成 3 分钟后自动清除系统下载记录。仅当下载位置在 Ehviewer 专属目录内时，才会同时删除已下载的图片；下载位置在公共 Downloads 或 SAF 自定义目录时，图片保留。该开关仅影响启用后新开始的下载。</string>
+    <string name="settings_download_private_mode_location_warning_title">下载位置不兼容</string>
+    <string name="settings_download_private_mode_location_warning_message">当前下载位置在公共目录或用户自定义目录，隐私模式只能清除系统下载记录，无法删除已下载的图片。如需完整删除图片，请先把下载位置改为 Ehviewer 专属目录（设置 → 下载 → 下载位置）。</string>
+    <string name="go_to_download_location">前往设置</string>
     <string name="settings_download_download_order_by_asc">正序下载</string>
     <string name="settings_download_download_order_by_asc_summary">下载全部画廊时正序下载</string>
     <string name="settings_download_download_queue_order">下载队列顺序</string>
@@ -790,6 +912,8 @@
     <string name="settings_advanced_download_prefetch_pages_concurrency_summary">获取页面数量时的最大同时网络请求数</string>
     <string name="settings_advanced_download_inherit_pages">从来源继承页面数量</string>
     <string name="settings_advanced_download_inherit_pages_summary">添加下载时从画廊详情/列表复制页面数量信息</string>
+    <string name="settings_advanced_download_always_complete">始终完成下载</string>
+    <string name="settings_advanced_download_always_complete_summary">当下载结束时，若仍有未完成的任务，自动执行停止全部→开始全部的循环，直到所有任务完成</string>
     <string name="category_priority_dialog_title">按优先级排序画廊类型</string>
     <string name="category_priority_dialog_drag_hint">长按并拖拽以重新排序。越靠上优先级越高。</string>
     <string name="settings_advanced">高级</string>
@@ -1106,6 +1230,19 @@
     <string name="past_year_top_list">过去一年排行榜</string>
     <string name="past_month_top_list">过去一个月排行榜</string>
     <string name="yesterday_top_list">昨日热门榜单</string>
+    <string name="top_list_top5_title">今日 Top 5 画廊</string>
+    <string name="top_list_search_hint">搜索画廊…</string>
+    <string name="top_list_view_all">查看全部</string>
+    <string name="top_list_top5_loading_failed">热门画廊加载失败</string>
+    <string name="top_list_top5_loading">正在加载热门画廊…</string>
+    <string name="top_list_rank_prefix">#%1$d</string>
+    <string name="top_list_tab_yesterday">昨日</string>
+    <string name="top_list_tab_past_month">过去一月</string>
+    <string name="top_list_tab_past_year">过去一年</string>
+    <string name="top_list_tab_all_time">全部</string>
+    <string name="top_list_empty">暂无数据</string>
+    <string name="top_list_retry">点击重试</string>
+    <string name="top_list_load_failed">榜单数据加载失败</string>
     <string name="change_background_title">你确定要更换背景吗？</string>
     <string name="change_background_message">背景修改仅限于本软件，无法同步至E-hentai或其他类似软件。</string>
     <string name="change_avatar_title">你确定要更换头像吗？</string>
@@ -1256,6 +1393,8 @@ SSID: %1$s
     <string name="background_task_clear_completed">清除已完成的任务</string>
     <string name="background_task_cleared_completed">已完成的任务已清除</string>
     <string name="background_task_unique_running">后台任务已在运行中</string>
+    <string name="task_clear">清空</string>
+    <string name="task_cleared_from_completed">已从已完成列表移除</string>
     <string name="no_description">无描述</string>
     <string name="task_progress_label">进度</string>
     <string name="task_status_label">状态</string>
@@ -1283,6 +1422,8 @@ SSID: %1$s
     <string name="task_progress_detail_label">进度详情</string>
     <string name="task_log_label">任务日志</string>
     <string name="task_log_empty">尚无日志条目</string>
+    <string name="task_log_truncated">已隐藏 %1$d 条早期日志（导出可查看全部）</string>
+    <string name="task_badge_unique">互斥</string>
     <string name="task_log_save_to">日志已保存至 %1$s</string>
     <string name="task_log_file_missing">日志文件不可用</string>
     <string name="task_eta_format">剩余 ~%1$s</string>
@@ -1973,17 +2114,17 @@ SSID: %1$s
     <string name="capture_notification_text">请求数: %1$d | 已发送: %2$s | 已接收: %3$s</string>
     <string name="capture_stop_save">停止并保存</string>
 
-    <!-- 定时任务相关 -->
-    <string name="settings_advanced_scheduled_tasks">定时任务</string>
-    <string name="settings_advanced_scheduled_tasks_summary">管理和配置定时执行的后台任务</string>
+    <!-- 自动化任务相关 -->
+    <string name="settings_advanced_scheduled_tasks">自动化任务</string>
+    <string name="settings_advanced_scheduled_tasks_summary">管理和配置自动执行的自动化任务</string>
 
-    <string name="scheduled_task_title">定时任务管理</string>
-    <string name="scheduled_task_add">添加定时任务</string>
-    <string name="scheduled_task_edit">编辑定时任务</string>
-    <string name="scheduled_task_delete">删除定时任务</string>
-    <string name="scheduled_task_delete_confirm">确定要删除这个定时任务吗？</string>
-    <string name="scheduled_task_no_tasks">暂无定时任务</string>
-    <string name="scheduled_task_no_tasks_hint">点击右上角 + 按钮添加定时任务</string>
+    <string name="scheduled_task_title">自动化任务管理</string>
+    <string name="scheduled_task_add">添加自动化任务</string>
+    <string name="scheduled_task_edit">编辑自动化任务</string>
+    <string name="scheduled_task_delete">删除自动化任务</string>
+    <string name="scheduled_task_delete_confirm">确定要删除这个自动化任务吗？</string>
+    <string name="scheduled_task_no_tasks">暂无自动化任务</string>
+    <string name="scheduled_task_no_tasks_hint">点击右上角 + 按钮添加自动化任务</string>
 
     <!-- 任务状态 -->
     <string name="scheduled_task_state_pending">等待中</string>
@@ -1993,8 +2134,124 @@ SSID: %1$s
     <string name="scheduled_task_state_running">运行中</string>
     <string name="scheduled_task_state_completed">已完成</string>
     <string name="scheduled_task_state_failed">失败</string>
-    <string name="scheduled_task_state_cancelled">已取消</string>
-    <string name="scheduled_task_state_paused">已暂停</string>
+    <string name="scheduled_task_state_disabled">已禁用</string>
+
+    <!-- 自动化任务界面 -->
+    <string name="automation_title">自动化</string>
+    <string name="automation_settings_title">自动化</string>
+    <string name="automation_settings_summary">创建规则，按时或按事件运行任务</string>
+    <string name="automation_empty_title">暂无自动化规则</string>
+    <string name="automation_empty_hint">点击 + 创建第一条自动化规则</string>
+    <string name="automation_filter_all">全部</string>
+    <string name="automation_filter_schedule">定时</string>
+    <string name="automation_filter_event">事件</string>
+    <string name="automation_filter_manual">手动</string>
+    <string name="automation_add">新建自动化</string>
+    <string name="automation_edit">编辑自动化</string>
+    <string name="automation_delete">删除</string>
+    <string name="automation_delete_confirm">确定删除这条自动化规则吗？</string>
+    <string name="automation_run_now">立即运行</string>
+    <string name="automation_enabled">已启用</string>
+    <string name="automation_disabled">已禁用</string>
+    <string name="automation_trigger_when">条件</string>
+    <string name="automation_trigger_if">前置</string>
+    <string name="automation_trigger_then">执行</string>
+    <string name="automation_actions_count">%1$d 个动作</string>
+
+    <!-- 自动化向导 -->
+    <string name="automation_wizard_step1_title">选择触发器</string>
+    <string name="automation_wizard_step2_title">执行条件（可选）</string>
+    <string name="automation_wizard_step3_title">动作列表</string>
+    <string name="automation_wizard_prev">上一步</string>
+    <string name="automation_wizard_next">下一步</string>
+    <string name="automation_wizard_save">保存</string>
+    <string name="automation_trigger_type_schedule">定时触发器</string>
+    <string name="automation_trigger_type_event">事件触发器</string>
+    <string name="automation_trigger_type_manual">仅手动</string>
+    <string name="automation_trigger_pick_event">选择事件…</string>
+
+    <!-- 自动化条件 -->
+    <string name="automation_condition_wifi">仅 WiFi</string>
+    <string name="automation_condition_no_metered">跳过计量网络</string>
+    <string name="automation_condition_charging">仅充电时</string>
+    <string name="automation_condition_screen_off">仅熄屏时</string>
+    <string name="automation_condition_min_battery">最低电量: %1$d%%</string>
+    <string name="automation_condition_time_window">时间窗口: %1$s - %2$s</string>
+    <string name="automation_condition_weekday">工作日: %1$s</string>
+
+    <!-- 自动化执行模式 -->
+    <string name="automation_execution_sequential">顺序执行</string>
+    <string name="automation_execution_parallel">并行执行</string>
+
+    <!-- 自动化状态 -->
+    <string name="automation_state_pending">等待中</string>
+    <string name="automation_state_waiting_condition">等待条件</string>
+    <string name="automation_state_waiting_time">等待时间</string>
+    <string name="automation_state_running">运行中</string>
+    <string name="automation_state_completed">已完成</string>
+    <string name="automation_state_failed">失败</string>
+    <string name="automation_state_cancelled">已取消</string>
+    <string name="automation_state_paused">已暂停</string>
+    <string name="automation_state_disabled">已禁用</string>
+
+    <!-- 定时触发描述 -->
+    <string name="automation_schedule_once">单次: %1$s</string>
+    <string name="automation_schedule_daily">每天: %1$s</string>
+    <string name="automation_schedule_weekdays">工作日: %1$s</string>
+    <string name="automation_schedule_weekends">周末: %1$s</string>
+    <string name="automation_schedule_holidays">节假日: %1$s</string>
+    <string name="automation_schedule_cron">自定义: %1$s</string>
+    <string name="automation_schedule_manual">手动触发</string>
+
+    <!-- 事件触发器名称 -->
+    <string name="automation_event_download_finished">下载完成</string>
+    <string name="automation_event_download_finished_desc">单个画廊下载进入完成状态时触发</string>
+    <string name="automation_event_all_downloads_completed">全部下载完成</string>
+    <string name="automation_event_all_downloads_completed_desc">下载队列为空时触发</string>
+    <string name="automation_event_download_failed">下载失败</string>
+    <string name="automation_event_download_failed_desc">画廊下载进入失败状态时触发</string>
+    <string name="automation_event_download_added">新下载添加</string>
+    <string name="automation_event_download_added_desc">新画廊加入下载队列时触发</string>
+    <string name="automation_event_network_available">网络可用</string>
+    <string name="automation_event_network_available_desc">从离线状态恢复网络连接时触发</string>
+    <string name="automation_event_network_lost">网络断开</string>
+    <string name="automation_event_network_lost_desc">设备完全离线时触发</string>
+    <string name="automation_event_wifi_connected">WiFi 已连接</string>
+    <string name="automation_event_wifi_connected_desc">设备连接到 WiFi 时触发</string>
+    <string name="automation_event_charging_started">开始充电</string>
+    <string name="automation_event_charging_started_desc">设备开始充电时触发</string>
+    <string name="automation_event_charging_stopped">停止充电</string>
+    <string name="automation_event_charging_stopped_desc">设备停止充电时触发</string>
+    <string name="automation_event_app_foreground">应用进入前台</string>
+    <string name="automation_event_app_foreground_desc">应用被切换到前台时触发</string>
+    <string name="automation_event_app_background">应用进入后台</string>
+    <string name="automation_event_app_background_desc">应用进入后台时触发</string>
+    <string name="automation_event_favorite_added">添加收藏</string>
+    <string name="automation_event_favorite_added_desc">画廊被添加到收藏时触发</string>
+    <string name="automation_event_favorite_removed">取消收藏</string>
+    <string name="automation_event_favorite_removed_desc">画廊从收藏中移除时触发</string>
+    <string name="automation_event_history_added">历史记录</string>
+    <string name="automation_event_history_added_desc">新条目被添加到历史记录时触发</string>
+    <string name="automation_event_local_gallery_added">本地画廊添加</string>
+    <string name="automation_event_local_gallery_added_desc">扫描到新本地画廊时触发</string>
+    <string name="automation_event_file_created">文件创建</string>
+    <string name="automation_event_file_created_desc">监视目录中创建文件时触发</string>
+    <string name="automation_event_file_deleted">文件删除</string>
+    <string name="automation_event_file_deleted_desc">监视目录中删除文件时触发</string>
+    <string name="automation_event_custom_intent">自定义意图</string>
+    <string name="automation_event_custom_intent_desc">外部应用广播匹配意图时触发</string>
+
+    <!-- 分类筛选 -->
+    <string name="automation_category_download">下载</string>
+    <string name="automation_category_network">网络</string>
+    <string name="automation_category_device">设备</string>
+    <string name="automation_category_lifecycle">应用生命周期</string>
+    <string name="automation_category_data">数据变更</string>
+    <string name="automation_category_file">文件</string>
+    <string name="automation_category_extension">扩展</string>
+
+    <!-- 冷却 -->
+    <string name="automation_cooldown">冷却: %1$s</string>
 
     <!-- 延时条件 -->
     <string name="delay_condition_title">延时条件</string>

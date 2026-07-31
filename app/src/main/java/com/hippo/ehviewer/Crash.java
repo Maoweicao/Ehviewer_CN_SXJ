@@ -30,6 +30,7 @@ import com.hippo.util.ReadableTime;
 import com.hippo.lib.yorozuya.FileUtils;
 import com.hippo.lib.yorozuya.IOUtils;
 import com.hippo.lib.yorozuya.OSUtils;
+import com.hippo.ehviewer.network.NetworkHealthTracker;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -117,6 +118,17 @@ public final class Crash {
     fw.write("MEMORY_MAX=");fw.write(FileUtils.humanReadableByteCount(OSUtils.getAppMaxMemory(), false));fw.write("\r\n");
     fw.write("MEMORY_TOTAL=");fw.write(FileUtils.humanReadableByteCount(OSUtils.getTotalMemory(), false));fw.write("\r\n");
     fw.write("\r\n");
+
+    // Network health
+    try {
+      StringBuilder sb = new StringBuilder();
+      NetworkHealthTracker.INSTANCE.format(sb);
+      fw.write("======== NetworkHealth ========\r\n");
+      fw.write(sb.toString());
+      fw.write("\r\n");
+    } catch (Throwable e) {
+      // Ignore
+    }
   }
 
   private static void getThrowableInfo(Throwable t, FileWriter fw) {

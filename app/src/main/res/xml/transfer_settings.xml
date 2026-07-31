@@ -78,6 +78,13 @@
             android:summary="@string/remote_management_summary"
             app:allowDividerAbove="false" />
 
+        <com.hippo.preference.SwitchPreference
+            android:key="remote_management_enabled"
+            android:title="@string/remote_management_enabled"
+            android:summary="@string/remote_management_enabled_summary"
+            android:defaultValue="true"
+            app:allowDividerAbove="true" />
+
         <ListPreference
             android:key="remote_auth_mode"
             android:title="@string/remote_auth_mode"

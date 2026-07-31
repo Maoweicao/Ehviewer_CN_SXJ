@@ -19,10 +19,13 @@ package com.hippo.ehviewer.gallery;
 import android.content.Context;
 import android.os.SystemClock;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.SparseLongArray;
 import android.net.Uri;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import com.hippo.ehviewer.GetText;
+import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderQueen;
@@ -34,6 +37,8 @@ import com.hippo.lib.yorozuya.SimpleHandler;
 import java.util.Locale;
 
 public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.OnSpiderListener {
+
+    private static final String TAG = "EhGalleryProvider";
 
     private final Context mContext;
     private final GalleryInfo mGalleryInfo;
@@ -122,11 +127,14 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
     @Override
     protected void onRequest(int index) {
         if (mSpiderQueen != null) {
+            Log.d(TAG, "[ImgLoad] REQUEST page=" + index + " gid=" + mGalleryInfo.gid);
             Object object = mSpiderQueen.request(index);
             if (object instanceof Float) {
                 notifyPagePercent(index, (Float) object);
             } else if (object instanceof String) {
+                putPageError(index, (String) object);
                 notifyPageFailed(index, (String) object);
+                Log.d(TAG, "[ImgLoad] REQUEST_FAILED page=" + index + " error=" + object);
             } else if (object == null) {
                 notifyPageWait(index);
             }
@@ -136,11 +144,14 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
     @Override
     protected void onForceRequest(int index) {
         if (mSpiderQueen != null) {
+            Log.d(TAG, "[ImgLoad] FORCE_REQUEST page=" + index + " gid=" + mGalleryInfo.gid);
             Object object = mSpiderQueen.forceRequest(index);
             if (object instanceof Float) {
                 notifyPagePercent(index, (Float) object);
             } else if (object instanceof String) {
+                putPageError(index, (String) object);
                 notifyPageFailed(index, (String) object);
+                Log.d(TAG, "[ImgLoad] FORCE_REQUEST_FAILED page=" + index + " error=" + object);
             } else if (object == null) {
                 notifyPageWait(index);
             }
@@ -159,7 +170,12 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
         if (mSpiderQueen != null) {
             return mSpiderQueen.getError();
         } else {
-            return "Error"; // TODO
+            // Try to get error from cache if set
+            String cachedError = getPageError(-1);
+            if (cachedError != null) {
+                return cachedError;
+            }
+            return GetText.getString(R.string.error_spider_not_started);
         }
     }
 
@@ -234,11 +250,18 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
 
     @Override
     public void onPageFailure(int index, String error, int finished, int downloaded, int total) {
+        putPageError(index, error);
         notifyPageFailed(index, error);
     }
 
     public long getPageContentLength(int index) {
         return mContentLength.get(index, -1L);
+    }
+
+    @Override
+    @Nullable
+    public GalleryInfo getGalleryInfo() {
+        return mGalleryInfo;
     }
 
     @Override
@@ -252,6 +275,7 @@ public class EhGalleryProvider extends GalleryProvider2 implements SpiderQueen.O
 
     @Override
     public void onGetImageFailure(int index, String error) {
+        putPageError(index, error);
         notifyPageFailed(index, error);
     }
 

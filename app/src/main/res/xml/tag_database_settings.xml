@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+  ~ Copyright 2026 Hippo Seven
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~      http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  -->
+
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/settings_eh_tag_database"
+        app:allowDividerAbove="false">
+
+        <Preference
+            android:key="tag_db_status"
+            android:selectable="false"
+            android:summary="@string/tag_database_status_not_loaded"
+            android:title="@string/settings_eh_tag_database" />
+
+        <Preference
+            android:key="tag_db_data_file"
+            android:selectable="false"
+            android:title="@string/tag_database_data_file"
+            android:summary="@string/tag_database_data_file_missing" />
+
+        <Preference
+            android:key="tag_db_data_file_modified"
+            android:selectable="false" />
+
+        <Preference
+            android:key="tag_db_sha1_expected"
+            android:selectable="false"
+            android:title="@string/tag_database_sha1_expected"
+            android:summary="@string/tag_database_sha1_expected_missing" />
+
+        <Preference
+            android:key="tag_db_sha1_computed"
+            android:selectable="false"
+            android:title="@string/tag_database_sha1_computed"
+            android:summary="@string/tag_database_sha1_computed_missing" />
+
+        <Preference
+            android:key="tag_db_integrity"
+            android:selectable="false"
+            android:title="@string/tag_database_integrity_pending" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/tag_database_action_check"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="tag_db_action_check"
+            android:title="@string/tag_database_action_check" />
+
+        <Preference
+            android:key="tag_db_action_redownload"
+            android:title="@string/tag_database_action_redownload"
+            android:summary="@string/tag_database_action_redownload_hint" />
+
+        <Preference
+            android:key="tag_db_action_clear"
+            android:title="@string/tag_database_action_clear"
+            android:summary="@string/tag_database_action_clear_hint" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

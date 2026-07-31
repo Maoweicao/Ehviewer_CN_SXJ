@@ -19,6 +19,8 @@ package com.hippo.ehviewer;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import android.util.Log;
+
 import com.hippo.conaco.ValueHelper;
 import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.ImageBitmap;
@@ -39,16 +41,22 @@ public class ImageBitmapHelper implements ValueHelper<Image> {
 
     @Nullable
     public Image decode(@NonNull InputStreamPipe isPipe,boolean hardware) {
+        int fileSize = -1;
         try {
             isPipe.obtain();
             FileInputStream is = (FileInputStream) isPipe.open();
-            return Image.decode(is,hardware);
+            fileSize = is.available();
+            Log.d("ImageBitmapHelper", "[ImgLoad] THUMB_DECODE size=" + fileSize + " hardware=" + hardware);
+            Image result = Image.decode(is,hardware);
+            Log.d("ImageBitmapHelper", "[ImgLoad] THUMB_OK w=" + result.getWidth() + "x" + result.getHeight());
+            return result;
 //            return ImageBitmap.decode(is,hardware);
         } catch (OutOfMemoryError e) {
+            Log.w("ImageBitmapHelper", "[ImgLoad] THUMB_OOM size=" + fileSize, e);
             Analytics.recordException(e);
             return null;
         } catch (RuntimeException e) {
-            Analytics.recordException(e);
+            Log.w("ImageBitmapHelper", "[ImgLoad] THUMB_FAIL size=" + fileSize + " " + e.getMessage());
             return null;
         } catch (IOException e) {
             return null;

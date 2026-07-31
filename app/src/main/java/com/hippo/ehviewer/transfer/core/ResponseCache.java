@@ -1,0 +1,186 @@
+/*
+ * Copyright 2025 EhViewer Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.hippo.ehviewer.transfer.core;
+
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Simple in-memory response cache with TTL support.
+ * Used to cache expensive API responses (gallery lists, integrity checks, etc.)
+ */
+public class ResponseCache {
+
+    private static final long DEFAULT_TTL_MS = 5 * 60 * 60 * 1000; // 5 hours
+
+    private static volatile ResponseCache instance;
+
+    private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
+
+    private ResponseCache() {}
+
+    public static ResponseCache getInstance() {
+        if (instance == null) {
+            synchronized (ResponseCache.class) {
+                if (instance == null) {
+                    instance = new ResponseCache();
+                }
+            }
+        }
+        return instance;
+    }
+
+    /**
+     * Get cached response if valid
+     * @param key Cache key
+     * @return Cached JSON string, or null if expired/missing
+     */
+    public String get(String key) {
+        CacheEntry entry = cache.get(key);
+        if (entry == null) return null;
+
+        if (System.currentTimeMillis() - entry.createdAt > entry.ttlMs) {
+            cache.remove(key);
+            return null;
+        }
+
+        return entry.json;
+    }
+
+    /**
+     * Store response in cache
+     * @param key Cache key
+     * @param json Response JSON string
+     */
+    public void put(String key, String json) {
+        put(key, json, DEFAULT_TTL_MS);
+    }
+
+    /**
+     * Store response in cache with custom TTL
+     * @param key Cache key
+     * @param json Response JSON string
+     * @param ttlMs TTL in milliseconds
+     */
+    public void put(String key, String json, long ttlMs) {
+        cache.put(key, new CacheEntry(json, System.currentTimeMillis(), ttlMs));
+    }
+
+    /**
+     * Invalidate cache entries matching a prefix
+     * @param prefix Key prefix to match
+     */
+    public void invalidateByPrefix(String prefix) {
+        cache.entrySet().removeIf(entry -> entry.getKey().startsWith(prefix));
+    }
+
+    /**
+     * Invalidate a specific cache key
+     * @param key Cache key
+     */
+    public void invalidate(String key) {
+        cache.remove(key);
+    }
+
+    /**
+     * Invalidate all gallery-related caches.
+     * Called when gallery count changes.
+     */
+    public void invalidateGalleries() {
+        invalidateByPrefix("galleries:");
+        invalidateByPrefix("gallery_detail:");
+        invalidateByPrefix("labels");
+        invalidateByPrefix("integrity:");
+        invalidateByPrefix("system_stats");
+        invalidateByPrefix("export_downloads");
+        invalidateByPrefix("export_favorites");
+        invalidateByPrefix("export_bookmarks");
+    }
+
+    /**
+     * Invalidate all file-related caches.
+     * Called when files change.
+     */
+    public void invalidateFiles() {
+        invalidateByPrefix("files:");
+        invalidateByPrefix("folders");
+        invalidateByPrefix("integrity:");
+        invalidateByPrefix("file_hash:");
+        invalidateByPrefix("export_files");
+    }
+
+    /**
+     * Invalidate settings-related caches.
+     */
+    public void invalidateSettings() {
+        invalidateByPrefix("settings:");
+        invalidateByPrefix("system_info");
+    }
+
+    /**
+     * Invalidate label-related caches.
+     */
+    public void invalidateLabels() {
+        invalidateByPrefix("labels");
+    }
+
+    /**
+     * Invalidate task-related caches.
+     */
+    public void invalidateTasks() {
+        invalidateByPrefix("tasks:");
+        invalidateByPrefix("compress_tasks:");
+    }
+
+    /**
+     * Clear all caches
+     */
+    public void clear() {
+        cache.clear();
+    }
+
+    /**
+     * Get cache size
+     */
+    public int size() {
+        return cache.size();
+    }
+
+    /**
+     * Build a cache key from path and parameters
+     */
+    public static String buildKey(String path, String... params) {
+        StringBuilder sb = new StringBuilder(path);
+        for (String param : params) {
+            if (param != null && !param.isEmpty()) {
+                sb.append(':').append(param);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static class CacheEntry {
+        final String json;
+        final long createdAt;
+        final long ttlMs;
+
+        CacheEntry(String json, long createdAt, long ttlMs) {
+            this.json = json;
+            this.createdAt = createdAt;
+            this.ttlMs = ttlMs;
+        }
+    }
+}

@@ -23,6 +23,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.data.ReceiveSettings;
 
 import fi.iki.elonen.NanoHTTPD;
@@ -47,6 +48,11 @@ public class SettingsApiHandler extends BaseApiHandler {
             return handleGetReceiveSettings(session);
         }
 
+        // /api/v1/settings/page-upload - 获取远程上传页面开关
+        if (uri.equals("/api/v1/settings/page-upload")) {
+            return handleGetPageUploadSettings(session);
+        }
+
         return ResponseBuilder.notFound("Endpoint");
     }
 
@@ -59,6 +65,11 @@ public class SettingsApiHandler extends BaseApiHandler {
             return handleUpdateReceiveSettings(session);
         }
 
+        // /api/v1/settings/page-upload - 更新远程上传页面开关
+        if (uri.equals("/api/v1/settings/page-upload")) {
+            return handleUpdatePageUploadSettings(session);
+        }
+
         return ResponseBuilder.notFound("Endpoint");
     }
 
@@ -67,6 +78,14 @@ public class SettingsApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleGetReceiveSettings(NanoHTTPD.IHTTPSession session) {
         try {
+            // Check cache
+            String cacheKey = "settings:receive";
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for receive settings");
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             JSONObject response = new JSONObject();
 
             JSONObject autoReceive = new JSONObject();
@@ -77,7 +96,12 @@ public class SettingsApiHandler extends BaseApiHandler {
             response.put("autoReceive", autoReceive);
             response.put("pageSize", Settings.getSelectorPageSize());
 
-            return ResponseBuilder.jsonSuccess(response.toJSONString());
+            String responseJson = response.toJSONString();
+            
+            // Store in cache
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+
+            return ResponseBuilder.jsonSuccess(responseJson);
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to get receive settings", e);
@@ -112,6 +136,9 @@ public class SettingsApiHandler extends BaseApiHandler {
                 Settings.putSelectorPageSize(json.getIntValue("pageSize"));
             }
 
+            // Invalidate settings cache
+            ResponseCache.getInstance().invalidateSettings();
+
             JSONObject response = new JSONObject();
             response.put("success", true);
 
@@ -119,6 +146,48 @@ public class SettingsApiHandler extends BaseApiHandler {
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to update receive settings", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 获取远程上传页面开关
+     */
+    private NanoHTTPD.Response handleGetPageUploadSettings(NanoHTTPD.IHTTPSession session) {
+        try {
+            JSONObject response = new JSONObject();
+            response.put("enabled", Settings.isRemotePageUploadEnabled());
+            response.put("defaultAlgorithm", "md5");
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get page-upload settings", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * 更新远程上传页面开关
+     */
+    private NanoHTTPD.Response handleUpdatePageUploadSettings(NanoHTTPD.IHTTPSession session) {
+        try {
+            String body = RequestParser.readBody(session);
+            JSONObject json = JSON.parseObject(body);
+
+            if (json.containsKey("enabled")) {
+                Settings.putRemotePageUploadEnabled(json.getBoolean("enabled"));
+            }
+
+            JSONObject response = new JSONObject();
+            response.put("success", true);
+            response.put("message", "Settings updated");
+            response.put("enabled", Settings.isRemotePageUploadEnabled());
+
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to update page-upload settings", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

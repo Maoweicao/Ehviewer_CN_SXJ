@@ -81,11 +81,12 @@
                 android:gravity="center_vertical"
                 android:layout_marginBottom="8dp">
 
-                <TextView
+                <androidx.appcompat.widget.AppCompatTextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/progressive_target_label"
                     android:textSize="13sp"
+                    android:textColor="?android:attr/textColorSecondary"
                     android:layout_marginEnd="8dp" />
 
                 <Spinner

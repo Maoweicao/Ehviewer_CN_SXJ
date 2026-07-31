@@ -1270,6 +1270,54 @@ public class Settings {
         putIntToStr(KEY_BACKGROUND_CONCURRENT_TASKS, MathUtils.clamp(value, 1, 32));
     }
 
+    // 性能监测
+    private static final String KEY_PERFORMANCE_MONITOR_ENABLED = "performance_monitor_enabled";
+    private static final boolean DEFAULT_PERFORMANCE_MONITOR_ENABLED = false;
+
+    public static boolean getPerformanceMonitorEnabled() {
+        return getBoolean(KEY_PERFORMANCE_MONITOR_ENABLED, DEFAULT_PERFORMANCE_MONITOR_ENABLED);
+    }
+
+    public static void putPerformanceMonitorEnabled(boolean value) {
+        putBoolean(KEY_PERFORMANCE_MONITOR_ENABLED, value);
+    }
+
+    // 无响应预判与诊断（看门狗 + 网络健康采集），默认常驻开启
+    private static final String KEY_PRE_ANR_DETECTION_ENABLED = "pre_anr_detection_enabled";
+    private static final boolean DEFAULT_PRE_ANR_DETECTION_ENABLED = true;
+
+    public static boolean getPreAnrDetectionEnabled() {
+        return getBoolean(KEY_PRE_ANR_DETECTION_ENABLED, DEFAULT_PRE_ANR_DETECTION_ENABLED);
+    }
+
+    public static void putPreAnrDetectionEnabled(boolean value) {
+        putBoolean(KEY_PRE_ANR_DETECTION_ENABLED, value);
+    }
+
+    // 看门狗日志保留时间（分钟），默认 3 分钟，到期自动清理
+    public static final int DEFAULT_WATCHDOG_LOG_RETENTION_MINUTES = 3;
+    private static final String KEY_WATCHDOG_LOG_RETENTION_MINUTES = "watchdog_log_retention_minutes";
+
+    public static int getWatchdogLogRetentionMinutes() {
+        return getInt(KEY_WATCHDOG_LOG_RETENTION_MINUTES, DEFAULT_WATCHDOG_LOG_RETENTION_MINUTES);
+    }
+
+    public static void putWatchdogLogRetentionMinutes(int value) {
+        putInt(KEY_WATCHDOG_LOG_RETENTION_MINUTES, Math.max(1, value));
+    }
+
+    // 网络流量抓包
+    private static final String KEY_TRAFFIC_CAPTURE_ENABLED = "traffic_capture_enabled";
+    private static final boolean DEFAULT_TRAFFIC_CAPTURE_ENABLED = false;
+
+    public static boolean getTrafficCaptureEnabled() {
+        return getBoolean(KEY_TRAFFIC_CAPTURE_ENABLED, DEFAULT_TRAFFIC_CAPTURE_ENABLED);
+    }
+
+    public static void putTrafficCaptureEnabled(boolean value) {
+        putBoolean(KEY_TRAFFIC_CAPTURE_ENABLED, value);
+    }
+
     private static final String KEY_PRELOAD_IMAGE = "preload_image";
     private static final int DEFAULT_PRELOAD_IMAGE = 5;
 
@@ -1311,6 +1359,40 @@ public class Settings {
 
     public static void putDownloadOriginImage(boolean value) {
         putBoolean(KEY_DOWNLOAD_ORIGIN_IMAGE, value);
+    }
+
+    /**
+     * 是否把图片下载交给 Android 系统 DownloadManager。
+     * - true：使用 SystemDMBackend；下载在 com.android.providers.downloads 进程，
+     *   不受 Ehviewer 自身被节流影响；后台稳定性更好。
+     * - false（默认）：使用原 SpiderBackend（OkHttp + IoThreadPoolExecutor）。
+     *
+     * 限制：开了原图（{@link #getDownloadOriginImage()}）的画廊自动 fallback 到 SpiderBackend。
+     */
+    public static final String KEY_USE_SYSTEM_DOWNLOAD_MANAGER = "use_system_download_manager";
+    private static final boolean DEFAULT_USE_SYSTEM_DOWNLOAD_MANAGER = false;
+
+    public static boolean getUseSystemDownloadManager() {
+        return getBoolean(KEY_USE_SYSTEM_DOWNLOAD_MANAGER, DEFAULT_USE_SYSTEM_DOWNLOAD_MANAGER);
+    }
+
+    public static void putUseSystemDownloadManager(boolean value) {
+        putBoolean(KEY_USE_SYSTEM_DOWNLOAD_MANAGER, value);
+    }
+
+    /**
+     * 隐私下载模式：下载完成后 3 分钟自动清理系统下载痕迹（系统下载记录、Ehviewer 私有目录里的图片）。
+     * 仅在使用 SystemDMBackend 时生效；SpiderBackend 不受影响。
+     */
+    public static final String KEY_DOWNLOAD_PRIVATE_MODE = "download_private_mode";
+    private static final boolean DEFAULT_DOWNLOAD_PRIVATE_MODE = false;
+
+    public static boolean getDownloadPrivateMode() {
+        return getBoolean(KEY_DOWNLOAD_PRIVATE_MODE, DEFAULT_DOWNLOAD_PRIVATE_MODE);
+    }
+
+    public static void putDownloadPrivateMode(boolean value) {
+        putBoolean(KEY_DOWNLOAD_PRIVATE_MODE, value);
     }
 
     /********************
@@ -1792,6 +1874,21 @@ public class Settings {
         putBoolean(KEY_DOMAIN_FRONTING, value);
     }
 
+    // VPN aware mode constants
+    public static final int VPN_MODE_AUTO_DISABLE = 0;
+    public static final int VPN_MODE_PROMPT = 1;
+    public static final int VPN_MODE_IGNORE = 2;
+
+    private static final String KEY_VPN_AWARE_MODE = "vpn_aware_mode";
+    private static final int DEFAULT_VPN_AWARE_MODE = VPN_MODE_AUTO_DISABLE;
+
+    public static int getVpnAwareMode() {
+        return getIntFromStr(KEY_VPN_AWARE_MODE, DEFAULT_VPN_AWARE_MODE);
+    }
+
+    public static void putVpnAwareMode(int value) {
+        putIntToStr(KEY_VPN_AWARE_MODE, value);
+    }
 
     private static final String KEY_DOWNLOAD_DELAY = "download_delay";
     private static final int DEFAULT_DOWNLOAD_DELAY = 0;
@@ -1947,6 +2044,7 @@ public class Settings {
     public static final int DOWNLOAD_QUEUE_SECONDARY_NONE = 0;
     public static final int DOWNLOAD_QUEUE_SECONDARY_FEWEST_FIRST = 1;
     public static final int DOWNLOAD_QUEUE_SECONDARY_MOST_FIRST = 2;
+    public static final int DOWNLOAD_QUEUE_SECONDARY_CATEGORY_PRIORITY = 3;
 
     public static int getDownloadQueueOrderSecondary() {
         return getInt(KEY_DOWNLOAD_QUEUE_SECONDARY_ORDER, DOWNLOAD_QUEUE_SECONDARY_NONE);
@@ -1964,6 +2062,16 @@ public class Settings {
 
     public static void setDownloadTreatRemovedAsComplete(boolean value) {
         putBoolean(KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE, value);
+    }
+
+    public static final String KEY_DOWNLOAD_ALWAYS_COMPLETE = "download_always_complete";
+
+    public static boolean getDownloadAlwaysComplete() {
+        return getBoolean(KEY_DOWNLOAD_ALWAYS_COMPLETE, false);
+    }
+
+    public static void setDownloadAlwaysComplete(boolean value) {
+        putBoolean(KEY_DOWNLOAD_ALWAYS_COMPLETE, value);
     }
 
     public static final String KEY_DOWNLOAD_PREFETCH_PAGES_ENABLED = "download_prefetch_pages_enabled";
@@ -2473,7 +2581,18 @@ public class Settings {
     }
 
     // Remote Management Settings
-    
+
+    public static final String KEY_REMOTE_MANAGEMENT_ENABLED = "remote_management_enabled";
+    private static final boolean DEFAULT_REMOTE_MANAGEMENT_ENABLED = true;
+
+    public static boolean isRemoteManagementEnabled() {
+        return getBoolean(KEY_REMOTE_MANAGEMENT_ENABLED, DEFAULT_REMOTE_MANAGEMENT_ENABLED);
+    }
+
+    public static void putRemoteManagementEnabled(boolean value) {
+        putBoolean(KEY_REMOTE_MANAGEMENT_ENABLED, value);
+    }
+
     public static final String KEY_REMOTE_DELETE_ENABLED = "remote_delete_enabled";
     private static final boolean DEFAULT_REMOTE_DELETE_ENABLED = false;
 
@@ -2563,6 +2682,18 @@ public class Settings {
 
     public static void putLocalBypassEnabled(boolean value) {
         putBoolean(KEY_LOCAL_BYPASS_ENABLED, value);
+    }
+
+    // 远程上传页面开关（POST /api/v1/galleries/{gid}/pages/{page}/upload 总开关）
+    public static final String KEY_REMOTE_PAGE_UPLOAD_ENABLED = "remote_page_upload_enabled";
+    private static final boolean DEFAULT_REMOTE_PAGE_UPLOAD_ENABLED = true;
+
+    public static boolean isRemotePageUploadEnabled() {
+        return getBoolean(KEY_REMOTE_PAGE_UPLOAD_ENABLED, DEFAULT_REMOTE_PAGE_UPLOAD_ENABLED);
+    }
+
+    public static void putRemotePageUploadEnabled(boolean value) {
+        putBoolean(KEY_REMOTE_PAGE_UPLOAD_ENABLED, value);
     }
 
     // 自动接收书签

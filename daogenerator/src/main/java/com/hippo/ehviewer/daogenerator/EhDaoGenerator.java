@@ -32,7 +32,7 @@ public class EhDaoGenerator {
     private static final String OUT_DIR = "app/src/main/java";
     private static final String DELETE_DIR = OUT_DIR+"/com/hippo/ehviewer/dao";
 
-    private static final int VERSION = 7;
+    private static final int VERSION = 8;
 
     private static final String DOWNLOAD_INFO_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/DownloadInfo.java";
     private static final String HISTORY_INFO_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/HistoryInfo.java";
@@ -42,6 +42,7 @@ public class EhDaoGenerator {
     private static final String FILTER_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/Filter.java";
     private static final String BLACKLIST_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/BlackList.java";
     private static final String GALLERY_TAG_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/GalleryTags.java";
+    private static final String SYSTEM_DOWNLOAD_TASK_PATH = OUT_DIR+"/com/hippo/ehviewer/dao/SystemDownloadTask.java";
 
 
     public static void generate() throws Exception {
@@ -66,6 +67,7 @@ public class EhDaoGenerator {
         addLocalFavorites(schema);
         addBookmarks(schema);
         addFilter(schema);
+        addSystemDownloadTask(schema);
         new DaoGenerator().generateAll(schema, OUT_DIR);
 
         adjustGalleryTags();
@@ -324,6 +326,27 @@ public class EhDaoGenerator {
         entity.addStringProperty("text");
         // Since 3
         entity.addBooleanProperty("enable");
+    }
+
+    // Since 8
+    private static void addSystemDownloadTask(Schema schema) {
+        Entity entity = schema.addEntity("SystemDownloadTask");
+        entity.setTableName("SYSTEM_DOWNLOAD_TASKS");
+        entity.setClassNameDao("SystemDownloadTaskDao");
+        // system DownloadManager downloadId
+        entity.addLongProperty("downloadId").primaryKey().notNull();
+        // gid of the gallery
+        entity.addLongProperty("gid").notNull();
+        // 0-indexed page index inside the gallery
+        entity.addIntProperty("pageIndex").notNull();
+        // Resolved image URL (pToken/showKey may expire; persisted for retry)
+        entity.addStringProperty("resolvedUrl");
+        // PENDING / RUNNING / SUCCESS / FAILED
+        entity.addStringProperty("status").notNull();
+        // 0..N retry attempts so far
+        entity.addIntProperty("retryCount").notNull();
+        // epoch ms
+        entity.addLongProperty("createdAt").notNull();
     }
 
     private static void adjustDownloadInfo() throws Exception {

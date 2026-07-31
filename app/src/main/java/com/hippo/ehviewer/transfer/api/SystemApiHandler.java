@@ -28,6 +28,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.unifile.UniFile;
 
 import java.io.File;
@@ -71,6 +72,14 @@ public class SystemApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleSystemInfo(NanoHTTPD.IHTTPSession session) {
         try {
+            // Check cache
+            String cacheKey = "system_info";
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for system info");
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             StringBuilder sb = new StringBuilder();
             sb.append("{");
             
@@ -133,10 +142,17 @@ public class SystemApiHandler extends BaseApiHandler {
             // 功能开关
             sb.append(",\"deleteEnabled\":").append(Settings.isRemoteDeleteEnabled());
             sb.append(",\"syncDownloadEnabled\":").append(Settings.getSyncDownloadWhileReading());
-            
+            sb.append(",\"remoteManagementEnabled\":").append(Settings.isRemoteManagementEnabled());
+            sb.append(",\"pageUploadEnabled\":").append(Settings.isRemotePageUploadEnabled());
+
             sb.append("}");
             
-            return ResponseBuilder.jsonSuccess(sb.toString());
+            String responseJson = sb.toString();
+            
+            // Store in cache (system info changes infrequently)
+            ResponseCache.getInstance().put(cacheKey, responseJson);
+            
+            return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
             Log.e(TAG, "Error getting system info", e);
@@ -149,6 +165,14 @@ public class SystemApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleSystemStats(NanoHTTPD.IHTTPSession session) {
         try {
+            // Check cache
+            String cacheKey = "system_stats";
+            String cached = ResponseCache.getInstance().get(cacheKey);
+            if (cached != null) {
+                Log.d(TAG, "Cache hit for system stats");
+                return ResponseBuilder.jsonSuccess(cached);
+            }
+
             List<DownloadInfo> allList = downloadManager.getAllDownloadInfoList();
             
             int totalGalleries = allList.size();
@@ -188,7 +212,12 @@ public class SystemApiHandler extends BaseApiHandler {
             sb.append(",\"none\":").append(none);
             sb.append("}");
             
-            return ResponseBuilder.jsonSuccess(sb.toString());
+            String responseJson = sb.toString();
+            
+            // Store in cache (shorter TTL since download status changes)
+            ResponseCache.getInstance().put(cacheKey, responseJson, 60 * 1000); // 1 minute
+            
+            return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
             Log.e(TAG, "Error getting system stats", e);

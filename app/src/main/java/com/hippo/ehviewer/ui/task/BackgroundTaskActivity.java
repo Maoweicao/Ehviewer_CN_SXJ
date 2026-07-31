@@ -3,6 +3,8 @@ package com.hippo.ehviewer.ui.task;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.widget.Toast;
@@ -26,9 +28,20 @@ import com.hippo.ehviewer.ui.MainActivity;
  */
 public class BackgroundTaskActivity extends EhActivity {
     
+    private static final long REFRESH_INTERVAL = 1500; // 1.5秒刷新一次
+    
     private RecyclerView mRecyclerView;
     private BackgroundTaskAdapter mAdapter;
     private BackgroundTaskStatusManager mTaskManager;
+    private Handler mHandler;
+    
+    private final Runnable mRefreshRunnable = new Runnable() {
+        @Override
+        public void run() {
+            refreshData();
+            mHandler.postDelayed(this, REFRESH_INTERVAL);
+        }
+    };
     
     public static void start(@NonNull Context context) {
         Intent intent = new Intent(context, BackgroundTaskActivity.class);
@@ -53,6 +66,7 @@ public class BackgroundTaskActivity extends EhActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_background_task);
         
+        mHandler = new Handler(Looper.getMainLooper());
         setupActionBar();
         initViews();
         initTaskManager();
@@ -89,18 +103,14 @@ public class BackgroundTaskActivity extends EhActivity {
         } else if (item.getItemId() == R.id.action_clear_completed) {
             if (mTaskManager != null && mAdapter != null) {
                 mTaskManager.clearCompletedTasks();
-                mAdapter.updateData(mTaskManager.getActiveTasks(), mTaskManager.getCompletedTasks());
-                updateToolbarTitle();
+                refreshData();
                 Toast.makeText(this, R.string.background_task_cleared_completed, Toast.LENGTH_SHORT).show();
             }
             return true;
         } else if (item.getItemId() == R.id.action_clear_all) {
             if (mAdapter != null) {
                 BackgroundTaskManager.getInstance().forceStopAllTasks();
-                if (mTaskManager != null) {
-                    mAdapter.updateData(mTaskManager.getActiveTasks(), mTaskManager.getCompletedTasks());
-                }
-                updateToolbarTitle();
+                refreshData();
                 Toast.makeText(this, R.string.background_task_cleared_all, Toast.LENGTH_SHORT).show();
             }
             return true;
@@ -125,10 +135,14 @@ public class BackgroundTaskActivity extends EhActivity {
     
     private void initTaskManager() {
         mTaskManager = BackgroundTaskStatusManager.getInstance();
-        if (mAdapter != null) {
+        refreshData();
+    }
+    
+    private void refreshData() {
+        if (mAdapter != null && mTaskManager != null) {
             mAdapter.updateData(mTaskManager.getActiveTasks(), mTaskManager.getCompletedTasks());
+            updateToolbarTitle();
         }
-        updateToolbarTitle();
     }
     
     private void updateToolbarTitle() {
@@ -142,11 +156,13 @@ public class BackgroundTaskActivity extends EhActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // 刷新数据
-        if (mAdapter != null && mTaskManager != null) {
-            mAdapter.updateData(mTaskManager.getActiveTasks(), mTaskManager.getCompletedTasks());
-        }
-        updateToolbarTitle();
+        mHandler.postDelayed(mRefreshRunnable, REFRESH_INTERVAL);
+    }
+
+    @Override
+    protected void onPause() {
+        mHandler.removeCallbacks(mRefreshRunnable);
+        super.onPause();
     }
 
     @Override

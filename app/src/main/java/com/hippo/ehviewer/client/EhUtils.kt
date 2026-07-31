@@ -19,6 +19,7 @@ import android.content.Context
 import android.graphics.Color
 import android.text.TextUtils
 import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.data.GalleryInfo
 import java.util.regex.Pattern
@@ -32,17 +33,17 @@ object EhUtils {
     @JvmField
     val ALL_CATEGORY: Int = UNKNOWN - 1
 
-    //DOUJINSHI|MANGA|ARTIST_CG|GAME_CG|WESTERN|NON_H|IMAGE_SET|COSPLAY|ASIAN_PORN|MISC;
-    const val BG_COLOR_DOUJINSHI: Int = -0xbbcca
-    const val BG_COLOR_MANGA: Int = -0x6800
-    const val BG_COLOR_ARTIST_CG: Int = -0x43fd3
-    const val BG_COLOR_GAME_CG: Int = -0xb350b0
-    const val BG_COLOR_WESTERN: Int = -0x743cb6
-    const val BG_COLOR_NON_H: Int = -0xde690d
-    const val BG_COLOR_IMAGE_SET: Int = -0xc0ae4b
-    const val BG_COLOR_COSPLAY: Int = -0x63d850
-    const val BG_COLOR_ASIAN_PORN: Int = -0x6a8a33
-    const val BG_COLOR_MISC: Int = -0xf9d6e
+    // E-Hentai category colors (ct1-cta)
+    const val BG_COLOR_DOUJINSHI: Int = -0x3b1b2    // #fc4e4e
+    const val BG_COLOR_MANGA: Int = -0x1873e6       // #e78c1a
+    const val BG_COLOR_ARTIST_CG: Int = -0x3840f9   // #c7bf07
+    const val BG_COLOR_GAME_CG: Int = -0xe56ce9     // #1a9317
+    const val BG_COLOR_WESTERN: Int = -0xa23ec5     // #5dc13b
+    const val BG_COLOR_NON_H: Int = -0xf06143       // #0f9ebd
+    const val BG_COLOR_IMAGE_SET: Int = -0xd8a956   // #2756aa
+    const val BG_COLOR_COSPLAY: Int = -0x77ff3d     // #8800c3
+    const val BG_COLOR_ASIAN_PORN: Int = -0x4bad5b  // #b452a5
+    const val BG_COLOR_MISC: Int = -0x8f8f90        // #707070
     val BG_COLOR_UNKNOWN: Int = Color.BLACK
 
     // Remove [XXX], (XXX), {XXX}, ~XXX~ stuff
@@ -84,6 +85,20 @@ object EhUtils {
         arrayOf<String>("unknown")
     )
 
+    private val CATEGORY_STRING_RES = intArrayOf(
+        R.string.misc,
+        R.string.doujinshi,
+        R.string.manga,
+        R.string.artist_cg,
+        R.string.game_cg,
+        R.string.image_set,
+        R.string.cosplay,
+        R.string.asian_porn,
+        R.string.non_h,
+        R.string.western,
+        R.string.unknown
+    )
+
     @JvmStatic
     fun getCategory(type: String?): Int {
         var i: Int
@@ -109,6 +124,16 @@ object EhUtils {
             i++
         }
         return CATEGORY_STRINGS[i]!![0]
+    }
+
+    @JvmStatic
+    fun getCategoryName(context: Context, category: Int): String {
+        var i = 0
+        while (i < CATEGORY_VALUES.size - 1) {
+            if (CATEGORY_VALUES[i] == category) break
+            i++
+        }
+        return context.getString(CATEGORY_STRING_RES[i])
     }
 
     @JvmStatic

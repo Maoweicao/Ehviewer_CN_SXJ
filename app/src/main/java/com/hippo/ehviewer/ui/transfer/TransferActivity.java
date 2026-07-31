@@ -45,6 +45,7 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.TransferService;
@@ -112,6 +113,9 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private TextView remoteAccessInfo;
     private Button remoteOpenBrowser;
     private Button remoteCopyUrl;
+    private com.google.android.material.switchmaterial.SwitchMaterial remoteDeleteSwitch;
+    private com.google.android.material.switchmaterial.SwitchMaterial remoteManagementSwitch;
+    private View remoteManagementContent;
 
     // Send data
     private Button sendBookmarksAll;
@@ -120,6 +124,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private Button sendDownloadsSelect;
     private Button sendFavoritesAll;
     private Button sendFavoritesSelect;
+    private Button sendAllData;
 
     // Connect to
     private EditText addressInput;
@@ -140,6 +145,18 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private boolean isLogExpanded = false;
     private TransferLogger transferLogger;
 
+    // Relay task section
+    private RecyclerView relayTaskListView;
+    private RelayTaskAdapter relayTaskAdapter;
+    private TextView relayEmptyText;
+    private Button relayTabIncoming;
+    private Button relayTabOutgoing;
+    private Button relayTabAll;
+    private Button relayRefreshButton;
+    private Button relayClearCompletedButton;
+    private com.hippo.ehviewer.transfer.core.RelayTaskManager relayTaskManager;
+    private String relayFilterDirection = "all";
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -148,6 +165,13 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         initializeUI();
         setupServiceConnection();
         bindTransferService();
+
+        String openTab = getIntent().getStringExtra("open_tab");
+        if ("relay".equals(openTab)) {
+            findViewById(R.id.relay_task_list).post(() -> {
+                findViewById(R.id.relay_task_list).requestFocus();
+            });
+        }
     }
 
     private void initializeUI() {
@@ -170,6 +194,29 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         remoteAccessInfo = findViewById(R.id.remote_access_info);
         remoteOpenBrowser = findViewById(R.id.remote_open_browser);
         remoteCopyUrl = findViewById(R.id.remote_copy_url);
+        remoteDeleteSwitch = findViewById(R.id.remote_delete_switch);
+        remoteManagementSwitch = findViewById(R.id.remote_management_switch);
+        remoteManagementContent = findViewById(R.id.remote_management_content);
+
+        // Initialize remote management switch
+        remoteManagementSwitch.setChecked(Settings.isRemoteManagementEnabled());
+        updateRemoteManagementUI(Settings.isRemoteManagementEnabled());
+        remoteManagementSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            Settings.putRemoteManagementEnabled(isChecked);
+            updateRemoteManagementUI(isChecked);
+            // Invalidate system info cache so remote clients see the change immediately
+            com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().invalidateSettings();
+            Toast.makeText(this, isChecked ? R.string.remote_management_enabled_label : R.string.remote_management_disabled_label, Toast.LENGTH_SHORT).show();
+        });
+
+        // Initialize remote delete switch
+        remoteDeleteSwitch.setChecked(Settings.isRemoteDeleteEnabled());
+        remoteDeleteSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            Settings.putRemoteDeleteEnabled(isChecked);
+            // Invalidate system info cache so remote clients see the change immediately
+            com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().invalidateSettings();
+            Toast.makeText(this, isChecked ? R.string.remote_delete_enabled : R.string.remote_delete_disabled, Toast.LENGTH_SHORT).show();
+        });
 
         // Send data
         sendBookmarksAll = findViewById(R.id.send_bookmarks_all);
@@ -178,6 +225,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         sendDownloadsSelect = findViewById(R.id.send_downloads_select);
         sendFavoritesAll = findViewById(R.id.send_favorites_all);
         sendFavoritesSelect = findViewById(R.id.send_favorites_select);
+        sendAllData = findViewById(R.id.send_all_data);
 
         // Connect to
         addressInput = findViewById(R.id.address_input);
@@ -215,6 +263,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         sendDownloadsSelect.setOnClickListener(v -> openDataSelector("downloads"));
         sendFavoritesAll.setOnClickListener(v -> sendAll("favorites"));
         sendFavoritesSelect.setOnClickListener(v -> openDataSelector("favorites"));
+        sendAllData.setOnClickListener(v -> sendAllData());
 
         connectButton.setOnClickListener(v -> connectToDevice());
         refreshDevicesButton.setOnClickListener(v -> refreshDevices());
@@ -226,7 +275,10 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         });
 
         // Initialize transfer client manager
-        transferClientManager = new TransferClientManager(this);
+        transferClientManager = TransferClientManager.getInstance(this);
+
+        // Initialize relay task section
+        setupRelayTaskSection();
 
         // Initialize log section
         setupLogSection();
@@ -293,6 +345,333 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         // Load existing logs
         List<LogEntry> existingLogs = transferLogger.getLogs();
         logAdapter.setLogs(existingLogs);
+    }
+
+    /**
+     * 设置接力任务区域
+     */
+    private void setupRelayTaskSection() {
+        relayTaskManager = com.hippo.ehviewer.transfer.core.RelayTaskManager.getInstance(this);
+
+        relayTaskListView = findViewById(R.id.relay_task_list);
+        relayEmptyText = findViewById(R.id.relay_empty_text);
+        relayTabIncoming = findViewById(R.id.relay_tab_incoming);
+        relayTabOutgoing = findViewById(R.id.relay_tab_outgoing);
+        relayTabAll = findViewById(R.id.relay_tab_all);
+        relayRefreshButton = findViewById(R.id.relay_refresh);
+        relayClearCompletedButton = findViewById(R.id.relay_clear_completed);
+
+        // Setup RecyclerView
+        relayTaskAdapter = new RelayTaskAdapter();
+        relayTaskListView.setLayoutManager(new LinearLayoutManager(this));
+        relayTaskListView.setAdapter(relayTaskAdapter);
+
+        // Setup action listener
+        relayTaskAdapter.setOnRelayActionListener(new RelayTaskAdapter.OnRelayActionListener() {
+            @Override
+            public void onAccept(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                handleRelayAccept(task);
+            }
+
+            @Override
+            public void onReject(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                handleRelayReject(task);
+            }
+
+            @Override
+            public void onCancel(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                handleRelayCancel(task);
+            }
+
+            @Override
+            public void onRetrieve(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                handleRelayRetrieve(task);
+            }
+
+            @Override
+            public void onDelete(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                handleRelayDelete(task);
+            }
+        });
+
+        // Setup tab buttons
+        relayTabIncoming.setOnClickListener(v -> {
+            relayFilterDirection = "incoming";
+            refreshRelayTaskList();
+        });
+        relayTabOutgoing.setOnClickListener(v -> {
+            relayFilterDirection = "outgoing";
+            refreshRelayTaskList();
+        });
+        relayTabAll.setOnClickListener(v -> {
+            relayFilterDirection = "all";
+            refreshRelayTaskList();
+        });
+        relayRefreshButton.setOnClickListener(v -> refreshRelayTaskList());
+        relayClearCompletedButton.setOnClickListener(v -> handleClearCompleted());
+
+        // Register relay task listener
+        relayTaskManager.addListener(new com.hippo.ehviewer.transfer.core.RelayTaskManager.RelayTaskListener() {
+            @Override
+            public void onTaskCreated(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                runOnUiThread(() -> refreshRelayTaskList());
+            }
+
+            @Override
+            public void onTaskUpdated(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                runOnUiThread(() -> refreshRelayTaskList());
+            }
+
+            @Override
+            public void onTaskDeleted(com.hippo.ehviewer.transfer.data.RelayTask task) {
+                runOnUiThread(() -> refreshRelayTaskList());
+            }
+        });
+
+        // Initial load
+        refreshRelayTaskList();
+    }
+
+    /**
+     * 刷新接力任务列表
+     */
+    private void refreshRelayTaskList() {
+        List<com.hippo.ehviewer.transfer.data.RelayTask> tasks =
+                relayTaskManager.getTasks("all", relayFilterDirection);
+        relayTaskAdapter.setTasks(tasks);
+
+        if (tasks.isEmpty()) {
+            relayEmptyText.setVisibility(View.VISIBLE);
+            relayTaskListView.setVisibility(View.GONE);
+        } else {
+            relayEmptyText.setVisibility(View.GONE);
+            relayTaskListView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /**
+     * 接受接力任务
+     */
+    private void handleRelayAccept(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.relay_accept)
+                .setMessage("接受接力任务并开始下载？\n" + (task.getTitle() != null ? task.getTitle() : "GID: " + task.getGid()))
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    relayTaskManager.acceptTask(task.getTaskId());
+                    relayTaskManager.startDownload(task.getTaskId());
+                    Toast.makeText(this, R.string.relay_accept, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * 拒绝接力任务
+     */
+    private void handleRelayReject(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.relay_reject)
+                .setMessage("拒绝此接力任务？")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    relayTaskManager.rejectTask(task.getTaskId());
+                    Toast.makeText(this, R.string.relay_reject, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * 取消接力任务
+     */
+    private void handleRelayCancel(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.relay_cancel)
+                .setMessage("取消此接力任务？")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    relayTaskManager.cancelTask(task.getTaskId());
+                    Toast.makeText(this, R.string.relay_cancel, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * 取回接力文件（从执行端下载ZIP并解压到本地下载目录）
+     */
+    private void handleRelayRetrieve(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        if (transferClientManager == null || transferClientManager.getConnectedDevices().isEmpty()) {
+            Toast.makeText(this, "没有已连接的设备", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        ConnectedDevice executorDevice = findExecutorDevice(task);
+        if (executorDevice == null) {
+            Toast.makeText(this, "找不到执行端设备。请确保已连接", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "开始取回文件...", Toast.LENGTH_SHORT).show();
+
+        transferClientManager.downloadRelayZip(executorDevice, task.getTaskId(),
+                new com.hippo.ehviewer.transfer.core.TransferClientManager.RelayZipCallback() {
+                    @Override
+                    public void onSuccess(String zipFilePath) {
+                        java.io.File zipFile = new java.io.File(zipFilePath);
+                        if (!zipFile.exists()) {
+                            Toast.makeText(TransferActivity.this, "下载的文件不存在", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        try {
+                            long gid = task.getGid();
+                            com.hippo.ehviewer.dao.DownloadInfo downloadInfo =
+                                    com.hippo.ehviewer.EhApplication.getDownloadManager(TransferActivity.this).getDownloadInfo(gid);
+                            if (downloadInfo == null) {
+                                Toast.makeText(TransferActivity.this, "找不到下载记录", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            com.hippo.unifile.UniFile downloadDir =
+                                    com.hippo.ehviewer.spider.SpiderDen.getGalleryDownloadDir(downloadInfo);
+                            if (downloadDir == null || !downloadDir.isDirectory()) {
+                                Toast.makeText(TransferActivity.this, "下载目录不存在", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            java.io.File extractTmpDir = new java.io.File(
+                                    getCacheDir(),
+                                    "relay_retrieve_extract_" + gid + "_" + System.currentTimeMillis());
+                            extractTmpDir.mkdirs();
+
+                            boolean extracted = com.hippo.ehviewer.util.GZIPUtils.UnZipFolder(
+                                    zipFile.getAbsolutePath(), extractTmpDir.getAbsolutePath());
+                            zipFile.delete();
+
+                            if (!extracted) {
+                                deleteDir(extractTmpDir);
+                                Toast.makeText(TransferActivity.this, "解压失败", Toast.LENGTH_SHORT).show();
+                                return;
+                            }
+
+                            int fileCount = copyFiles(extractTmpDir, downloadDir);
+                            deleteDir(extractTmpDir);
+
+                            downloadInfo.state = com.hippo.ehviewer.dao.DownloadInfo.STATE_FINISH;
+                            downloadInfo.speed = 0;
+                            downloadInfo.remaining = 0;
+                            com.hippo.ehviewer.EhDB.putDownloadInfo(downloadInfo);
+
+                            relayTaskManager.deleteTask(task.getTaskId());
+
+                            Toast.makeText(TransferActivity.this,
+                                    "取回成功！共 " + fileCount + " 个文件", Toast.LENGTH_SHORT).show();
+                        } catch (Exception e) {
+                            Toast.makeText(TransferActivity.this,
+                                    "取回失败: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        }
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        Toast.makeText(TransferActivity.this,
+                                "取回失败: " + error, Toast.LENGTH_LONG).show();
+                    }
+                });
+    }
+
+    private ConnectedDevice findExecutorDevice(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        for (ConnectedDevice device : transferClientManager.getConnectedDevices()) {
+            if (task.getTargetDeviceId() != null
+                    && task.getTargetDeviceId().equals(device.getDeviceId())) {
+                return device;
+            }
+            if (task.getTargetDevice() != null
+                    && task.getTargetDevice().equals(device.getName())) {
+                return device;
+            }
+        }
+        return null;
+    }
+
+    private void deleteDir(java.io.File file) {
+        if (file == null || !file.exists()) return;
+        if (file.isDirectory()) {
+            java.io.File[] children = file.listFiles();
+            if (children != null) {
+                for (java.io.File child : children) {
+                    deleteDir(child);
+                }
+            }
+        }
+        file.delete();
+    }
+
+    private int copyFiles(java.io.File srcDir, com.hippo.unifile.UniFile destDir) throws java.io.IOException {
+        int count = 0;
+        java.io.File[] files = srcDir.listFiles();
+        if (files == null) return 0;
+        for (java.io.File srcFile : files) {
+            if (srcFile.isFile()) {
+                com.hippo.unifile.UniFile destFile = destDir.createFile("application/octet-stream");
+                if (destFile != null) {
+                    try (java.io.InputStream is = new java.io.FileInputStream(srcFile);
+                         java.io.OutputStream os = destFile.openOutputStream()) {
+                        byte[] buffer = new byte[8192];
+                        int len;
+                        while ((len = is.read(buffer)) > 0) {
+                            os.write(buffer, 0, len);
+                        }
+                    }
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 删除接力任务
+     */
+    private void handleRelayDelete(com.hippo.ehviewer.transfer.data.RelayTask task) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.relay_delete_task)
+                .setMessage("删除此接力任务？")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    relayTaskManager.deleteTask(task.getTaskId());
+                    Toast.makeText(this, R.string.relay_delete_task, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * 清空已完成（终态）的接力任务
+     */
+    private void handleClearCompleted() {
+        List<com.hippo.ehviewer.transfer.data.RelayTask> allTasks = relayTaskManager.getAllTasks();
+        List<com.hippo.ehviewer.transfer.data.RelayTask> terminalTasks = new ArrayList<>();
+        for (com.hippo.ehviewer.transfer.data.RelayTask task : allTasks) {
+            if (task.isTerminal()) {
+                terminalTasks.add(task);
+            }
+        }
+
+        if (terminalTasks.isEmpty()) {
+            Toast.makeText(this, "没有可清空的任务", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle("清空已完成任务")
+                .setMessage("确定要清空 " + terminalTasks.size() + " 个已完成的任务吗？")
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    for (com.hippo.ehviewer.transfer.data.RelayTask task : terminalTasks) {
+                        relayTaskManager.deleteTask(task.getTaskId());
+                    }
+                    Toast.makeText(this, "已清空 " + terminalTasks.size() + " 个任务", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     /**
@@ -403,7 +782,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
 
     private void startTransferService() {
         TransferLogger.getInstance().i(TAG, "startTransferService() 开始");
-        
+
         Intent intent = new Intent(this, TransferService.class);
         startService(intent);
 
@@ -417,18 +796,58 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         deviceDiscoveryManager.startDiscovery();
         startAutoRefresh();
 
+        // 首次启动时引导用户豁免电池优化（HyperOS/MIUI 后台限制严格）
+        maybePromptBatteryOptimization();
+
         // 延迟更新UI，等待服务启动完成
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
             updateUI();
         }, 500);
     }
 
+    /**
+     * 电池优化豁免引导（每次安装只自动提示一次）
+     * HyperOS/MIUI 默认限制后台应用，未豁免时退后台后传输服务可能被限制
+     */
+    private void maybePromptBatteryOptimization() {
+        try {
+            android.content.SharedPreferences prefs = getPreferences(Context.MODE_PRIVATE);
+            boolean prompted = prefs.getBoolean("battery_optimization_prompted", false);
+            if (prompted) {
+                return;
+            }
+            if (!com.hippo.ehviewer.util.MiuiOptimizationHelper.INSTANCE.needsAggressiveOptimization()) {
+                return;
+            }
+            if (com.hippo.ehviewer.util.MiuiOptimizationHelper.INSTANCE.isBatteryOptimizationExempted(this)) {
+                return;
+            }
+
+            prefs.edit().putBoolean("battery_optimization_prompted", true).apply();
+
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.battery_optimization_title)
+                    .setMessage(R.string.battery_optimization_message)
+                    .setPositiveButton(R.string.battery_optimization_go, (dialog, which) ->
+                            com.hippo.ehviewer.util.MiuiOptimizationHelper.INSTANCE
+                                    .requestBatteryOptimizationExemption(this))
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "电池优化引导失败", e);
+        }
+    }
+
     private void stopTransferService() {
-        Intent intent = new Intent(this, TransferService.class);
-        stopService(intent);
+        TransferLogger.getInstance().i(TAG, "stopTransferService() 开始");
 
         if (isBound && transferService != null) {
-            transferService.unregisterCallback();
+            // 通过Binder直接停止服务器：stopService()不会销毁仍有绑定客户端的服务，
+            // 导致服务器实际仍在运行、启动按钮无法恢复
+            transferService.stopTransferServer();
+        } else {
+            Intent intent = new Intent(this, TransferService.class);
+            stopService(intent);
         }
 
         // Stop device discovery
@@ -573,6 +992,18 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         remoteAccessInfo.setText(info.toString());
     }
 
+    private void updateRemoteManagementUI(boolean enabled) {
+        if (remoteManagementContent != null) {
+            remoteManagementContent.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        }
+        if (remoteOpenBrowser != null) {
+            remoteOpenBrowser.setEnabled(enabled);
+        }
+        if (remoteCopyUrl != null) {
+            remoteCopyUrl.setEnabled(enabled);
+        }
+    }
+
     private String getAuthModeName(String mode) {
         switch (mode) {
             case "password":
@@ -659,6 +1090,108 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         Toast.makeText(this, 
                 String.format("发送 %d 个%s到 %s", selectedGids.size(), type, targetDevice.getName()), 
                 Toast.LENGTH_SHORT).show();
+    }
+
+    /**
+     * 全部传输：导出数据库并推送到目标设备，接收端按导入数据处理
+     */
+    private void sendAllData() {
+        TransferLogger.getInstance().i(TAG, "sendAllData");
+
+        // 检查是否有已连接设备
+        if (transferClientManager == null || transferClientManager.getConnectedDevices().isEmpty()) {
+            Toast.makeText(this, R.string.no_connected_devices, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        List<ConnectedDevice> devices = transferClientManager.getConnectedDevices();
+        if (devices.size() == 1) {
+            confirmSendAllData(devices.get(0));
+        } else {
+            // 多台设备时弹选择对话框
+            String[] names = new String[devices.size()];
+            for (int i = 0; i < devices.size(); i++) {
+                names[i] = devices.get(i).getName()
+                        + " (" + devices.get(i).getHost() + ":" + devices.get(i).getPort() + ")";
+            }
+            new AlertDialog.Builder(this)
+                    .setTitle(R.string.select_target_device)
+                    .setItems(names, (dialog, which) -> confirmSendAllData(devices.get(which)))
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+        }
+    }
+
+    /**
+     * 发送前确认：接收端将执行数据库导入（合并）
+     */
+    private void confirmSendAllData(ConnectedDevice device) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.send_all_data)
+                .setMessage(getString(R.string.send_all_data_confirm, device.getName()))
+                .setPositiveButton(R.string.send_all_data, (dialog, which) -> doSendAllData(device))
+                .setNegativeButton(R.string.cancel, null)
+                .show();
+    }
+
+    /**
+     * 执行全部传输：后台线程导出DB -> 上传 -> 清理临时文件
+     */
+    private void doSendAllData(ConnectedDevice device) {
+        sendAllData.setEnabled(false);
+        Toast.makeText(this, R.string.send_all_data_exporting, Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            java.io.File exportFile = new java.io.File(getCacheDir(),
+                    "transfer_export_" + System.currentTimeMillis() + ".db");
+            boolean exported;
+            try {
+                exported = EhDB.exportDB(this, exportFile);
+            } catch (Exception e) {
+                TransferLogger.getInstance().e(TAG, "导出数据库失败", e);
+                exported = false;
+            }
+
+            if (!exported || !exportFile.exists()) {
+                exportFile.delete();
+                runOnUiThread(() -> {
+                    sendAllData.setEnabled(true);
+                    Toast.makeText(this, getString(R.string.send_all_data_failed, "export failed"),
+                            Toast.LENGTH_LONG).show();
+                });
+                return;
+            }
+
+            runOnUiThread(() -> Toast.makeText(this,
+                    getString(R.string.send_all_data_sending, device.getName()),
+                    Toast.LENGTH_SHORT).show());
+
+            transferClientManager.pushDatabase(device, exportFile,
+                    new TransferClientManager.PushDatabaseCallback() {
+                        @Override
+                        public void onSuccess(String message) {
+                            exportFile.delete();
+                            TransferLogger.getInstance().i(TAG, "全部传输成功: " + message);
+                            runOnUiThread(() -> {
+                                sendAllData.setEnabled(true);
+                                Toast.makeText(TransferActivity.this,
+                                        R.string.send_all_data_success, Toast.LENGTH_LONG).show();
+                            });
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            exportFile.delete();
+                            TransferLogger.getInstance().e(TAG, "全部传输失败: " + error);
+                            runOnUiThread(() -> {
+                                sendAllData.setEnabled(true);
+                                Toast.makeText(TransferActivity.this,
+                                        getString(R.string.send_all_data_failed, error),
+                                        Toast.LENGTH_LONG).show();
+                            });
+                        }
+                    });
+        }).start();
     }
 
     private void connectToDevice() {

@@ -1,34 +1,39 @@
 package com.hippo.ehviewer.ui;
 
-import android.graphics.Color;
+import android.content.Intent;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
-import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.StyleRes;
 import androidx.appcompat.app.ActionBar;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.util.NetworkDiagnosticTool;
 
-/**
- * 网站连通性测试Activity
- */
+import java.util.ArrayList;
+import java.util.List;
+
 public class NetworkDiagnosticActivity extends EhActivity {
 
     private LinearLayout container;
     private ProgressBar progressBar;
     private TextView infoText;
+    private Spinner timeoutSpinner;
+    private Button btnProgressCancel;
+    private LinearLayout progressContainer;
     private volatile boolean isRunning = false;
+    private volatile Thread diagnosticThread;
+    private int timeoutSeconds = 60;
 
     @Override
     protected int getThemeResId(int theme) {
@@ -48,7 +53,6 @@ public class NetworkDiagnosticActivity extends EhActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_network_diagnostic);
 
-        // 设置ActionBar
         ActionBar actionBar = getSupportActionBar();
         if (actionBar != null) {
             actionBar.setTitle(R.string.network_diagnostic_title);
@@ -58,68 +62,103 @@ public class NetworkDiagnosticActivity extends EhActivity {
         container = findViewById(R.id.diagnostic_container);
         progressBar = findViewById(R.id.diagnostic_progress);
         infoText = findViewById(R.id.network_info_text);
+        timeoutSpinner = findViewById(R.id.timeout_spinner);
+        progressContainer = findViewById(R.id.progress_bar_container);
+        btnProgressCancel = findViewById(R.id.btn_cancel);
 
-        // 显示当前网络信息
-        NetworkDiagnosticTool.NetworkInfo networkInfo = 
-            NetworkDiagnosticTool.getNetworkInfo(this);
+        timeoutSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                timeoutSeconds = Integer.parseInt(parent.getItemAtPosition(position).toString());
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        timeoutSpinner.setSelection(2);
+
+        btnProgressCancel.setOnClickListener(v -> cancelDiagnostic());
+
+        NetworkDiagnosticTool.NetworkInfo networkInfo =
+                NetworkDiagnosticTool.getNetworkInfo(this);
         updateNetworkInfoDisplay(networkInfo);
 
-        // 开始诊断
+        addAdvancedButton();
         startDiagnostic();
     }
 
     private void updateNetworkInfoDisplay(NetworkDiagnosticTool.NetworkInfo info) {
-        String status = info.isConnected ? 
-            getString(R.string.network_status_connected) : 
-            getString(R.string.network_status_disconnected);
+        String status = info.isConnected ?
+                getString(R.string.network_status_connected) :
+                getString(R.string.network_status_disconnected);
         String text = String.format(getString(R.string.network_info_format),
                 status, info.networkType, info.currentIP);
         infoText.setText(text);
+    }
+
+    private void cancelDiagnostic() {
+        if (diagnosticThread != null) {
+            diagnosticThread.interrupt();
+        }
     }
 
     private void startDiagnostic() {
         if (isRunning) return;
         isRunning = true;
 
-        progressBar.setVisibility(View.VISIBLE);
-        container.removeAllViews();
+        progressContainer.setVisibility(View.VISIBLE);
 
-        // 在后台线程执行诊断
-        new Thread(() -> {
+        diagnosticThread = new Thread(() -> {
             String[] domains = {"e-hentai.org", "exhentai.org"};
+            String[] outerDomains = {"ehgt.org", "forums.e-hentai.org", "ehwiki.org"};
             try {
-                java.util.List<NetworkDiagnosticTool.SiteInfo> results = 
-                    NetworkDiagnosticTool.checkMultipleSites(domains);
+                List<NetworkDiagnosticTool.SiteInfo> results =
+                        NetworkDiagnosticTool.checkMultipleSites(domains, timeoutSeconds);
+                if (Thread.currentThread().isInterrupted()) {
+                    runOnUiThread(() -> onDiagnosticCancelled());
+                    return;
+                }
+                List<NetworkDiagnosticTool.SiteInfo> outerResults =
+                        NetworkDiagnosticTool.checkMultipleSites(outerDomains, timeoutSeconds);
 
                 runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
+                    progressContainer.setVisibility(View.GONE);
+                    container.removeAllViews();
                     displayResults(results);
+                    displayOuterResults(outerResults);
+                    addAdvancedButton();
                     isRunning = false;
+                    diagnosticThread = null;
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    Toast.makeText(NetworkDiagnosticActivity.this, 
-                        getString(R.string.diagnostic_error, e.getMessage()), 
-                        Toast.LENGTH_LONG).show();
+                    progressContainer.setVisibility(View.GONE);
+                    Toast.makeText(NetworkDiagnosticActivity.this,
+                            getString(R.string.diagnostic_error, e.getMessage()),
+                            Toast.LENGTH_LONG).show();
                     isRunning = false;
+                    diagnosticThread = null;
                 });
             }
-        }).start();
+        });
+        diagnosticThread.start();
     }
 
-    private void displayResults(java.util.List<NetworkDiagnosticTool.SiteInfo> results) {
-        container.removeAllViews();
+    private void onDiagnosticCancelled() {
+        progressContainer.setVisibility(View.GONE);
+        isRunning = false;
+        diagnosticThread = null;
+        Toast.makeText(this, R.string.diagnostic_cancelled, Toast.LENGTH_SHORT).show();
+    }
 
+    private void displayResults(List<NetworkDiagnosticTool.SiteInfo> results) {
         for (NetworkDiagnosticTool.SiteInfo site : results) {
             View itemView = LayoutInflater.from(this).inflate(
                     R.layout.item_diagnostic_result, container, false);
 
-            // 域名
             TextView domainText = itemView.findViewById(R.id.site_domain);
             domainText.setText(site.domain);
 
-            // IP地址
             TextView ipText = itemView.findViewById(R.id.site_ip);
             if ("FAILED".equals(site.resolvedIP)) {
                 ipText.setText(R.string.dns_resolution_failed);
@@ -129,7 +168,6 @@ public class NetworkDiagnosticActivity extends EhActivity {
                 ipText.setTextColor(getTextSecondaryColor());
             }
 
-            // 可访问性状态
             TextView statusText = itemView.findViewById(R.id.site_status);
             if (site.isAccessible) {
                 statusText.setText(getString(R.string.site_accessible, site.responseTime));
@@ -144,23 +182,85 @@ public class NetworkDiagnosticActivity extends EhActivity {
 
             container.addView(itemView);
         }
-
-        // 添加刷新按钮
-        addRefreshButton();
     }
 
-    private void addRefreshButton() {
+    private void displayOuterResults(List<NetworkDiagnosticTool.SiteInfo> outerResults) {
+        TextView sectionHeader = new TextView(this);
+        sectionHeader.setText(R.string.diagnostic_outer_section);
+        sectionHeader.setTextSize(16);
+        sectionHeader.setTextColor(getTextPrimaryColor());
+        LinearLayout.LayoutParams headerParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        headerParams.setMargins(0, 24, 0, 8);
+        sectionHeader.setLayoutParams(headerParams);
+        container.addView(sectionHeader);
+
+        for (NetworkDiagnosticTool.SiteInfo site : outerResults) {
+            View itemView = LayoutInflater.from(this).inflate(
+                    R.layout.item_diagnostic_result, container, false);
+
+            TextView domainText = itemView.findViewById(R.id.site_domain);
+            domainText.setText(site.domain);
+
+            TextView ipText = itemView.findViewById(R.id.site_ip);
+            if ("FAILED".equals(site.resolvedIP)) {
+                ipText.setText(R.string.dns_resolution_failed);
+                ipText.setTextColor(getErrorColor());
+            } else {
+                ipText.setText(getString(R.string.ip_address_format, site.resolvedIP));
+                ipText.setTextColor(getTextSecondaryColor());
+            }
+
+            TextView statusText = itemView.findViewById(R.id.site_status);
+            if (site.isAccessible) {
+                statusText.setText(getString(R.string.site_accessible, site.responseTime));
+                statusText.setTextColor(getSuccessColor());
+            } else {
+                statusText.setText(R.string.site_inaccessible);
+                statusText.setTextColor(getErrorColor());
+                if (site.error != null) {
+                    statusText.setText(statusText.getText() + " (" + site.error + ")");
+                }
+            }
+
+            container.addView(itemView);
+        }
+    }
+
+    private void addAdvancedButton() {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, 32, 0, 0);
+        params.setMargins(0, 24, 0, 8);
+
+        android.widget.Button advancedBtn = new android.widget.Button(this);
+        advancedBtn.setText(R.string.diagnostic_advanced_api);
+        advancedBtn.setLayoutParams(params);
+        advancedBtn.setOnClickListener(v -> {
+            Intent intent = new Intent(this, NetworkApiDiagnosticActivity.class);
+            intent.putExtra("timeout_seconds", timeoutSeconds);
+            startActivity(intent);
+        });
+        container.addView(advancedBtn);
 
         android.widget.Button refreshBtn = new android.widget.Button(this);
         refreshBtn.setText(R.string.refresh_diagnostic);
-        refreshBtn.setLayoutParams(params);
+        LinearLayout.LayoutParams refreshParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        refreshParams.setMargins(0, 8, 0, 0);
+        refreshBtn.setLayoutParams(refreshParams);
         refreshBtn.setOnClickListener(v -> startDiagnostic());
-
         container.addView(refreshBtn);
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (diagnosticThread != null) {
+            diagnosticThread.interrupt();
+        }
     }
 
     @Override
@@ -170,18 +270,22 @@ public class NetworkDiagnosticActivity extends EhActivity {
     }
 
     private int getErrorColor() {
-        // 使用红色作为错误颜色，兼容所有Android版本
         return getResources().getColor(android.R.color.holo_red_light);
     }
 
     private int getSuccessColor() {
-        // 使用绿色作为成功颜色
         return getResources().getColor(android.R.color.holo_green_light);
     }
 
     private int getTextSecondaryColor() {
         TypedValue typedValue = new TypedValue();
         getTheme().resolveAttribute(android.R.attr.textColorSecondary, typedValue, true);
+        return typedValue.data;
+    }
+
+    private int getTextPrimaryColor() {
+        TypedValue typedValue = new TypedValue();
+        getTheme().resolveAttribute(android.R.attr.textColorPrimary, typedValue, true);
         return typedValue.data;
     }
 }

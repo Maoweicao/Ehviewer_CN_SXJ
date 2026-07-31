@@ -2,6 +2,7 @@ package com.hippo.ehviewer.task.impl
 
 import android.content.Context
 import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.task.BackgroundTask
 import com.hippo.ehviewer.task.TaskState
 import com.hippo.ehviewer.BackgroundTaskManager
@@ -107,6 +108,20 @@ abstract class BaseBackgroundTask(
      */
     protected fun notifyCancelled() {
         updateState(TaskState.CANCELLED)
+    }
+
+    /**
+     * 返回互斥分组键。默认返回下载目录的 URI 字符串。
+     * 操作同一个目录的任务会互斥排队，操作不同目录的任务可以独立运行。
+     * 子类如果操作用于其他目录（如导出到 logcat / 备份数据库），
+     * 应覆盖此方法返回 null 或对应的目录路径。
+     */
+    override fun getMutexGroup(): String? {
+        return try {
+            Settings.getDownloadLocation()?.uri?.toString()
+        } catch (e: Exception) {
+            null
+        }
     }
     
     override suspend fun cancel() {

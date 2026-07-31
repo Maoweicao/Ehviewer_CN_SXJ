@@ -21,14 +21,17 @@ import java.util.concurrent.Future;
  * 用于存储和管理后台任务的状态信息
  */
 public class BackgroundTaskInfo {
+    private static final int MAX_LOG_MESSAGES = 1000;
+
     private final String taskId;
     private final String taskName;
     private final String taskDescription;
-    private final Future<?> future;
+    private volatile Future<?> future;
     private final BackgroundTask.TaskType taskType;
     private final boolean uniqueTask;
     private final String taskClassName;
     private final String taskPersistData;
+    private final String mutexGroup;
     private final long startTime;
     private volatile int currentProgress;
     private volatile int totalProgress;
@@ -45,7 +48,7 @@ public class BackgroundTaskInfo {
                              @Nullable String taskDescription, @Nullable Future<?> future,
                              @NonNull BackgroundTask.TaskType taskType, boolean uniqueTask,
                              @NonNull String taskClassName, @Nullable String taskPersistData,
-                             long startTime) {
+                             @Nullable String mutexGroup, long startTime) {
         this.taskId = taskId;
         this.taskName = taskName;
         this.taskDescription = taskDescription;
@@ -54,6 +57,7 @@ public class BackgroundTaskInfo {
         this.uniqueTask = uniqueTask;
         this.taskClassName = taskClassName;
         this.taskPersistData = taskPersistData;
+        this.mutexGroup = mutexGroup;
         this.startTime = startTime;
         this.currentProgress = 0;
         this.totalProgress = -1; // -1 表示不确定进度
@@ -87,6 +91,10 @@ public class BackgroundTaskInfo {
         return future;
     }
 
+    public void setFuture(@Nullable Future<?> future) {
+        this.future = future;
+    }
+
     @NonNull
     public BackgroundTask.TaskType getTaskType() {
         return taskType;
@@ -104,6 +112,11 @@ public class BackgroundTaskInfo {
 
     public boolean isUniqueTask() {
         return uniqueTask;
+    }
+
+    @Nullable
+    public String getMutexGroup() {
+        return mutexGroup;
     }
 
     public long getStartTime() {
@@ -194,6 +207,29 @@ public class BackgroundTaskInfo {
         return System.currentTimeMillis() - startTime;
     }
 
+    /**
+     * 估算剩余时间（毫秒）
+     * 返回 -1 表示无法估算（无确定进度、已暂停、已完成、刚开始运行）
+     */
+    public long getEstimatedRemainingTime() {
+        if (currentProgress <= 0 || totalProgress <= 0 || currentProgress >= totalProgress) {
+            return -1;
+        }
+        if (isPaused || isCompleted || isCancelled || isQueued) {
+            return -1;
+        }
+        long elapsed = System.currentTimeMillis() - startTime;
+        if (elapsed < 3000) {
+            return -1;
+        }
+        double progressRate = (double) currentProgress / elapsed;
+        if (progressRate <= 0) {
+            return -1;
+        }
+        double remaining = totalProgress - currentProgress;
+        return (long) (remaining / progressRate);
+    }
+
     public void setLogFile(@Nullable File file) {
         this.logFile = file;
     }
@@ -206,6 +242,9 @@ public class BackgroundTaskInfo {
     public void appendLog(@NonNull String message) {
         String stamped = stampMessage(message);
         logMessages.add(stamped);
+        while (logMessages.size() > MAX_LOG_MESSAGES) {
+            logMessages.remove(0);
+        }
 
         File target = logFile;
         if (target != null) {
@@ -219,6 +258,20 @@ public class BackgroundTaskInfo {
 
     public void addLogMessage(@NonNull String message) {
         logMessages.add(message);
+        while (logMessages.size() > MAX_LOG_MESSAGES) {
+            logMessages.remove(0);
+        }
+    }
+
+    @NonNull
+    public List<String> getRecentLogs(int count) {
+        synchronized (logMessages) {
+            int size = logMessages.size();
+            if (size <= count) {
+                return new ArrayList<>(logMessages);
+            }
+            return new ArrayList<>(logMessages.subList(size - count, size));
+        }
     }
 
     @NonNull

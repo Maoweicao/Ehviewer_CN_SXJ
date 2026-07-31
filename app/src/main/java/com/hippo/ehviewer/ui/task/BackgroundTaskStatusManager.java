@@ -17,12 +17,17 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Deque;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -40,10 +45,195 @@ public class BackgroundTaskStatusManager {
 
     // 存储所有活跃的任务
     private final Map<String, BackgroundTaskInfo> mActiveTasks = new ConcurrentHashMap<>();
-    // 存储已完成的任务（保留最近的一些）
-    private final Map<String, BackgroundTaskInfo> mCompletedTasks = new ConcurrentHashMap<>();
+    // 存储已完成的任务（保留最近的一些），LinkedHashMap 保证按插入顺序以实现可预测的最旧条目淘汰
+    private final Map<String, BackgroundTaskInfo> mCompletedTasks = Collections.synchronizedMap(new LinkedHashMap<>());
     // 最大保留的已完成任务数量
     private static final int MAX_COMPLETED_TASKS = 50;
+    // 互斥任务等待队列（仅内存，进程重启后清空）
+    private final Deque<PendingUniqueTask> mUniqueWaitQueue = new ArrayDeque<>();
+    // 互斥等待队列变更监听器（由 BackgroundTaskManager 设置，用于在槽位释放时启动下一任务）
+    public interface UniqueWaitListener {
+        void onUniqueTaskPromotable();
+    }
+    private volatile UniqueWaitListener mUniqueWaitListener;
+
+    /**
+     * 互斥等待队列条目。仅在内存中保留，进程重启即丢失。
+     */
+    public static final class PendingUniqueTask {
+        private final String taskId;
+        private final String taskName;
+        private final String taskDescription;
+        private final BackgroundTask.TaskType taskType;
+        private final boolean uniqueTask;
+        private final String taskClassName;
+        private final String taskPersistData;
+        private final BackgroundTask task;
+
+        public PendingUniqueTask(@NonNull BackgroundTask task) {
+            this.taskId = task.getTaskId();
+            this.taskName = task.getTaskName();
+            this.taskDescription = task.getTaskDescription();
+            this.taskType = task.getTaskType();
+            this.uniqueTask = task.isUniqueTask();
+            this.taskClassName = task.getTaskClassName();
+            this.taskPersistData = task.getTaskPersistData();
+            this.task = task;
+        }
+
+        @NonNull public String getTaskId() { return taskId; }
+        @NonNull public String getTaskName() { return taskName; }
+        @Nullable public String getTaskDescription() { return taskDescription; }
+        @NonNull public BackgroundTask.TaskType getTaskType() { return taskType; }
+        public boolean isUniqueTask() { return uniqueTask; }
+        @NonNull public String getTaskClassName() { return taskClassName; }
+        @Nullable public String getTaskPersistData() { return taskPersistData; }
+        @NonNull public BackgroundTask getTask() { return task; }
+    }
+
+    /**
+     * 任务变更监听器
+     */
+    public interface TaskChangeListener {
+        default void onTaskAdded(String taskId) {}
+        default void onTaskProgressChanged(String taskId) {}
+        default void onTaskStateChanged(String taskId) {}
+        default void onTaskRemoved(String taskId) {}
+    }
+
+    private final List<TaskChangeListener> mChangeListeners = new CopyOnWriteArrayList<>();
+
+    public void addTaskChangeListener(@NonNull TaskChangeListener listener) {
+        if (!mChangeListeners.contains(listener)) {
+            mChangeListeners.add(listener);
+        }
+    }
+
+    public void removeTaskChangeListener(@NonNull TaskChangeListener listener) {
+        mChangeListeners.remove(listener);
+    }
+
+    /**
+     * 注册互斥等待队列的监听器。当任意 unique 任务结束时，会通过该监听器通知
+     * BackgroundTaskManager 启动队列中的下一任务。仅保留最近设置的监听器。
+     */
+    public void setUniqueWaitListener(@Nullable UniqueWaitListener listener) {
+        this.mUniqueWaitListener = listener;
+    }
+
+    /**
+     * 将互斥任务加入等待队列并在活跃表中创建一条占位（isQueued=true，无 Future）。
+     * 返回创建的 taskId；若同名 taskId 已存在则返回 null。
+     */
+    @Nullable
+    public synchronized String enqueueUniqueWaitingTask(@NonNull PendingUniqueTask pending) {
+        String taskId = pending.getTaskId();
+        if (mActiveTasks.containsKey(taskId) || mCompletedTasks.containsKey(taskId)) {
+            return null;
+        }
+        BackgroundTaskInfo info = new BackgroundTaskInfo(
+                taskId, pending.getTaskName(), pending.getTaskDescription(), null,
+                pending.getTaskType(), pending.isUniqueTask(),
+                pending.getTaskClassName(), pending.getTaskPersistData(),
+                pending.getTask().getMutexGroup(), System.currentTimeMillis());
+        info.setQueued(true);
+        File logFile = createTaskLogFile(taskId);
+        if (logFile != null) {
+            info.setLogFile(logFile);
+        }
+        mActiveTasks.put(taskId, info);
+        mUniqueWaitQueue.addLast(pending);
+        savePersistedTasksAsync();
+        notifyTaskAdded(taskId);
+        return taskId;
+    }
+
+    /**
+     * 取出队首的待启动互斥任务，并把它在 mActiveTasks 中的条目标记为运行中（清 queued）。
+     * 若队列为空则返回 null。
+     */
+    @Nullable
+    public synchronized PendingUniqueTask pollNextUniqueWaitingTask() {
+        PendingUniqueTask head = mUniqueWaitQueue.pollFirst();
+        if (head == null) {
+            return null;
+        }
+        BackgroundTaskInfo info = mActiveTasks.get(head.getTaskId());
+        if (info != null) {
+            info.setQueued(false);
+            notifyTaskStateChanged(head.getTaskId());
+        }
+        return head;
+    }
+
+    /**
+     * 从等待队列中按 taskId 移除（用于取消一个仍排队中的任务）。
+     * 同时从 mActiveTasks 中移除占位条目。
+     */
+    public synchronized boolean removeFromUniqueWaitQueue(@NonNull String taskId) {
+        Iterator<PendingUniqueTask> it = mUniqueWaitQueue.iterator();
+        boolean removed = false;
+        while (it.hasNext()) {
+            if (taskId.equals(it.next().getTaskId())) {
+                it.remove();
+                removed = true;
+                break;
+            }
+        }
+        if (removed) {
+            BackgroundTaskInfo info = mActiveTasks.remove(taskId);
+            if (info != null) {
+                savePersistedTasksAsync();
+                notifyTaskRemoved(taskId);
+            }
+        }
+        return removed;
+    }
+
+    /**
+     * 仅从已完成队列移除指定 taskId，不影响活跃任务。
+     * 返回是否真的移除了一条记录。
+     */
+    public synchronized boolean removeFromCompleted(@NonNull String taskId) {
+        BackgroundTaskInfo removed = mCompletedTasks.remove(taskId);
+        if (removed != null) {
+            savePersistedTasksAsync();
+            notifyTaskRemoved(taskId);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 当前互斥等待队列大小（仅 UI 展示用）。
+     */
+    public synchronized int getUniqueWaitQueueSize() {
+        return mUniqueWaitQueue.size();
+    }
+
+    private void notifyTaskAdded(String taskId) {
+        for (TaskChangeListener l : mChangeListeners) {
+            l.onTaskAdded(taskId);
+        }
+    }
+
+    private void notifyTaskProgressChanged(String taskId) {
+        for (TaskChangeListener l : mChangeListeners) {
+            l.onTaskProgressChanged(taskId);
+        }
+    }
+
+    private void notifyTaskStateChanged(String taskId) {
+        for (TaskChangeListener l : mChangeListeners) {
+            l.onTaskStateChanged(taskId);
+        }
+    }
+
+    private void notifyTaskRemoved(String taskId) {
+        for (TaskChangeListener l : mChangeListeners) {
+            l.onTaskRemoved(taskId);
+        }
+    }
 
     private final File mStatusFile;
     private final File mLogDir;
@@ -104,6 +294,12 @@ public class BackgroundTaskStatusManager {
     public String addTask(@NonNull String taskId, @NonNull String taskName, @Nullable String taskDescription,
                           @Nullable Future<?> future, @NonNull BackgroundTask.TaskType taskType, boolean uniqueTask,
                           @NonNull String taskClassName, @Nullable String taskPersistData) {
+        return addTask(taskId, taskName, taskDescription, future, taskType, uniqueTask, taskClassName, taskPersistData, null);
+    }
+
+    public String addTask(@NonNull String taskId, @NonNull String taskName, @Nullable String taskDescription,
+                          @Nullable Future<?> future, @NonNull BackgroundTask.TaskType taskType, boolean uniqueTask,
+                          @NonNull String taskClassName, @Nullable String taskPersistData, @Nullable String mutexGroup) {
         if (uniqueTask && taskType != BackgroundTask.TaskType.DOWNLOAD) {
             BackgroundTaskInfo activeUnique = getActiveUniqueNonDownloadTask();
             if (activeUnique != null) {
@@ -112,7 +308,7 @@ public class BackgroundTaskStatusManager {
         }
 
         BackgroundTaskInfo taskInfo = new BackgroundTaskInfo(taskId, taskName, taskDescription, future, taskType,
-                uniqueTask, taskClassName, taskPersistData, System.currentTimeMillis());
+                uniqueTask, taskClassName, taskPersistData, mutexGroup, System.currentTimeMillis());
         taskInfo.setQueued(future != null);
         File logFile = createTaskLogFile(taskId);
         if (logFile != null) {
@@ -120,7 +316,26 @@ public class BackgroundTaskStatusManager {
         }
         mActiveTasks.put(taskId, taskInfo);
         savePersistedTasksAsync();
+        notifyTaskAdded(taskId);
         return taskId;
+    }
+
+    /**
+     * 查找与指定 mutexGroup 冲突的活跃任务（同组且 unique 且非 DOWNLOAD）。
+     * mutexGroup 为 null 时始终返回 null（不参与互斥）。
+     */
+    @Nullable
+    public BackgroundTaskInfo getActiveConflictTask(@Nullable String mutexGroup) {
+        if (mutexGroup == null) return null;
+        for (BackgroundTaskInfo info : mActiveTasks.values()) {
+            if (info.isUniqueTask() && info.getTaskType() != BackgroundTask.TaskType.DOWNLOAD) {
+                String otherGroup = info.getMutexGroup();
+                if (mutexGroup.equals(otherGroup)) {
+                    return info;
+                }
+            }
+        }
+        return null;
     }
 
     @Nullable
@@ -155,6 +370,7 @@ public class BackgroundTaskStatusManager {
                 total
             );
             savePersistedTasksAsync();
+            notifyTaskProgressChanged(taskId);
         }
     }
 
@@ -170,6 +386,7 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.appendLog(message);
             savePersistedTasksAsync();
+            notifyTaskProgressChanged(taskId);
         }
     }
     
@@ -184,17 +401,14 @@ public class BackgroundTaskStatusManager {
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
+            evictCompletedIfOverLimit();
 
-            // 限制已完成任务的数量
-            if (mCompletedTasks.size() > MAX_COMPLETED_TASKS) {
-                // 移除最旧的任务
-                String oldestTaskId = mCompletedTasks.keySet().iterator().next();
-                mCompletedTasks.remove(oldestTaskId);
-            }
             savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+            notifyUniqueSlotFreed();
         }
     }
-    
+
     /**
      * 标记任务取消
      */
@@ -206,17 +420,14 @@ public class BackgroundTaskStatusManager {
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
+            evictCompletedIfOverLimit();
 
-            // 限制已完成任务的数量
-            if (mCompletedTasks.size() > MAX_COMPLETED_TASKS) {
-                // 移除最旧的任务
-                String oldestTaskId = mCompletedTasks.keySet().iterator().next();
-                mCompletedTasks.remove(oldestTaskId);
-            }
             savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+            notifyUniqueSlotFreed();
         }
     }
-    
+
     /**
      * 标记任务出错
      */
@@ -228,14 +439,32 @@ public class BackgroundTaskStatusManager {
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
+            evictCompletedIfOverLimit();
 
-            // 限制已完成任务的数量
-            if (mCompletedTasks.size() > MAX_COMPLETED_TASKS) {
-                // 移除最旧的任务
-                String oldestTaskId = mCompletedTasks.keySet().iterator().next();
-                mCompletedTasks.remove(oldestTaskId);
-            }
             savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+            notifyUniqueSlotFreed();
+        }
+    }
+
+    private void evictCompletedIfOverLimit() {
+        synchronized (mCompletedTasks) {
+            while (mCompletedTasks.size() > MAX_COMPLETED_TASKS) {
+                Iterator<String> it = mCompletedTasks.keySet().iterator();
+                if (!it.hasNext()) break;
+                it.next();
+                it.remove();
+            }
+        }
+    }
+
+    private void notifyUniqueSlotFreed() {
+        UniqueWaitListener listener = mUniqueWaitListener;
+        if (listener != null && !mUniqueWaitQueue.isEmpty()) {
+            try {
+                listener.onUniqueTaskPromotable();
+            } catch (Exception ignored) {
+            }
         }
     }
     
@@ -250,6 +479,7 @@ public class BackgroundTaskStatusManager {
         taskInfo.setQueued(false);
         taskInfo.setPaused(true);
         savePersistedTasksAsync();
+        notifyTaskStateChanged(taskId);
         return true;
     }
 
@@ -259,6 +489,7 @@ public class BackgroundTaskStatusManager {
             taskInfo.setQueued(false);
             taskInfo.setPaused(false);
             savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
         }
     }
 
@@ -270,6 +501,7 @@ public class BackgroundTaskStatusManager {
                 taskInfo.setProgressDetail(detail);
             }
             savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
         }
     }
 
@@ -287,26 +519,45 @@ public class BackgroundTaskStatusManager {
     }
 
     /**
-     * 取消指定任务
+     * 取消指定任务。
+     * <p>若任务仍在等待队列中（isQueued=true 且无 Future），会直接从队列和活跃表中移除；<br>
+     * 若任务正在运行，会尝试中断 Future；<br>
+     * 若 Future 已 done，按"已结束"对待，把任务直接移到已完成列表以保证 UI 一致性。
      */
     public boolean cancelTask(@NonNull String taskId) {
         BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
-        if (taskInfo != null) {
-            boolean cancelled = taskInfo.cancel();
-            if (cancelled) {
-                mActiveTasks.remove(taskId);
-                mCompletedTasks.put(taskId, taskInfo);
-
-                // 限制已完成任务的数量
-                if (mCompletedTasks.size() > MAX_COMPLETED_TASKS) {
-                    String oldestTaskId = mCompletedTasks.keySet().iterator().next();
-                    mCompletedTasks.remove(oldestTaskId);
-                }
-                savePersistedTasksAsync();
-            }
-            return cancelled;
+        if (taskInfo == null) {
+            return false;
         }
-        return false;
+        // 排队中的 unique 任务：直接出队
+        if (taskInfo.isQueued() && taskInfo.getFuture() == null) {
+            boolean removed = removeFromUniqueWaitQueue(taskId);
+            if (removed) {
+                notifyUniqueSlotFreed();
+            }
+            return removed;
+        }
+        boolean cancelled = taskInfo.cancel();
+        Future<?> future = taskInfo.getFuture();
+        if (cancelled) {
+            mActiveTasks.remove(taskId);
+            taskInfo.setCancelled(true);
+            mCompletedTasks.put(taskId, taskInfo);
+            evictCompletedIfOverLimit();
+            savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+            notifyUniqueSlotFreed();
+        } else if (future != null && future.isDone()) {
+            // Future 已完成但 cancel 返回 false：把任务从 active 移到 completed，避免持续显示为运行中
+            mActiveTasks.remove(taskId);
+            taskInfo.setCancelled(true);
+            mCompletedTasks.put(taskId, taskInfo);
+            evictCompletedIfOverLimit();
+            savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+            notifyUniqueSlotFreed();
+        }
+        return cancelled;
     }
 
     /**
@@ -318,22 +569,26 @@ public class BackgroundTaskStatusManager {
     }
 
     /**
-     * 取消所有活跃任务并清空所有任务记录
+     * 取消所有活跃任务并清空所有任务记录。
+     * <p>先把所有 active 条目一次性从 mActiveTasks 拆走，再统一清空 mCompletedTasks，
+     * 避免 put-then-clear 之间的 UI 监听器看到幽灵条目。
      */
     public void clearAllTasks() {
-        List<String> taskIds = new ArrayList<>(mActiveTasks.keySet());
-        for (String taskId : taskIds) {
-            boolean cancelled = cancelTask(taskId);
-            if (!cancelled) {
-                BackgroundTaskInfo taskInfo = mActiveTasks.remove(taskId);
-                if (taskInfo != null) {
-                    taskInfo.setCancelled(true);
-                    mCompletedTasks.put(taskId, taskInfo);
-                }
+        List<BackgroundTaskInfo> snapshot = new ArrayList<>(mActiveTasks.values());
+        mActiveTasks.clear();
+        for (BackgroundTaskInfo info : snapshot) {
+            info.setCancelled(true);
+            Future<?> future = info.getFuture();
+            if (future != null && !future.isDone()) {
+                future.cancel(true);
             }
         }
+        mUniqueWaitQueue.clear();
         mCompletedTasks.clear();
         savePersistedTasksAsync();
+        for (BackgroundTaskInfo info : snapshot) {
+            notifyTaskRemoved(info.getTaskId());
+        }
     }
 
     @NonNull
@@ -369,6 +624,15 @@ public class BackgroundTaskStatusManager {
         }
         return new ArrayList<>();
     }
+
+    @NonNull
+    public List<String> getRecentTaskLogs(@NonNull String taskId, int count) {
+        BackgroundTaskInfo taskInfo = getTaskInfo(taskId);
+        if (taskInfo != null) {
+            return taskInfo.getRecentLogs(count);
+        }
+        return new ArrayList<>();
+    }
     
     /**
      * 获取活跃任务数量
@@ -384,10 +648,15 @@ public class BackgroundTaskStatusManager {
         return mActiveTasks.size() + mCompletedTasks.size();
     }
 
+    /**
+     * 完全移除指定任务：同时从活跃表与已完成表删除记录。仅用于任务恢复等需要彻底清理的场景。
+     * <p>若只想从已完成列表中移出，请改用 {@link #removeFromCompleted(String)}。
+     */
     public void removeTask(@NonNull String taskId) {
         mActiveTasks.remove(taskId);
         mCompletedTasks.remove(taskId);
         savePersistedTasksAsync();
+        notifyTaskRemoved(taskId);
     }
 
     private File createTaskLogFile(@NonNull String taskId) {
@@ -511,7 +780,7 @@ public class BackgroundTaskStatusManager {
             String taskPersistData = object.optString("taskPersistData", null);
             BackgroundTaskInfo taskInfo = new BackgroundTaskInfo(taskId, taskName, taskDescription,
                     null, taskType, uniqueTask, taskClassName, taskPersistData,
-                    object.optLong("startTime", System.currentTimeMillis()));
+                    null, object.optLong("startTime", System.currentTimeMillis()));
             taskInfo.setCurrentProgress(object.optInt("currentProgress", taskInfo.getCurrentProgress()));
             taskInfo.setTotalProgress(object.optInt("totalProgress", taskInfo.getTotalProgress()));
             taskInfo.setProgressDetail(object.optString("progressDetail", taskInfo.getProgressDetail()));

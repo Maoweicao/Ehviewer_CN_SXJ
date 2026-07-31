@@ -4,28 +4,26 @@ import android.content.Context
 import android.util.Log
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.local.LocalGalleryManager
+import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 
 class ScanRecycleBinTask(
-    private val context: Context
-) : BackgroundTask {
+    context: Context
+) : BaseBackgroundTask(context) {
 
     companion object {
         private const val TAG = "ScanRecycleBinTask"
     }
 
-    private val taskId = "scan_recycle_bin_${System.currentTimeMillis()}"
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var progressListener: BackgroundTask.ProgressListener? = null
 
-    private var currentProgress = 0
     private var totalProgress = 0
 
-    override fun getTaskId(): String = taskId
+    override fun getTaskId(): String = "scan_recycle_bin"
 
     override fun getTaskName(): String = context.getString(R.string.recycle_bin_scan_task_name)
 
@@ -35,7 +33,9 @@ class ScanRecycleBinTask(
 
     override suspend fun execute(): Result<Unit> {
         return try {
+            updateState(TaskState.RUNNING)
             Log.d(TAG, "Start recycle bin scan")
+            appendTaskLog("开始扫描回收站")
             coroutineContext[Job]?.ensureActive()
 
             val manager = LocalGalleryManager.getInstance(context)
@@ -44,17 +44,18 @@ class ScanRecycleBinTask(
 
             val listener = object : LocalGalleryManager.LocalGalleryListener {
                 override fun onScanStart() {
-                    // no-op
+                    appendTaskLog("扫描开始")
                 }
 
                 override fun onScanProgress(current: String) {
                     if (isCancelled) return
                     val progressDetail = context.getString(R.string.recycle_bin_scan_progress_simple, 0, 0)
-                    progressListener?.onProgressChanged(-1, progressDetail)
+                    updateProgress(-1, progressDetail)
                 }
 
                 override fun onScanComplete(localGalleries: List<com.hippo.ehviewer.client.data.LocalGalleryInfo>, recycleBinGalleries: List<com.hippo.ehviewer.client.data.LocalGalleryInfo>) {
                     recycleResults.set(recycleBinGalleries)
+                    appendTaskLog("扫描完成，发现 ${recycleBinGalleries.size} 个回收站画廊")
                     latch.countDown()
                 }
 
@@ -84,11 +85,16 @@ class ScanRecycleBinTask(
                 throw CancellationException("Task cancelled")
             }
 
+            notifyCompleted()
             Result.success(Unit)
         } catch (e: CancellationException) {
+            appendTaskLog("任务已取消")
+            notifyCancelled()
             Result.failure(e)
         } catch (e: Exception) {
             Log.e(TAG, "Recycle bin scan failed", e)
+            appendTaskLog("扫描失败: ${e.message}")
+            notifyError(e)
             Result.failure(e)
         }
     }
@@ -97,30 +103,23 @@ class ScanRecycleBinTask(
 
     override suspend fun pause() {
         isPaused = true
+        updateState(TaskState.PAUSED)
+        appendTaskLog("任务已暂停")
     }
 
     override suspend fun resume() {
         isPaused = false
+        updateState(TaskState.RUNNING)
+        appendTaskLog("任务已恢复")
     }
 
     override suspend fun cancel() {
         isCancelled = true
         isPaused = false
-    }
-
-    override fun getProgress(): Int {
-        return if (totalProgress > 0) {
-            currentProgress * 100 / totalProgress
-        } else {
-            -1
-        }
+        notifyCancelled()
     }
 
     override fun getProgressDetail(): String? {
         return if (totalProgress > 0) "$currentProgress/$totalProgress" else null
-    }
-
-    override fun setProgressListener(listener: BackgroundTask.ProgressListener?) {
-        progressListener = listener
     }
 }

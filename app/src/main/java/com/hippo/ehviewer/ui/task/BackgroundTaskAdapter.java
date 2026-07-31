@@ -170,8 +170,10 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         private final TextView mNameText;
         private final TextView mDescriptionText;
         private final TextView mProgressText;
+        private final TextView mEtaText;
         private final TextView mTimeText;
         private final TextView mStatusText;
+        private final TextView mUniqueBadge;
         private final ProgressBar mProgressBar;
         private final View mActionsContainer;
         private final Button mBtnPause;
@@ -180,14 +182,17 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         private final Button mBtnDelete;
         
         private BackgroundTaskInfo mTaskInfo;
+        private boolean mIsCompletedSection;
         
         public TaskViewHolder(@NonNull View itemView) {
             super(itemView);
             mNameText = itemView.findViewById(R.id.task_name);
             mDescriptionText = itemView.findViewById(R.id.task_description);
             mProgressText = itemView.findViewById(R.id.task_progress);
+            mEtaText = itemView.findViewById(R.id.task_eta);
             mTimeText = itemView.findViewById(R.id.task_time);
             mStatusText = itemView.findViewById(R.id.task_status);
+            mUniqueBadge = itemView.findViewById(R.id.task_unique_badge);
             mProgressBar = itemView.findViewById(R.id.progress_bar);
             mActionsContainer = itemView.findViewById(R.id.task_actions);
             mBtnPause = itemView.findViewById(R.id.btn_pause);
@@ -205,23 +210,33 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         
         public void bind(@NonNull BackgroundTaskInfo taskInfo) {
             mTaskInfo = taskInfo;
-            
+            // 通过状态判定是否在「已完成」段；用于「清空」按钮只清已完成列表
+            mIsCompletedSection = taskInfo.isCompleted() || taskInfo.isCancelled();
+
             // 任务名称
             mNameText.setText(taskInfo.getTaskName());
             
+            // 互斥徽标
+            if (taskInfo.isUniqueTask()) {
+                mUniqueBadge.setVisibility(View.VISIBLE);
+            } else {
+                mUniqueBadge.setVisibility(View.GONE);
+            }
+            
             // 任务描述
             String description = taskInfo.getTaskDescription();
-            mDescriptionText.setText(description != null ? description : mContext.getString(R.string.no_description));
+            if (description != null && !description.isEmpty()) {
+                mDescriptionText.setText(description);
+                mDescriptionText.setVisibility(View.VISIBLE);
+            } else {
+                mDescriptionText.setVisibility(View.GONE);
+            }
             
             // 进度
             int percentage = taskInfo.getProgressPercentage();
             if (percentage >= 0) {
-                String detail = taskInfo.getProgressDetail();
                 String progressText = mContext.getString(R.string.task_progress_format, 
                     taskInfo.getCurrentProgress(), taskInfo.getTotalProgress(), percentage);
-                if (detail != null && !detail.isEmpty()) {
-                    progressText = progressText + " - " + detail;
-                }
                 mProgressText.setText(progressText);
                 mProgressBar.setMax(100);
                 mProgressBar.setProgress(percentage);
@@ -231,9 +246,19 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
                 mProgressBar.setIndeterminate(true);
             }
             
+            // ETA
+            long eta = taskInfo.getEstimatedRemainingTime();
+            if (eta > 0) {
+                mEtaText.setText(mContext.getString(R.string.task_eta_format, 
+                    ReadableTime.getShortTimeInterval(eta)));
+                mEtaText.setVisibility(View.VISIBLE);
+            } else {
+                mEtaText.setVisibility(View.GONE);
+            }
+            
             // 运行时间
             long runningTime = taskInfo.getRunningTime();
-            mTimeText.setText(mContext.getString(R.string.task_running_time, ReadableTime.getShortTimeInterval(runningTime)));
+            mTimeText.setText(ReadableTime.getShortTimeInterval(runningTime));
             
             // 状态
             String status;
@@ -263,14 +288,20 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
                 mActionsContainer.setVisibility(View.GONE);
                 return;
             }
-            
+
             boolean isActive = !mTaskInfo.isCompleted() && !mTaskInfo.isCancelled();
             boolean isPaused = mTaskInfo.isPaused();
             boolean isCompleted = mTaskInfo.isCompleted() || mTaskInfo.isCancelled();
-            
+            boolean isQueuedUnique = isActive && mTaskInfo.isQueued();
+
             if (isActive) {
                 mActionsContainer.setVisibility(View.VISIBLE);
-                if (isPaused) {
+                if (isQueuedUnique) {
+                    // 排队中的互斥任务：只允许「取消排队」
+                    mBtnPause.setVisibility(View.GONE);
+                    mBtnResume.setVisibility(View.GONE);
+                    mBtnCancel.setVisibility(View.VISIBLE);
+                } else if (isPaused) {
                     mBtnPause.setVisibility(View.GONE);
                     mBtnResume.setVisibility(View.VISIBLE);
                     mBtnCancel.setVisibility(View.VISIBLE);
@@ -314,7 +345,13 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         
         private void handleDelete() {
             if (mTaskInfo == null) return;
-            BackgroundTaskManager.getInstance().removeTask(mTaskInfo.getTaskId());
+            if (mIsCompletedSection) {
+                // 已完成段：仅从 mCompletedTasks 移出，不影响活跃任务（修复误伤）
+                BackgroundTaskStatusManager.getInstance().removeFromCompleted(mTaskInfo.getTaskId());
+                Toast.makeText(mContext, R.string.task_cleared_from_completed, Toast.LENGTH_SHORT).show();
+            } else {
+                BackgroundTaskManager.getInstance().removeTask(mTaskInfo.getTaskId());
+            }
             refreshAdapter();
         }
         

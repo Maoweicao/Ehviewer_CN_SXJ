@@ -18,8 +18,10 @@ package com.hippo.ehviewer.gallery;
 
 import android.text.TextUtils;
 import android.util.LruCache;
+import android.util.SparseArray;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.util.GifUtils;
 import com.hippo.ehviewer.util.WebpUtils;
 import com.hippo.lib.glgallery.GalleryProvider;
@@ -116,4 +118,25 @@ public abstract class GalleryProvider2 extends GalleryProvider {
      */
     @Nullable
     public abstract UniFile save(int index, @NonNull UniFile dir, @NonNull String filename);
+
+    // Error storage for page failures
+    private final SparseArray<String> mPageErrors = new SparseArray<>();
+
+    @Nullable
+    public String getPageError(int index) {
+        return mPageErrors.get(index);
+    }
+
+    public void putPageError(int index, String error) {
+        mPageErrors.put(index, error);
+    }
+
+    public void clearPageError(int index) {
+        mPageErrors.remove(index);
+    }
+
+    @Nullable
+    public GalleryInfo getGalleryInfo() {
+        return null;
+    }
 }

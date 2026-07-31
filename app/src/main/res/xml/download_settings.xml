@@ -17,231 +17,268 @@
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
-    <Preference
-        android:key="download_location"
-        android:title="@string/settings_download_download_location"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+    <PreferenceCategory
+        android:key="category_download_basic"
+        android:title="@string/settings_category_download_basic"
+        android:summary="@string/settings_category_download_basic_summary"
+        app:allowDividerAbove="false">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="media_scan"
-        android:title="@string/settings_download_media_scan"
-        app:summaryOff="@string/settings_download_media_scan_summary_off"
-        app:summaryOn="@string/settings_download_media_scan_summary_on" />
+        <Preference
+            android:key="download_location"
+            android:title="@string/settings_download_download_location" />
 
-    <Preference
-        android:key="reset_media_scan"
-        android:title="@string/settings_download_reset_media_scan"
-        android:summary="@string/settings_download_reset_media_scan_summary"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="media_scan"
+            android:title="@string/settings_download_media_scan"
+            app:summaryOff="@string/settings_download_media_scan_summary_off"
+            app:summaryOn="@string/settings_download_media_scan_summary_on" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="enable_min_download_speed"
-        android:title="@string/settings_download_enable_min_download_speed"
-        android:summary="@string/settings_download_enable_min_download_speed_summary"
-        app:allowDividerAbove="true" />
+        <Preference
+            android:key="reset_media_scan"
+            android:title="@string/settings_download_reset_media_scan"
+            android:summary="@string/settings_download_reset_media_scan_summary" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:key="min_download_speed"
-        android:title="@string/settings_download_min_download_speed"
-        android:dependency="enable_min_download_speed"
-        app:minValue="64"
-        app:maxValue="1048576"
-        app:stepSize="2"
-        app:unit="KB/s"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="download_list_pagination"
+            android:summary="@string/settings_download_download_list_pagination_summary"
+            android:title="@string/settings_download_download_list_pagination" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="download_logging_enabled"
-        android:title="@string/settings_download_logging_enabled"
-        android:summary="@string/settings_download_logging_enabled_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="use_system_download_manager"
+            android:summary="@string/settings_download_use_system_download_manager_summary"
+            android:title="@string/settings_download_use_system_download_manager" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="incremental_download_update"
-        android:title="@string/settings_download_incremental_update"
-        android:summary="@string/settings_download_incremental_update_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_private_mode"
+            android:summary="@string/settings_download_private_mode_summary"
+            android:title="@string/settings_download_private_mode" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="show_download_card_folder_time"
-        android:title="@string/settings_download_show_folder_time"
-        android:summary="@string/settings_download_show_folder_time_summary" />
+        <Preference
+            android:key="check_system_download_service"
+            android:title="@string/settings_download_check_system_service"
+            android:summary="@string/settings_download_check_system_service_summary" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="show_download_card_folder_size"
-        android:title="@string/settings_download_show_folder_size"
-        android:summary="@string/settings_download_show_folder_size_summary" />
+    </PreferenceCategory>
 
-    <!-- Default value for debugging: 3 -->
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="3"
-        android:key="download_thread"
-        android:title="@string/settings_download_multi_thread_download"
-        app:allowDividerAbove="true"
-        app:minValue="1"
-        app:maxValue="7"
-        app:stepSize="2"
-        app:unit="个"
-        app:showValue="true" />
+    <PreferenceCategory
+        android:key="category_download_speed"
+        android:title="@string/settings_category_download_speed"
+        android:summary="@string/settings_category_download_speed_summary">
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="5"
-        android:key="preload_image"
-        android:title="@string/settings_download_preload_image"
-        app:allowDividerAbove="true"
-        app:minValue="3"
-        app:maxValue="17"
-        app:stepSize="2"
-        app:unit="张"
-        app:showValue="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="enable_min_download_speed"
+            android:title="@string/settings_download_enable_min_download_speed"
+            android:summary="@string/settings_download_enable_min_download_speed_summary" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="download_list_pagination"
-        android:summary="@string/settings_download_download_list_pagination_summary"
-        android:title="@string/settings_download_download_list_pagination" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:key="min_download_speed"
+            android:title="@string/settings_download_min_download_speed"
+            android:dependency="enable_min_download_speed"
+            app:minValue="64"
+            app:maxValue="1048576"
+            app:stepSize="2"
+            app:unit="KB/s"
+            app:showValue="true" />
 
-    <!-- Default value for debugging: a -->
-    <com.hippo.preference.ListPreference
-        android:defaultValue="a"
-        android:key="image_size"
-        android:summary="@string/settings_download_image_resolution_summary"
-        android:title="@string/settings_download_image_resolution"
-        app:allowDividerAbove="true"
-        app:entries="@array/image_resolution_entries"
-        app:entryValues="@array/image_resolution_entry_values"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_logging_enabled"
+            android:title="@string/settings_download_logging_enabled"
+            android:summary="@string/settings_download_logging_enabled_summary" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="download_origin_image"
-        android:summary="@string/settings_download_download_origin_image_summary"
-        android:title="@string/settings_download_download_origin_image" />
+        <!-- Default value for debugging: 3 -->
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="3"
+            android:key="download_thread"
+            android:title="@string/settings_download_multi_thread_download"
+            app:minValue="1"
+            app:maxValue="7"
+            app:stepSize="2"
+            app:unit="个"
+            app:showValue="true" />
 
-    <!-- Default value for debugging: 60 -->
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="enable_download_timeout"
-        android:title="@string/settings_download_enable_download_timeout"
-        android:summary="@string/settings_download_enable_download_timeout_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="5"
+            android:key="preload_image"
+            android:title="@string/settings_download_preload_image"
+            app:minValue="3"
+            app:maxValue="17"
+            app:stepSize="2"
+            app:unit="张"
+            app:showValue="true" />
 
-    <com.hippo.ehviewer.preference.SliderPreference
-        android:defaultValue="60"
-        android:key="download_timeout"
-        android:title="@string/settings_download_timeout"
-        android:dependency="enable_download_timeout"
-        app:minValue="60"
-        app:maxValue="300"
-        app:stepSize="10"
-        app:unit="秒"
-        app:showValue="true" />
+        <!-- Default value for debugging: a -->
+        <com.hippo.preference.ListPreference
+            android:defaultValue="a"
+            android:key="image_size"
+            android:summary="@string/settings_download_image_resolution_summary"
+            android:title="@string/settings_download_image_resolution"
+            app:entries="@array/image_resolution_entries"
+            app:entryValues="@array/image_resolution_entry_values" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="true"
-        android:key="download_order_asc"
-        android:summary="@string/settings_download_download_order_by_asc_summary"
-        android:title="@string/settings_download_download_order_by_asc" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_origin_image"
+            android:summary="@string/settings_download_download_origin_image_summary"
+            android:title="@string/settings_download_download_origin_image" />
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="sync_download_while_reading"
-        android:summary="@string/settings_download_sync_while_reading_summary"
-        android:title="@string/settings_download_sync_while_reading"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <!-- Default value for debugging: 60 -->
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="enable_download_timeout"
+            android:title="@string/settings_download_enable_download_timeout"
+            android:summary="@string/settings_download_enable_download_timeout_summary" />
 
-    <com.hippo.preference.ListPreference
-        android:defaultValue="0"
-        android:key="metered_network_policy"
-        android:summary="@string/settings_download_metered_network_policy_summary"
-        android:title="@string/settings_download_metered_network_policy"
-        app:allowDividerAbove="true"
-        app:entries="@array/metered_network_policy_entries"
-        app:entryValues="@array/metered_network_policy_entry_values"
-        app:iconSpaceReserved="false" />
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="60"
+            android:key="download_timeout"
+            android:title="@string/settings_download_timeout"
+            android:dependency="enable_download_timeout"
+            app:minValue="60"
+            app:maxValue="300"
+            app:stepSize="10"
+            app:unit="秒"
+            app:showValue="true" />
 
-    <com.hippo.ehviewer.preference.RestoreDownloadPreference
-        android:key="restore_download_items"
-        android:summary="@string/settings_download_restore_download_items_summary"
-        android:title="@string/settings_download_restore_download_items"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+    </PreferenceCategory>
 
-<com.hippo.ehviewer.preference.CleanRedundancyPreference3
-        android:key="clean_redundancy"
-        android:summary="@string/settings_download_clean_redundancy_summary"
-        android:title="@string/settings_download_clean_redundancy"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+    <PreferenceCategory
+        android:key="category_download_queue"
+        android:title="@string/settings_category_download_queue"
+        android:summary="@string/settings_category_download_queue_summary">
 
-    <com.hippo.preference.SwitchPreference
-        android:defaultValue="false"
-        android:key="merge_on_download"
-        android:title="@string/settings_download_merge_on_download"
-        android:summary="@string/settings_download_merge_on_download_summary"
-        app:allowDividerAbove="true" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="download_order_asc"
+            android:summary="@string/settings_download_download_order_by_asc_summary"
+            android:title="@string/settings_download_download_order_by_asc" />
 
-    <com.hippo.ehviewer.preference.MergeDuplicateGalleryPreference2
-        android:key="merge_duplicate_gallery"
-        android:summary="@string/settings_download_merge_duplicate_gallery_summary"
-        android:title="@string/settings_download_merge_duplicate_gallery"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <Preference
+            android:key="download_queue_order_header"
+            android:title="@string/settings_download_download_queue_order" />
 
-    <Preference
-        android:key="scan_download_files"
-        android:summary="@string/settings_download_scan_download_files_summary"
-        android:title="@string/settings_download_scan_download_files"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="advanced_download_sort_enabled"
+            android:summary="@string/settings_advanced_advanced_download_sort_summary"
+            android:title="@string/settings_advanced_advanced_download_sort" />
 
-    <Preference
-        android:key="view_download_logs"
-        android:summary="@string/settings_download_view_logs_summary"
-        android:title="@string/settings_download_view_logs"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="download_queue_order"
+            android:summary="@string/settings_download_download_queue_order_summary"
+            android:title="@string/settings_download_download_queue_order"
+            android:dependency="advanced_download_sort_enabled"
+            app:entries="@array/download_queue_order_entries"
+            app:entryValues="@array/download_queue_order_entry_values" />
 
-    <Preference
-        android:key="clean_download_logs"
-        android:summary="@string/settings_download_clean_logs_summary"
-        android:title="@string/settings_download_clean_logs"
-        app:iconSpaceReserved="false" />
+        <com.hippo.ehviewer.preference.CategoryPriorityDialogPreference
+            android:key="download_category_priority_order"
+            android:summary="@string/settings_advanced_download_category_priority_order_summary"
+            android:title="@string/settings_advanced_download_category_priority_order"
+            android:dependency="advanced_download_sort_enabled" />
 
-    <Preference
-        android:key="clean_invalid_download"
-        android:summary="@string/settings_download_clean_invalid_download_summary"
-        android:title="@string/settings_download_clean_invalid_download"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="download_queue_secondary_order"
+            android:title="@string/download_queue_secondary_order"
+            android:summary="@string/download_queue_secondary_order_summary"
+            android:dependency="advanced_download_sort_enabled"
+            app:entries="@array/download_queue_secondary_order_entries"
+            app:entryValues="@array/download_queue_secondary_order_entry_values" />
 
-    <Preference
-        android:key="repair_all_downloaded_gallery"
-        android:summary="@string/settings_download_repair_all_downloaded_gallery_summary"
-        android:title="@string/settings_download_repair_all_downloaded_gallery"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="sync_download_while_reading"
+            android:summary="@string/settings_download_sync_while_reading_summary"
+            android:title="@string/settings_download_sync_while_reading" />
 
-    <Preference
-        android:key="repair_unknown_category_gallery"
-        android:summary="@string/settings_download_repair_unknown_category_gallery_summary"
-        android:title="@string/settings_download_repair_unknown_category_gallery"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="metered_network_policy"
+            android:summary="@string/settings_download_metered_network_policy_summary"
+            android:title="@string/settings_download_metered_network_policy"
+            app:entries="@array/metered_network_policy_entries"
+            app:entryValues="@array/metered_network_policy_entry_values" />
 
-<com.hippo.ehviewer.preference.RebuildDownloadRecordsPreference
-        android:key="rebuild_download_records"
-        android:summary="@string/settings_download_rebuild_download_records_summary"
-        android:title="@string/settings_download_rebuild_download_records"
-        app:allowDividerAbove="true"
-        app:iconSpaceReserved="false" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_download_maintenance"
+        android:title="@string/settings_category_download_maintenance"
+        android:summary="@string/settings_category_download_maintenance_summary">
+
+        <com.hippo.ehviewer.preference.RestoreDownloadPreference
+            android:key="restore_download_items"
+            android:summary="@string/settings_download_restore_download_items_summary"
+            android:title="@string/settings_download_restore_download_items" />
+
+        <com.hippo.ehviewer.preference.CleanRedundancyPreference3
+            android:key="clean_redundancy"
+            android:summary="@string/settings_download_clean_redundancy_summary"
+            android:title="@string/settings_download_clean_redundancy" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="merge_on_download"
+            android:title="@string/settings_download_merge_on_download"
+            android:summary="@string/settings_download_merge_on_download_summary" />
+
+        <com.hippo.ehviewer.preference.MergeDuplicateGalleryPreference2
+            android:key="merge_duplicate_gallery"
+            android:summary="@string/settings_download_merge_duplicate_gallery_summary"
+            android:title="@string/settings_download_merge_duplicate_gallery" />
+
+        <Preference
+            android:key="scan_download_files"
+            android:summary="@string/settings_download_scan_download_files_summary"
+            android:title="@string/settings_download_scan_download_files" />
+
+        <Preference
+            android:key="view_download_logs"
+            android:summary="@string/settings_download_view_logs_summary"
+            android:title="@string/settings_download_view_logs" />
+
+        <Preference
+            android:key="clean_download_logs"
+            android:summary="@string/settings_download_clean_logs_summary"
+            android:title="@string/settings_download_clean_logs" />
+
+        <Preference
+            android:key="clean_invalid_download"
+            android:summary="@string/settings_download_clean_invalid_download_summary"
+            android:title="@string/settings_download_clean_invalid_download" />
+
+        <Preference
+            android:key="repair_downloaded_thumbnail"
+            android:summary="@string/settings_download_repair_thumbnail_summary"
+            android:title="@string/settings_download_repair_thumbnail" />
+
+        <Preference
+            android:key="verify_download_integrity"
+            android:summary="@string/settings_download_verify_integrity_summary"
+            android:title="@string/settings_download_verify_integrity" />
+
+        <Preference
+            android:key="repair_all_downloaded_gallery"
+            android:summary="@string/settings_download_repair_all_downloaded_gallery_summary"
+            android:title="@string/settings_download_repair_all_downloaded_gallery" />
+
+        <Preference
+            android:key="repair_unknown_category_gallery"
+            android:summary="@string/settings_download_repair_unknown_category_gallery_summary"
+            android:title="@string/settings_download_repair_unknown_category_gallery" />
+
+        <com.hippo.ehviewer.preference.RebuildDownloadRecordsPreference
+            android:key="rebuild_download_records"
+            android:summary="@string/settings_download_rebuild_download_records_summary"
+            android:title="@string/settings_download_rebuild_download_records" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

@@ -1,18 +1,18 @@
 package com.hippo.ehviewer.ui.scene.topList;
 
 import android.content.Context;
-import android.graphics.Paint;
-import android.graphics.drawable.GradientDrawable;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.TableLayout;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 
+import androidx.annotation.AttrRes;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.hippo.ehviewer.R;
-import com.hippo.ehviewer.client.data.EhTopListDetail;
 import com.hippo.ehviewer.client.data.topList.TopListInfo;
 import com.hippo.ehviewer.client.data.topList.TopListItem;
 import com.hippo.ehviewer.client.data.topList.TopListItemArray;
@@ -22,97 +22,115 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
     private final Context context;
     private final TopListInfo ehTopListInfo;
     private final int searchType;
+    /**
+     * 0=yesterday, 1=past month, 2=past year, 3=all-time. The adapter only
+     * renders the items belonging to this time bucket; the Scene owns the
+     * secondary TabLayout that drives the index.
+     */
+    private final int timeBucketIndex;
 
-    public EhTopListAdapter(@NonNull Context context, TopListInfo topListInfo, int searchType) {
+    public EhTopListAdapter(@NonNull Context context, TopListInfo topListInfo, int searchType, int timeBucketIndex) {
         this.context = context;
         this.ehTopListInfo = topListInfo;
         this.searchType = searchType;
+        this.timeBucketIndex = timeBucketIndex;
     }
 
     @NonNull
     @Override
     public EhTopListAdapter.EhTopListViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        View view = View.inflate(context, R.layout.gallery_top_list_table_item, null);
-
+        View view = View.inflate(context, R.layout.item_top_list_entry, null);
         return new EhTopListViewHolder(view);
     }
 
     @Override
     public void onBindViewHolder(@NonNull EhTopListAdapter.EhTopListViewHolder holder, int position) {
-        holder.textView.setText(timeInfoId(position));
-        if (ehTopListInfo.type== EhTopListDetail.ListType.GALLERY){
-            holder.textView.setOnClickListener(v->clickTitle(urlFollow(position)));
-            holder.textView.getPaint().setFlags(Paint.UNDERLINE_TEXT_FLAG);
+        final TopListItemArray bucket = ehTopListInfo.get(timeBucketIndex);
+        if (bucket == null || position >= bucket.length()) {
+            return;
+        }
+        final TopListItem item = bucket.get(position);
+        final int rank = position + 1;
+
+        // ---- Rank badge (#1, #2, ... with gold/silver/bronze for top 3) ----
+        holder.rankText.setVisibility(View.VISIBLE);
+        holder.rankCrown.setVisibility(View.GONE);
+        switch (rank) {
+            case 1:
+                holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_gold);
+                holder.rankText.setText(R.string.top_list_rank_prefix);
+                holder.rankText.setText("#1");
+                holder.rankCrown.setVisibility(View.VISIBLE);
+                break;
+            case 2:
+                holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_silver);
+                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                break;
+            case 3:
+                holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_bronze);
+                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                break;
+            default:
+                holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_normal);
+                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                break;
         }
 
-        TopListItemArray topListItemArray = ehTopListInfo.get(position);
-        for (int i = 0; i < topListItemArray.length(); i++) {
-            View view = View.inflate(context, R.layout.gallery_top_list_item, null);
-            TextView textView = view.findViewById(R.id.list_item);
-            GradientDrawable gradientDrawable = new GradientDrawable();
-            gradientDrawable.setColor(getRandomColor(i));
-            TopListItem topListItem = topListItemArray.get(i);
-            gradientDrawable.setCornerRadius(8);
-            textView.setBackground(gradientDrawable);
+        // ---- Title (full display, no decoration icon to keep it clean) ----
+        holder.title.setText(item.value);
 
-            textView.setText(topListItem.value);
-
-            view.setOnClickListener(v -> onItemClick(topListItem, searchType));
-            holder.tableLayout.addView(view);
-        }
+        holder.itemView.setOnClickListener(v -> onItemClick(item, searchType));
     }
 
-    abstract void clickTitle(String urlFollow);
-
-    abstract int getRandomColor(int position);
+    /**
+     * Resolves a theme attribute (e.g. {@code R.attr.topListPalette1}) to a
+     * concrete color using the supplied context. Falls back to the provided
+     * default if the attribute is not defined in the active theme.
+     */
+    protected int resolveThemeColor(@AttrRes int attr, int fallback) {
+        android.util.TypedValue typedValue = new android.util.TypedValue();
+        if (context.getTheme().resolveAttribute(attr, typedValue, true)) {
+            return typedValue.data;
+        }
+        return fallback;
+    }
 
     abstract void onItemClick(TopListItem topListItem, int searchType);
 
-    private int timeInfoId(int index) {
-        switch (index) {
-            default:
-            case 3:
-                return R.string.all_time_top_list;
-            case 2:
-                return R.string.past_year_top_list;
-            case 1:
-                return R.string.past_month_top_list;
-            case 0:
-                return R.string.yesterday_top_list;
-        }
-    }
-
-    private String urlFollow(int index) {
-        switch (index) {
-            default:
-            case 3:
-                return "tl=11";
-            case 2:
-                return "tl=12";
-            case 1:
-                return "tl=13";
-            case 0:
-                return "tl=15";
-        }
-    }
-
     @Override
     public int getItemCount() {
-        return ehTopListInfo.size();
+        TopListItemArray bucket = ehTopListInfo.get(timeBucketIndex);
+        return bucket != null ? bucket.length() : 0;
     }
 
+    public TopListItemArray currentBucket() {
+        return ehTopListInfo.get(timeBucketIndex);
+    }
+
+    public TopListInfo getTopListInfo() {
+        return ehTopListInfo;
+    }
+
+    public int getSearchType() {
+        return searchType;
+    }
+
+    private static boolean isEmpty(@Nullable String s) {
+        return s == null || s.isEmpty();
+    }
 
     public static class EhTopListViewHolder extends RecyclerView.ViewHolder {
-
-        private final TextView textView;
-        private final TableLayout tableLayout;
-
+        public final FrameLayout rankContainer;
+        public final TextView rankText;
+        public final ImageView rankCrown;
+        public final TextView title;
 
         public EhTopListViewHolder(@NonNull View itemView) {
             super(itemView);
-            textView = itemView.findViewById(R.id.list_of_time);
-            tableLayout = itemView.findViewById(R.id.list_items_table_view);
-
+            rankContainer = itemView.findViewById(R.id.top_list_rank_container);
+            rankText = itemView.findViewById(R.id.top_list_rank_text);
+            rankCrown = itemView.findViewById(R.id.top_list_rank_crown);
+            title = itemView.findViewById(R.id.top_list_title);
         }
     }
 }

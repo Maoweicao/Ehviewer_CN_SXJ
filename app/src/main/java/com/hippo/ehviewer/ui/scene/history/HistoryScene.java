@@ -378,7 +378,7 @@ public class HistoryScene extends ToolbarScene
             holder.uploader.setText(gi.uploader);
             holder.rating.setRating(gi.rating);
             TextView category = holder.category;
-            String newCategoryText = EhUtils.getCategory(gi.category);
+            String newCategoryText = EhUtils.getCategoryName(category.getContext(), gi.category);
             if (!newCategoryText.equals(category.getText())) {
                 category.setText(newCategoryText);
                 category.setBackgroundColor(EhUtils.getCategoryColor(gi.category));

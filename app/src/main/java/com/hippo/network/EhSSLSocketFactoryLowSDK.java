@@ -3,6 +3,7 @@ package com.hippo.network;
 import android.util.Log;
 
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.network.NetworkSecurityManager;
 
 import java.io.IOException;
 import java.net.InetAddress;
@@ -37,7 +38,7 @@ public class EhSSLSocketFactoryLowSDK extends SSLSocketFactory {
 
     @Override
     public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-        if (!Settings.getDF()) {
+        if (!NetworkSecurityManager.INSTANCE.isDomainFrontingEnabled()) {
             return ((SSLSocketFactory) getDefault()).createSocket(s, host, port, autoClose);
         }
         InetAddress address = s.getInetAddress();

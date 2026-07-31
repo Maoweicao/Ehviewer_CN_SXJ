@@ -45,6 +45,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -439,19 +440,46 @@ public class EhTagDatabase {
     private boolean containsCJK(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
-                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
-                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
-                    || Character.UnicodeBlock.of(c) == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS) {
+            if (isCjkCodePoint(c)) {
                 return true;
             }
         }
         return false;
     }
 
+    /**
+     * Returns {@code true} if {@code c} belongs to a CJK-related Unicode block.
+     * Covers Han ideographs (incl. recent extensions), kana, hangul, fullwidth ASCII,
+     * and CJK compatibility forms so that ja/ko/zh/east-asian punctuation inputs are
+     * all treated as CJK for suggestion ordering.
+     */
+    private static boolean isCjkCodePoint(char c) {
+        Character.UnicodeBlock block = Character.UnicodeBlock.of(c);
+        return block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_B
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_C
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_D
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_E
+                || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_F
+                || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS
+                || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS_SUPPLEMENT
+                || block == Character.UnicodeBlock.HIRAGANA
+                || block == Character.UnicodeBlock.KATAKANA
+                || block == Character.UnicodeBlock.KATAKANA_PHONETIC_EXTENSIONS
+                || block == Character.UnicodeBlock.HANGUL_SYLLABLES
+                || block == Character.UnicodeBlock.HANGUL_JAMO
+                || block == Character.UnicodeBlock.HANGUL_JAMO_EXTENDED_A
+                || block == Character.UnicodeBlock.HANGUL_JAMO_EXTENDED_B
+                || block == Character.UnicodeBlock.HANGUL_COMPATIBILITY_JAMO
+                || block == Character.UnicodeBlock.CJK_RADICALS_SUPPLEMENT
+                || block == Character.UnicodeBlock.CJK_SYMBOLS_AND_PUNCTUATION
+                || block == Character.UnicodeBlock.HALFWIDTH_AND_FULLWIDTH_FORMS
+                || block == Character.UnicodeBlock.ENCLOSED_CJK_LETTERS_AND_MONTHS;
+    }
+
     private List<Pair<String, String>> searchTag(List<Tag> tags, String keyword) {
         boolean isCJK = containsCJK(keyword);
-        List<Pair<String, String>> searchList = new ArrayList<>();
         List<Pair<String, String>> chineseMatchList = new ArrayList<>();
         List<Pair<String, String>> englishMatchList = new ArrayList<>();
         int total = 0;
@@ -459,6 +487,8 @@ public class EhTagDatabase {
             if (total >= 80) {
                 break;
             }
+            // Tag.involve() is "english contains OR chinese contains", so if it returns
+            // true at least one of chineseMatch / englishMatch will also be true.
             if (tag.involve(keyword)) {
                 boolean chineseMatch = tag.chinese.contains(keyword);
                 boolean englishMatch = tag.english.contains(keyword);
@@ -466,23 +496,144 @@ public class EhTagDatabase {
                     chineseMatchList.add(new Pair<>(tag.chinese, tag.english));
                 } else if (englishMatch) {
                     englishMatchList.add(new Pair<>(tag.chinese, tag.english));
-                } else {
-                    searchList.add(new Pair<>(tag.chinese, tag.english));
                 }
                 total++;
             }
         }
-        // When user types CJK, prioritize Chinese translation matches
+        // For CJK queries we surface Chinese-translation matches first, followed by
+        // English fallbacks. For non-CJK we still want Chinese translations that happen
+        // to contain the ASCII keyword to lead (rare but useful, e.g. "scanlation").
+        List<Pair<String, String>> searchList = new ArrayList<>(chineseMatchList.size() + englishMatchList.size());
         if (isCJK) {
             searchList.addAll(chineseMatchList);
             searchList.addAll(englishMatchList);
         } else {
-            searchList.addAll(0, chineseMatchList);
+            searchList.addAll(chineseMatchList);
             searchList.addAll(englishMatchList);
         }
         return searchList.subList(0, Math.min(searchList.size(), 40));
     }
     public List<Tag> getTagList() {
         return tagList;
+    }
+
+    // ---------------------------------------------------------------------
+    // Status / management helpers exposed for the Settings page.
+    // ---------------------------------------------------------------------
+
+    /** Returns true when {@link #getInstance(Context)} could yield a usable instance. */
+    public static boolean isLoaded() {
+        return instance != null;
+    }
+
+    /** Returns whether the database file currently exists on disk, regardless of load state. */
+    public static boolean hasLocalData(Context context) {
+        File f = getLocalDataFile(context);
+        return f != null && f.exists() && f.length() > 0;
+    }
+
+    /** Returns the size in bytes of the local data file, or {@code -1} if missing/unreadable. */
+    public static long getLocalDataSize(Context context) {
+        File f = getLocalDataFile(context);
+        if (f == null || !f.exists()) return -1L;
+        return f.length();
+    }
+
+    /** Returns the last-modified time of the local data file in millis, or {@code 0} if missing. */
+    public static long getLocalDataModified(Context context) {
+        File f = getLocalDataFile(context);
+        if (f == null || !f.exists()) return 0L;
+        return f.lastModified();
+    }
+
+    /** Returns the metadata array {@code [sha1Name, sha1Url, dataName, dataUrl]} for the active locale. */
+    @Nullable
+    public static String[] getCurrentMetadata(Context context) {
+        return getMetadata(context);
+    }
+
+    @Nullable
+    public static File getLocalSha1File(Context context) {
+        String[] meta = getMetadata(context);
+        if (meta == null) return null;
+        File dir = AppConfig.getFilesDir("tag-translations");
+        if (dir == null) return null;
+        return new File(dir, meta[0]);
+    }
+
+    @Nullable
+    public static File getLocalDataFile(Context context) {
+        String[] meta = getMetadata(context);
+        if (meta == null) return null;
+        File dir = AppConfig.getFilesDir("tag-translations");
+        if (dir == null) return null;
+        return new File(dir, meta[2]);
+    }
+
+    /**
+     * Reads the locally cached SHA-1 reference (20 raw bytes) into an uppercase hex string.
+     * Returns {@code null} if the file is missing or unreadable.
+     */
+    @Nullable
+    public static String readLocalSha1Hex(Context context) {
+        File f = getLocalSha1File(context);
+        if (f == null || !f.exists()) return null;
+        byte[] bytes = getFileContent(f, 20);
+        if (bytes == null) return null;
+        return toHex(bytes);
+    }
+
+    /**
+     * Computes the SHA-1 of the local data file and returns it as an uppercase hex string.
+     * Returns {@code null} if the data file is missing or unreadable.
+     */
+    @Nullable
+    public static String computeLocalDataSha1Hex(Context context) {
+        File f = getLocalDataFile(context);
+        if (f == null || !f.exists()) return null;
+        byte[] sha1 = getFileSha1(f);
+        if (sha1 == null) return null;
+        return toHex(sha1);
+    }
+
+    /**
+     * Verifies that the local data file matches the cached SHA-1 reference.
+     * Returns:
+     * <ul>
+     *     <li>{@code true} – both files exist and the digest matches</li>
+     *     <li>{@code false} – any file missing or the digest doesn't match (corrupt/tampered)</li>
+     * </ul>
+     */
+    public static boolean verifyIntegrity(Context context) {
+        File sha1File = getLocalSha1File(context);
+        File dataFile = getLocalDataFile(context);
+        if (sha1File == null || dataFile == null) return false;
+        if (!sha1File.exists() || !dataFile.exists()) return false;
+        return checkData(sha1File, dataFile);
+    }
+
+    /**
+     * Drops the in-memory instance and deletes the cached SHA-1 and data files.
+     * The next call to {@link #update(Context)} will re-download from scratch.
+     */
+    public static void clearLocalCache(Context context) {
+        instance = null;
+        File sha1File = getLocalSha1File(context);
+        if (sha1File != null && sha1File.exists()) {
+            FileUtils.delete(sha1File);
+        }
+        File dataFile = getLocalDataFile(context);
+        if (dataFile != null && dataFile.exists()) {
+            FileUtils.delete(dataFile);
+        }
+    }
+
+    private static String toHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xF, 16));
+            sb.append(Character.forDigit(b & 0xF, 16));
+        }
+        return sb.toString().toUpperCase(Locale.ROOT);
     }
 }

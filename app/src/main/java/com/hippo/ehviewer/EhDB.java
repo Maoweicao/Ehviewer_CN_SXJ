@@ -54,6 +54,10 @@ import com.hippo.ehviewer.dao.HistoryDao;
 import com.hippo.ehviewer.dao.HistoryInfo;
 import com.hippo.ehviewer.dao.LocalFavoriteInfo;
 import com.hippo.ehviewer.dao.LocalFavoritesDao;
+import com.hippo.ehviewer.dao.PtokensIndex;
+import com.hippo.ehviewer.dao.PtokensIndexDao;
+import com.hippo.ehviewer.dao.SystemDownloadTask;
+import com.hippo.ehviewer.dao.SystemDownloadTaskDao;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.dao.QuickSearchDao;
 import com.hippo.ehviewer.download.DownloadManager;
@@ -80,6 +84,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 public class EhDB {
 
@@ -244,6 +249,29 @@ public class EhDB {
                         Log.w("EhDB", "Failed to add ARCHIVE_URI column, might already exist", e);
                         Analytics.recordException(e);
                     }
+                }
+
+                if (oldVersion < 10) {
+                    android.util.Log.i("EhDB", "Creating PTOKENS_INDEX table");
+                    db.execSQL("CREATE TABLE IF NOT EXISTS \"PTOKENS_INDEX\" (" +
+                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ," +
+                            "\"PTOKENS\" TEXT," +
+                            "\"PAGES\" INTEGER NOT NULL ," +
+                            "\"UPDATED_AT\" INTEGER NOT NULL );");
+                    android.util.Log.i("EhDB", "PTOKENS_INDEX table created successfully");
+                }
+
+                if (oldVersion < 11) {
+                    android.util.Log.i("EhDB", "Creating SYSTEM_DOWNLOAD_TASKS table");
+                    db.execSQL("CREATE TABLE IF NOT EXISTS \"SYSTEM_DOWNLOAD_TASKS\" (" +
+                            "\"DOWNLOAD_ID\" INTEGER PRIMARY KEY NOT NULL ," +
+                            "\"GID\" INTEGER NOT NULL ," +
+                            "\"PAGE_INDEX\" INTEGER NOT NULL ," +
+                            "\"RESOLVED_URL\" TEXT," +
+                            "\"STATUS\" TEXT NOT NULL ," +
+                            "\"RETRY_COUNT\" INTEGER NOT NULL ," +
+                            "\"CREATED_AT\" INTEGER NOT NULL );");
+                    android.util.Log.i("EhDB", "SYSTEM_DOWNLOAD_TASKS table created successfully");
                 }
                 
                 android.util.Log.i("EhDB", "Database upgrade completed successfully");
@@ -679,6 +707,70 @@ public class EhDB {
         }
     }
 
+    // -------- SystemDownloadTask (Android system DownloadManager mapping) --------
+
+    @Nullable
+    public static synchronized SystemDownloadTask getSystemDownloadTask(long downloadId) {
+        try {
+            return sDaoSession.getSystemDownloadTaskDao().load(downloadId);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+            return null;
+        }
+    }
+
+    @Nullable
+    public static synchronized List<SystemDownloadTask> getSystemDownloadTasksForGid(long gid) {
+        try {
+            return sDaoSession.getSystemDownloadTaskDao().queryBuilder()
+                    .where(SystemDownloadTaskDao.Properties.Gid.eq(gid))
+                    .list();
+        } catch (Exception e) {
+            Analytics.recordException(e);
+            return null;
+        }
+    }
+
+    @Nullable
+    public static synchronized List<SystemDownloadTask> getActiveSystemDownloadTasks() {
+        try {
+            return sDaoSession.getSystemDownloadTaskDao().queryBuilder()
+                    .whereOr(SystemDownloadTaskDao.Properties.Status.eq(SystemDownloadTask.STATUS_PENDING),
+                            SystemDownloadTaskDao.Properties.Status.eq(SystemDownloadTask.STATUS_RUNNING))
+                    .list();
+        } catch (Exception e) {
+            Analytics.recordException(e);
+            return null;
+        }
+    }
+
+    public static synchronized void putSystemDownloadTask(SystemDownloadTask task) {
+        try {
+            sDaoSession.getSystemDownloadTaskDao().insertOrReplace(task);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+    }
+
+    public static synchronized void deleteSystemDownloadTask(long downloadId) {
+        try {
+            sDaoSession.getSystemDownloadTaskDao().deleteByKey(downloadId);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+    }
+
+    public static synchronized void deleteSystemDownloadTasksForGid(long gid) {
+        try {
+            sDaoSession.getSystemDownloadTaskDao().queryBuilder()
+                    .where(SystemDownloadTaskDao.Properties.Gid.eq(gid))
+                    .buildDelete()
+                    .executeDeleteWithoutDetachingEntities();
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+    }
+
     public static synchronized void moveDownloadInfo(List<DownloadInfo> infos, int fromPosition, int toPosition){
         if (fromPosition == toPosition) {
             return;
@@ -870,6 +962,42 @@ public class EhDB {
         GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
         dao.deleteAll();
         */
+    }
+
+    // ==================== PtokensIndex ====================
+
+    public static synchronized PtokensIndex getPtokensIndex(long gid) {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        return dao.load(gid);
+    }
+
+    public static synchronized List<PtokensIndex> getAllPtokensIndex() {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        return dao.loadAll();
+    }
+
+    public static synchronized void putPtokensIndex(long gid, String ptokens, int pages) {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        PtokensIndex existing = dao.load(gid);
+        if (existing != null) {
+            existing.setPtokens(ptokens);
+            existing.setPages(pages);
+            existing.setUpdatedAt(System.currentTimeMillis());
+            dao.update(existing);
+        } else {
+            PtokensIndex entry = new PtokensIndex(gid, ptokens, pages, System.currentTimeMillis());
+            dao.insert(entry);
+        }
+    }
+
+    public static synchronized void removePtokensIndex(long gid) {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        dao.deleteByKey(gid);
+    }
+
+    public static synchronized void clearPtokensIndex() {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        dao.deleteAll();
     }
 
     @NonNull
@@ -1176,7 +1304,8 @@ public class EhDB {
     public static synchronized void putHistoryInfo(GalleryInfo galleryInfo) {
         HistoryDao dao = sDaoSession.getHistoryDao();
         HistoryInfo info = dao.load(galleryInfo.gid);
-        if (null != info) {
+        boolean isNew = (info == null);
+        if (!isNew) {
             // Update time
             info.time = System.currentTimeMillis();
             dao.update(info);
@@ -1194,6 +1323,31 @@ public class EhDB {
                         .limit(-1).offset(MAX_HISTORY_COUNT).list();
             }
             dao.deleteInTx(list);
+        }
+        if (isNew) {
+            notifyHistoryAdded(galleryInfo.gid);
+        }
+    }
+
+    private static final List<HistoryListener> sHistoryListeners = new CopyOnWriteArrayList<>();
+
+    public interface HistoryListener {
+        void onHistoryAdded(long gid);
+    }
+
+    public static void addHistoryListener(HistoryListener listener) {
+        if (listener != null && !sHistoryListeners.contains(listener)) {
+            sHistoryListeners.add(listener);
+        }
+    }
+
+    public static void removeHistoryListener(HistoryListener listener) {
+        sHistoryListeners.remove(listener);
+    }
+
+    private static void notifyHistoryAdded(long gid) {
+        for (HistoryListener l : sHistoryListeners) {
+            l.onHistoryAdded(gid);
         }
     }
 

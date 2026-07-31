@@ -47,6 +47,7 @@ object ProgressivePlanManager {
                     fObj.put("fileCount", f.fileCount)
                     fObj.put("hasEhviewer", f.hasEhviewer)
                     fObj.put("title", f.title)
+                    fObj.put("modifiedAt", f.modifiedAt)
                     foldersArr.put(fObj)
                 }
                 chainObj.put("folders", foldersArr)

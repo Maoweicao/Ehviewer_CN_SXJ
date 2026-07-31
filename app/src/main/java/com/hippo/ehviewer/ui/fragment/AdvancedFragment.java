@@ -285,7 +285,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
 
     private boolean gotoScheduledTaskActivity() {
         Activity activity = getActivity();
-        com.hippo.ehviewer.ui.scheduled.ScheduledTaskActivity.start(activity);
+        com.hippo.ehviewer.ui.automation.AutomationActivity.start(activity);
         return true;
     }
 
