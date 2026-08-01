@@ -856,6 +856,7 @@ public class DownloadsScene extends ToolbarScene
                         .setMessage(R.string.reset_reading_progress_message)
                         .setNegativeButton(android.R.string.cancel, null)
                         .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                            resetReadingProgressInUi();
                             if (mDownloadManager != null) {
                                 mDownloadManager.resetAllReadingProgress();
                             }
@@ -2347,6 +2348,18 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private static final int SPIDER_INFO_QUERY_BATCH_LIMIT = 200;
+
+    @SuppressLint("NotifyDataSetChanged")
+    private void resetReadingProgressInUi() {
+        for (SpiderInfo spiderInfo : mSpiderInfoMap.values()) {
+            if (spiderInfo != null) {
+                spiderInfo.startPage = 0;
+            }
+        }
+        if (mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
+        }
+    }
 
     private void queryUnreadSpiderInfo() {
         if (mList == null) {

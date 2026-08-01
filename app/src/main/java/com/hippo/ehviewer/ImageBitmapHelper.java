@@ -18,7 +18,6 @@ package com.hippo.ehviewer;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-
 import android.util.Log;
 
 import com.hippo.conaco.ValueHelper;
@@ -30,6 +29,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 
 public class ImageBitmapHelper implements ValueHelper<Image> {
+    private static final String TAG = "ImageBitmapHelper";
 
     private static final int MAX_CACHE_SIZE = 512 * 512;
 
@@ -48,6 +48,10 @@ public class ImageBitmapHelper implements ValueHelper<Image> {
             fileSize = is.available();
             Log.d("ImageBitmapHelper", "[ImgLoad] THUMB_DECODE size=" + fileSize + " hardware=" + hardware);
             Image result = Image.decode(is,hardware);
+            if (result == null) {
+                Log.w(TAG, "Image decode failed, result is null. hardware=" + hardware);
+                return null;
+            }
             Log.d("ImageBitmapHelper", "[ImgLoad] THUMB_OK w=" + result.getWidth() + "x" + result.getHeight());
             return result;
 //            return ImageBitmap.decode(is,hardware);
@@ -55,10 +59,15 @@ public class ImageBitmapHelper implements ValueHelper<Image> {
             Log.w("ImageBitmapHelper", "[ImgLoad] THUMB_OOM size=" + fileSize, e);
             Analytics.recordException(e);
             return null;
+        } catch (ClassCastException e) {
+            Analytics.recordException(e);
+            Log.w(TAG, "InputStream is not FileInputStream. hardware=" + hardware, e);
+            return null;
         } catch (RuntimeException e) {
             Log.w("ImageBitmapHelper", "[ImgLoad] THUMB_FAIL size=" + fileSize + " " + e.getMessage());
             return null;
         } catch (IOException e) {
+            Log.w(TAG, "Open image stream failed. hardware=" + hardware, e);
             return null;
         } finally {
             isPipe.close();

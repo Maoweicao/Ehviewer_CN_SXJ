@@ -35,8 +35,9 @@ android {
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 30
         versionCode 111
-        versionName "2.0.2.2"
+        versionName "2.0.2.3"
         buildConfigField 'String', 'BUILD_TIME', "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\""
+        vectorDrawables.useSupportLibrary = true
         resourceConfigurations += ['zh', 'zh-rCN', 'zh-rHK', 'zh-rTW', 'es', 'ja', 'ko', 'fr', 'de', 'th']
         testOptions.unitTests.includeAndroidResources = true
         testOptions.unitTests.all {
