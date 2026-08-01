@@ -37,12 +37,14 @@ import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 import com.hippo.drawable.TriangleDrawable;
 import com.hippo.easyrecyclerview.MarginItemDecoration;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
 import com.hippo.ehviewer.widget.SimpleRatingView;
 import com.hippo.ehviewer.widget.TileThumbNew;
@@ -288,6 +290,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                 }
                 holder.favourite.setVisibility((mShowFavourite && gi.favoriteSlot >= -1 && gi.favoriteSlot <= 10) ? View.VISIBLE : View.GONE);
                 holder.downloaded.setVisibility(mDownloadManager.containDownloadInfo(gi.gid) ? View.VISIBLE : View.GONE);
+                bindMergedStatus(holder, gi.gid);
                 break;
             }
             case TYPE_GRID: {
@@ -303,6 +306,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                     ((TriangleDrawable) drawable).setColor(color);
                 }
                 holder.simpleLanguage.setText(gi.simpleLanguage);
+                bindMergedStatus(holder, gi.gid);
                 break;
             }
         }
@@ -311,6 +315,13 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
 
     public void setThumbItemClickListener(OnThumbItemClickListener listener) {
         myOnThumbItemClickListener = listener;
+    }
+
+    private void bindMergedStatus(@NonNull GalleryHolder holder, long gid) {
+        DownloadHistory history = EhDB.getDownloadHistory(gid);
+        boolean merged = history != null && (history.getDeletionType() == DownloadHistory.DELETION_DUPLICATE_MERGED
+                || history.getDeletionType() == DownloadHistory.DELETION_PROGRESSIVE_MERGED);
+        holder.merged.setVisibility(merged ? View.VISIBLE : View.GONE);
     }
 
     /**
@@ -368,6 +379,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
         public final TextView simpleLanguage;
         public final ImageView favourite;
         public final ImageView downloaded;
+        public final ImageView merged;
         public final ImageView selected;
 
         public GalleryHolder(View itemView, final OnThumbItemClickListener onThumbItemClickListener, int mType) {
@@ -382,6 +394,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
             simpleLanguage = itemView.findViewById(R.id.simple_language);
             favourite = itemView.findViewById(R.id.favourited);
             downloaded = itemView.findViewById(R.id.downloaded);
+            merged = itemView.findViewById(R.id.merged);
             selected = itemView.findViewById(R.id.selected);
             if (mType == 0) {
                 thumb.setOnClickListener(v -> {

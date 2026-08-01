@@ -3,6 +3,7 @@ package com.hippo.ehviewer.task
 import android.content.Context
 import android.util.Log
 import com.hippo.ehviewer.EhDB
+import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.dao.DownloadInfo

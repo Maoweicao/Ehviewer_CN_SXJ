@@ -32,6 +32,7 @@ public class UnifiedTask {
     // Task types
     public static final String TYPE_PUSH = "push";
     public static final String TYPE_COMPRESS = "compress";
+    public static final String TYPE_DELETE = "delete";
 
     // Push sub-types
     public static final String SUB_TYPE_BOOKMARKS = "bookmarks";
@@ -60,6 +61,7 @@ public class UnifiedTask {
     public double progress;
     public int total;
     public int completed;
+    public int failed;
     public long createdTime;
     public long updatedTime;
     public long completedTime;
@@ -80,6 +82,11 @@ public class UnifiedTask {
     public boolean includeMetadata;
     public List<String> outputFiles;
 
+    // Delete specific
+    public List<String> deletePaths;
+    public boolean deleteFiles;
+    public String error;
+
     public UnifiedTask() {
         this.taskId = UUID.randomUUID().toString();
         this.status = STATUS_PENDING;
@@ -88,6 +95,7 @@ public class UnifiedTask {
         this.items = new ArrayList<>();
         this.gids = new ArrayList<>();
         this.outputFiles = new ArrayList<>();
+        this.deletePaths = new ArrayList<>();
     }
 
     /**
@@ -119,12 +127,24 @@ public class UnifiedTask {
         return task;
     }
 
+    public static UnifiedTask createDeleteTask(String subType) {
+        UnifiedTask task = new UnifiedTask();
+        task.type = TYPE_DELETE;
+        task.subType = subType;
+        task.taskId = "delete-" + task.taskId;
+        return task;
+    }
+
     public boolean isPush() {
         return TYPE_PUSH.equals(type);
     }
 
     public boolean isCompress() {
         return TYPE_COMPRESS.equals(type);
+    }
+
+    public boolean isDelete() {
+        return TYPE_DELETE.equals(type);
     }
 
     public boolean isFileTransfer() {
@@ -170,6 +190,7 @@ public class UnifiedTask {
         json.put("progress", progress);
         json.put("total", total);
         json.put("completed", completed);
+        json.put("failed", failed);
         json.put("createdTime", createdTime);
         json.put("updatedTime", updatedTime);
         json.put("completedTime", completedTime);
@@ -202,6 +223,14 @@ public class UnifiedTask {
             json.put("outputFiles", arr);
         }
 
+        if (deletePaths != null && !deletePaths.isEmpty()) {
+            JSONArray arr = new JSONArray();
+            for (String path : deletePaths) arr.add(path);
+            json.put("deletePaths", arr);
+        }
+        json.put("deleteFiles", deleteFiles);
+        json.put("error", error);
+
         return json;
     }
 
@@ -219,6 +248,7 @@ public class UnifiedTask {
         task.progress = json.getDoubleValue("progress");
         task.total = json.getIntValue("total");
         task.completed = json.getIntValue("completed");
+        task.failed = json.getIntValue("failed");
         task.createdTime = json.getLongValue("createdTime");
         task.updatedTime = json.getLongValue("updatedTime");
         task.completedTime = json.getLongValue("completedTime");
@@ -257,6 +287,16 @@ public class UnifiedTask {
             }
         }
 
+        JSONArray deletePathsArr = json.getJSONArray("deletePaths");
+        if (deletePathsArr != null) {
+            task.deletePaths = new ArrayList<>();
+            for (int i = 0; i < deletePathsArr.size(); i++) {
+                task.deletePaths.add(deletePathsArr.getString(i));
+            }
+        }
+        task.deleteFiles = json.getBooleanValue("deleteFiles");
+        task.error = json.getString("error");
+
         return task;
     }
 
@@ -273,6 +313,7 @@ public class UnifiedTask {
         json.put("progress", progress);
         json.put("total", total);
         json.put("completed", completed);
+        json.put("failed", failed);
         json.put("createdTime", createdTime);
         json.put("updatedTime", updatedTime);
         json.put("completedTime", completedTime);
@@ -292,6 +333,15 @@ public class UnifiedTask {
             json.put("totalChunks", totalChunks);
             json.put("receivedChunks", receivedChunks);
             json.put("receivedBytes", receivedBytes);
+        }
+
+        if (isDelete()) {
+            json.put("deleteFiles", deleteFiles);
+            json.put("error", error);
+            JSONObject result = new JSONObject();
+            result.put("deleted", Math.max(0, completed - failed));
+            result.put("failed", failed);
+            json.put("result", result);
         }
 
         return json;

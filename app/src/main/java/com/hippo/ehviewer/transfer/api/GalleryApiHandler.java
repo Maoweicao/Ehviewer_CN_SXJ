@@ -37,6 +37,8 @@ import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.core.DeleteTaskExecutor;
+import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.unifile.UniFile;
 
 import java.io.ByteArrayOutputStream;
@@ -361,21 +363,9 @@ public class GalleryApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Gallery");
             }
             
-            // 在主线程执行删除，避免View线程冲突
-            runOnUiThreadSync(() -> downloadManager.deleteDownload(gid));
-            
-            // 删除下载目录文件
-            if (Settings.isDeleteFilesOnRemoteDelete()) {
-                UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
-                if (downloadDir != null && downloadDir.isDirectory()) {
-                    downloadDir.delete();
-                }
-            }
-            
-            // Invalidate cache
-            ResponseCache.getInstance().invalidateGalleries();
-            
-            return ResponseBuilder.jsonSuccess("{\"success\":true,\"message\":\"Gallery deleted\"}");
+            UnifiedTask task = DeleteTaskExecutor.getInstance().submitGalleryDelete(
+                    context, java.util.Collections.singletonList(gid), Settings.isDeleteFilesOnRemoteDelete());
+            return ResponseBuilder.accepted(deleteTaskJson(task));
             
         } catch (Exception e) {
             Log.e(TAG, "Error deleting gallery", e);
@@ -403,43 +393,24 @@ public class GalleryApiHandler extends BaseApiHandler {
                     "No GIDs provided");
             }
             
-            int successCount = 0;
-            int failCount = 0;
-            
-            for (long gid : gids) {
-                DownloadInfo info = downloadManager.getDownloadInfo(gid);
-                
-                if (info == null) {
-                    failCount++;
-                    continue;
-                }
-                
-                // 在主线程执行删除，避免View线程冲突
-                long finalGid = gid;
-                runOnUiThreadSync(() -> downloadManager.deleteDownload(finalGid));
-                
-                // 删除下载目录文件
-                if (Settings.isDeleteFilesOnRemoteDelete()) {
-                    UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
-                    if (downloadDir != null && downloadDir.isDirectory()) {
-                        downloadDir.delete();
-                    }
-                }
-                
-                successCount++;
-            }
-            
-            // Invalidate cache
-            ResponseCache.getInstance().invalidateGalleries();
-            
-            String json = "{\"success\":true,\"deleted\":" + successCount + 
-                         ",\"failed\":" + failCount + "}";
-            return ResponseBuilder.jsonSuccess(json);
+            UnifiedTask task = DeleteTaskExecutor.getInstance().submitGalleryDelete(
+                    context, gids, Settings.isDeleteFilesOnRemoteDelete());
+            return ResponseBuilder.accepted(deleteTaskJson(task));
             
         } catch (Exception e) {
             Log.e(TAG, "Error batch deleting galleries", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
+    }
+
+    private String deleteTaskJson(UnifiedTask task) {
+        com.alibaba.fastjson.JSONObject response = new com.alibaba.fastjson.JSONObject();
+        response.put("success", true);
+        response.put("accepted", true);
+        response.put("taskId", task.taskId);
+        response.put("status", task.status);
+        response.put("total", task.total);
+        return response.toJSONString();
     }
     
     /**

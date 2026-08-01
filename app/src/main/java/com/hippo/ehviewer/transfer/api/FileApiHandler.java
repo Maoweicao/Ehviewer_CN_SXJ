@@ -22,12 +22,15 @@ import android.util.Log;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.FileTreeTaskExecutor;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
@@ -96,6 +99,18 @@ public class FileApiHandler extends BaseApiHandler {
             return handleFolderList(session);
         }
 
+        // GET /api/v1/folders/{root}/entries - 目录条目浏览
+        if (uri.matches("/api/v1/folders/[^/]+/entries")) {
+            String root = extractFolder(uri, "/api/v1/folders/", "/entries");
+            return handleEntries(session, root);
+        }
+
+        // GET /api/v1/folders/{root}/archive - 文件直接下载/目录ZIP归档
+        if (uri.matches("/api/v1/folders/[^/]+/archive")) {
+            String root = extractFolder(uri, "/api/v1/folders/", "/archive");
+            return handleArchive(session, root);
+        }
+
         // GET /api/v1/folders/{folder}/files
         if (uri.matches("/api/v1/folders/[^/]+/files")) {
             String folder = extractFolder(uri, "/api/v1/folders/", "/files");
@@ -149,6 +164,12 @@ public class FileApiHandler extends BaseApiHandler {
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("DELETE", uri);
 
+        // DELETE /api/v1/folders/{root}/entries?path=... - 删除文件或递归删除目录
+        if (uri.matches("/api/v1/folders/[^/]+/entries")) {
+            String root = extractFolder(uri, "/api/v1/folders/", "/entries");
+            return handleEntriesDelete(session, root);
+        }
+
         // DELETE /api/v1/folders/{folder}/files/batch
         if (uri.matches("/api/v1/folders/[^/]+/files/batch")) {
             String folder = extractFolder(uri, "/api/v1/folders/", "/files");
@@ -174,32 +195,31 @@ public class FileApiHandler extends BaseApiHandler {
         try {
             JSONArray foldersArray = new JSONArray();
 
-            // 添加已下载画廊文件夹
-            JSONObject downloadsFolder = new JSONObject();
-            downloadsFolder.put("name", "downloads");
-            downloadsFolder.put("path", "galleries");
-            
-            // 统计已下载画廊数量
-            try {
-                List<DownloadInfo> downloadList = downloadManager.getAllDownloadInfoList();
-                int completedCount = 0;
-                for (DownloadInfo info : downloadList) {
-                    if (info.state == DownloadInfo.STATE_FINISH) {
-                        completedCount++;
-                    }
-                }
-                downloadsFolder.put("fileCount", completedCount);
-                downloadsFolder.put("totalSize", 0);
-                downloadsFolder.put("totalSizeFormatted", completedCount + " 个画廊");
-            } catch (Exception e) {
-                TransferLogger.getInstance().e(TAG, "获取下载列表失败: " + e.getMessage());
-                downloadsFolder.put("fileCount", 0);
-                downloadsFolder.put("totalSize", 0);
-                downloadsFolder.put("totalSizeFormatted", "0 个画廊");
+            // 逻辑根：EhViewer 根目录
+            File appDir = AppConfig.getExternalAppDir();
+            if (appDir != null) {
+                JSONObject appRoot = new JSONObject();
+                appRoot.put("name", ROOT_APP);
+                appRoot.put("displayName", "EhViewer");
+                appRoot.put("path", appDir.getAbsolutePath());
+                appRoot.put("rootType", "app");
+                appRoot.put("isDirectory", true);
+                foldersArray.add(appRoot);
             }
-            foldersArray.add(downloadsFolder);
 
-            // 添加其他固定文件夹
+            // 逻辑根：当前画廊下载目录
+            UniFile downloadLocation = Settings.getDownloadLocation();
+            if (downloadLocation != null) {
+                JSONObject dlRoot = new JSONObject();
+                dlRoot.put("name", ROOT_DOWNLOADS);
+                dlRoot.put("displayName", "画廊下载目录");
+                dlRoot.put("path", downloadLocation.getUri().toString());
+                dlRoot.put("rootType", "downloads");
+                dlRoot.put("isDirectory", true);
+                foldersArray.add(dlRoot);
+            }
+
+            // 兼容旧固定目录（仍可用旧 /files 接口访问）
             for (Map.Entry<String, String> entry : FOLDER_MAP.entrySet()) {
                 String name = entry.getKey();
                 String path = entry.getValue();
@@ -1391,5 +1411,243 @@ public class FileApiHandler extends BaseApiHandler {
             default:
                 return "application/octet-stream";
         }
+    }
+
+    // ==================== 目录条目 API ====================
+
+    private static final String ROOT_APP = "ehviewer";
+    private static final String ROOT_DOWNLOADS = "downloads";
+
+    private static class DirEntry {
+        final UniFile file;
+        final boolean dir;
+        DirEntry(UniFile file, boolean dir) { this.file = file; this.dir = dir; }
+    }
+
+    /**
+     * 解析逻辑根为 UniFile。
+     * ehviewer  -> /sdcard/EhViewer
+     * downloads -> 当前配置的画廊下载位置（可能是 SAF）
+     */
+    private UniFile resolveRootUni(String root) {
+        if (ROOT_APP.equals(root)) {
+            File appDir = AppConfig.getExternalAppDir();
+            return appDir != null ? UniFile.fromFile(appDir) : null;
+        } else if (ROOT_DOWNLOADS.equals(root)) {
+            return Settings.getDownloadLocation();
+        }
+        return null;
+    }
+
+    /**
+     * 解析逻辑根为文件系统 File（仅当根为 file scheme）。
+     */
+    private File resolveRootFile(String root) {
+        UniFile uni = resolveRootUni(root);
+        if (uni == null) return null;
+        try {
+            android.net.Uri uri = uni.getUri();
+            if ("file".equalsIgnoreCase(uri.getScheme()) && uri.getPath() != null) {
+                return new File(uri.getPath());
+            }
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "解析根目录失败: " + root, e);
+        }
+        return null;
+    }
+
+    private String normalizeRelPath(String relPath) {
+        if (relPath == null) return "";
+        String normalized = relPath.trim().replace("\\", "/");
+        while (normalized.startsWith("/")) normalized = normalized.substring(1);
+        while (normalized.endsWith("/")) normalized = normalized.substring(0, normalized.length() - 1);
+        return normalized;
+    }
+
+    private boolean isValidRelPath(String relPath) {
+        if (relPath == null) return false;
+        String normalized = normalizeRelPath(relPath);
+        if (normalized.isEmpty()) return true;
+        for (String seg : normalized.split("/")) {
+            if (seg.isEmpty() || ".".equals(seg) || "..".equals(seg)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 在根下按相对路径解析 UniFile，逐段 subFile，非法段已在上层过滤。
+     */
+    private UniFile resolveEntryUni(String root, String relPath) {
+        UniFile base = resolveRootUni(root);
+        if (base == null) return null;
+        String normalized = normalizeRelPath(relPath);
+        if (normalized.isEmpty()) return base;
+        UniFile cur = base;
+        for (String seg : normalized.split("/")) {
+            cur = cur.subFile(seg);
+            if (cur == null) return null;
+        }
+        return cur;
+    }
+
+    /**
+     * 在根下解析为文件系统 File，并用 canonical path 校验未越界。
+     */
+    private File resolveEntryFile(String root, String relPath) {
+        File base = resolveRootFile(root);
+        if (base == null) return null;
+        String normalized = normalizeRelPath(relPath);
+        if (normalized.isEmpty()) return base;
+        File target = new File(base, normalized);
+        try {
+            String baseCanonical = base.getCanonicalPath();
+            String targetCanonical = target.getCanonicalPath();
+            if (!targetCanonical.equals(baseCanonical) && !targetCanonical.startsWith(baseCanonical + File.separator)) {
+                return null;
+            }
+        } catch (IOException e) {
+            TransferLogger.getInstance().e(TAG, "路径越界检查失败: " + relPath, e);
+            return null;
+        }
+        return target;
+    }
+
+    /**
+     * GET /api/v1/folders/{root}/entries?path=...&sort=name|size|time&order=asc|desc
+     */
+    private NanoHTTPD.Response handleEntries(NanoHTTPD.IHTTPSession session, String root) {
+        String relPath = RequestParser.getQueryParameter(session, "path", "");
+        if (!isValidRelPath(relPath)) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid path");
+        }
+        String normalized = normalizeRelPath(relPath);
+        String sort = RequestParser.getQueryParameter(session, "sort", "name");
+        String order = RequestParser.getQueryParameter(session, "order", "asc");
+
+        UniFile base = resolveEntryUni(root, normalized);
+        if (base == null || !base.isDirectory()) {
+            return ResponseBuilder.notFound("Directory");
+        }
+
+        try {
+            UniFile[] children = base.listFiles();
+            List<DirEntry> entries = new ArrayList<>();
+            if (children != null) {
+                for (UniFile child : children) {
+                    String name = child.getName();
+                    if (name == null) continue;
+                    entries.add(new DirEntry(child, child.isDirectory()));
+                }
+            }
+
+            entries.sort((a, b) -> {
+                if (a.dir != b.dir) return a.dir ? -1 : 1;
+                int cmp;
+                switch (sort) {
+                    case "size": cmp = Long.compare(a.file.length(), b.file.length()); break;
+                    case "time": cmp = Long.compare(a.file.lastModified(), b.file.lastModified()); break;
+                    default: cmp = a.file.getName().compareToIgnoreCase(b.file.getName());
+                }
+                return "asc".equals(order) ? cmp : -cmp;
+            });
+
+            JSONArray entriesArray = new JSONArray();
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            for (DirEntry entry : entries) {
+                String name = entry.file.getName();
+                String entryPath = normalized.isEmpty() ? name : normalized + "/" + name;
+                JSONObject obj = new JSONObject();
+                obj.put("name", name);
+                obj.put("path", entryPath);
+                obj.put("isDirectory", entry.dir);
+                obj.put("size", entry.dir ? 0 : entry.file.length());
+                obj.put("sizeFormatted", entry.dir ? "" : formatSize(entry.file.length()));
+                long lastModified = entry.file.lastModified();
+                obj.put("lastModified", lastModified);
+                obj.put("lastModifiedFormatted", lastModified > 0 ? sdf.format(new Date(lastModified)) : "");
+                obj.put("extension", entry.dir ? "" : getExtension(name));
+                entriesArray.add(obj);
+            }
+
+            JSONObject response = new JSONObject();
+            response.put("root", root);
+            response.put("path", normalized);
+            response.put("parentPath", normalized.contains("/") ? normalized.substring(0, normalized.lastIndexOf('/')) : "");
+            response.put("total", entriesArray.size());
+            response.put("entries", entriesArray);
+            return ResponseBuilder.jsonSuccess(response.toJSONString());
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "获取目录条目失败", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * GET /api/v1/folders/{root}/archive?path=...
+     * 文件直接下载（支持 Range），目录异步打包为 ZIP 返回 202 + taskId。
+     */
+    private NanoHTTPD.Response handleArchive(NanoHTTPD.IHTTPSession session, String root) {
+        String relPath = RequestParser.getQueryParameter(session, "path", "");
+        if (!isValidRelPath(relPath)) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid path");
+        }
+        String normalized = normalizeRelPath(relPath);
+        if (normalized.isEmpty()) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Cannot archive root");
+        }
+
+        File target = resolveEntryFile(root, normalized);
+        if (target == null || !target.exists()) {
+            return ResponseBuilder.notFound("Path");
+        }
+
+        if (target.isFile()) {
+            return serveFileWithRange(target, session.getHeaders().get("range"));
+        }
+
+        UnifiedTask task = FileTreeTaskExecutor.getInstance().archive(target, context.getCacheDir());
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("accepted", true);
+        response.put("taskId", task.taskId);
+        response.put("status", task.status);
+        response.put("total", 1);
+        return ResponseBuilder.accepted(response.toJSONString());
+    }
+
+    /**
+     * DELETE /api/v1/folders/{root}/entries?path=...
+     * 删除文件或递归删除目录，全部通过异步任务执行。
+     */
+    private NanoHTTPD.Response handleEntriesDelete(NanoHTTPD.IHTTPSession session, String root) {
+        if (!Settings.isRemoteDeleteEnabled()) {
+            return ResponseBuilder.forbidden("Remote delete is disabled");
+        }
+        String relPath = RequestParser.getQueryParameter(session, "path", "");
+        if (!isValidRelPath(relPath)) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid path");
+        }
+        String normalized = normalizeRelPath(relPath);
+        if (normalized.isEmpty()) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Cannot delete root");
+        }
+
+        File target = resolveEntryFile(root, normalized);
+        if (target == null || !target.exists()) {
+            return ResponseBuilder.notFound("Path");
+        }
+
+        if (ROOT_DOWNLOADS.equals(root) && target.isDirectory()) {
+            TransferLogger.getInstance().w(TAG, "删除下载目录下的文件夹，下载记录可能残留: " + target.getAbsolutePath());
+        }
+
+        UnifiedTask task = FileTreeTaskExecutor.getInstance().delete(target);
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("accepted", true);
+        response.put("taskId", task.taskId);
+        response.put("status", task.status);
+        response.put("total", 1);
+        return ResponseBuilder.accepted(response.toJSONString());
     }
 }

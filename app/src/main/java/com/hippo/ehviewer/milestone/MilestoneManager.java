@@ -124,7 +124,7 @@ public class MilestoneManager {
     }
 
     public long getTotalDownloadCount() {
-        return mPrefs.getLong(KEY_TOTAL_DOWNLOAD_COUNT, 0);
+        return EhDB.getDownloadHistoryCount();
     }
 
     public long getTotalSearchCount() {

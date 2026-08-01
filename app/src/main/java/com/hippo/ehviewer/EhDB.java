@@ -45,6 +45,8 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.dao.DownloadLabelDao;
 import com.hippo.ehviewer.dao.DownloadsDao;
+import com.hippo.ehviewer.dao.DownloadHistory;
+import com.hippo.ehviewer.dao.DownloadHistoryDao;
 import com.hippo.ehviewer.dao.Filter;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.dao.GalleryTagsDao;
@@ -272,6 +274,15 @@ public class EhDB {
                             "\"RETRY_COUNT\" INTEGER NOT NULL ," +
                             "\"CREATED_AT\" INTEGER NOT NULL );");
                     android.util.Log.i("EhDB", "SYSTEM_DOWNLOAD_TASKS table created successfully");
+                }
+
+                if (oldVersion < 12) {
+                    android.util.Log.i("EhDB", "Creating DOWNLOAD_HISTORY table");
+                    db.execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOAD_HISTORY\" (" +
+                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ,\"TOKEN\" TEXT,\"TITLE\" TEXT,\"TITLE_JPN\" TEXT," +
+                            "\"FILE_PATH\" TEXT,\"COMPLETED_AT\" INTEGER NOT NULL ,\"LAST_DOWNLOADED_AT\" INTEGER NOT NULL ," +
+                            "\"DOWNLOAD_COUNT\" INTEGER NOT NULL ,\"DELETION_TYPE\" INTEGER NOT NULL ," +
+                            "\"MERGED_TARGET_GID\" INTEGER NOT NULL ,\"DELETED_AT\" INTEGER NOT NULL );");
                 }
                 
                 android.util.Log.i("EhDB", "Database upgrade completed successfully");
@@ -807,6 +818,50 @@ public class EhDB {
 
     public static synchronized void removeDownloadInfo(long gid) {
         sDaoSession.getDownloadsDao().deleteByKey(gid);
+    }
+
+    @Nullable
+    public static synchronized DownloadHistory getDownloadHistory(long gid) {
+        return sDaoSession.getDownloadHistoryDao().load(gid);
+    }
+
+    public static synchronized boolean hasDownloadHistory(long gid) {
+        return sDaoSession.getDownloadHistoryDao().load(gid) != null;
+    }
+
+    public static synchronized long getDownloadHistoryCount() {
+        return sDaoSession.getDownloadHistoryDao().count();
+    }
+
+    public static synchronized void recordDownloadCompleted(DownloadInfo info, @Nullable String filePath) {
+        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
+        DownloadHistory history = dao.load(info.gid);
+        long now = System.currentTimeMillis();
+        if (history == null) {
+            history = new DownloadHistory();
+            history.setGid(info.gid);
+            history.setCompletedAt(now);
+            history.setDownloadCount(0);
+        }
+        history.setToken(info.token);
+        history.setTitle(info.title);
+        history.setTitleJpn(info.titleJpn);
+        history.setFilePath(filePath);
+        history.setLastDownloadedAt(now);
+        history.setDownloadCount(history.getDownloadCount() + 1);
+        history.setDeletionType(DownloadHistory.DELETION_NONE);
+        history.setMergedTargetGid(0);
+        history.setDeletedAt(0);
+        dao.insertOrReplace(history);
+    }
+
+    public static synchronized void markDownloadHistoryDeleted(long gid, int deletionType, long mergedTargetGid) {
+        DownloadHistory history = sDaoSession.getDownloadHistoryDao().load(gid);
+        if (history == null) return;
+        history.setDeletionType(deletionType);
+        history.setMergedTargetGid(mergedTargetGid);
+        history.setDeletedAt(System.currentTimeMillis());
+        sDaoSession.getDownloadHistoryDao().update(history);
     }
 
     @Nullable

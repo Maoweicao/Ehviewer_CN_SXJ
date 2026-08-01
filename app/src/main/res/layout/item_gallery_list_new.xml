@@ -106,6 +106,13 @@
                 app:srcCompat="@drawable/v_download_x16" />
 
             <ImageView
+                android:id="@+id/merged"
+                android:layout_width="16dp"
+                android:layout_height="16dp"
+                android:visibility="gone"
+                app:srcCompat="@drawable/v_merge_x24" />
+
+            <ImageView
                 android:id="@+id/favourited"
                 android:layout_width="16dp"
                 android:layout_height="16dp"

@@ -60,6 +60,26 @@ export interface GalleryListResponse {
   galleries: Gallery[];
 }
 
+export interface AsyncTaskResponse {
+  success: boolean
+  accepted: boolean
+  taskId: string
+  status: string
+  total?: number
+}
+
+export interface TransferTaskStatus {
+  taskId: string
+  type: string
+  subType?: string
+  status: string
+  progress: number
+  total: number
+  completed: number
+  failed?: number
+  error?: string
+}
+
 export interface Label {
   name: string;
   count: number;
@@ -142,6 +162,28 @@ export interface Folder {
   fileCount: number;
   totalSize: number;
   totalSizeFormatted: string;
+  displayName?: string;
+  rootType?: string;
+  isDirectory?: boolean;
+}
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  isDirectory: boolean;
+  size: number;
+  sizeFormatted: string;
+  extension: string;
+  lastModified: number;
+  lastModifiedFormatted: string;
+}
+
+export interface EntriesResponse {
+  root: string;
+  path: string;
+  parentPath: string;
+  total: number;
+  entries: FileEntry[];
 }
 
 export interface FileItem {
@@ -737,14 +779,17 @@ class EhViewerAPI {
   }
 
   async deleteGallery(gid: number): Promise<void> {
-    return this.request(`/api/v1/galleries/${gid}`, { method: 'DELETE' });
+    const task = await this.request<AsyncTaskResponse>(`/api/v1/galleries/${gid}`, { method: 'DELETE' });
+    await this.waitForTask(task.taskId)
   }
 
   async batchDeleteGalleries(gids: number[]): Promise<{ deleted: number; failed: number }> {
-    return this.request('/api/v1/galleries/batch', {
+    const task = await this.request<AsyncTaskResponse>('/api/v1/galleries/batch', {
       method: 'DELETE',
       body: JSON.stringify({ gids }),
     });
+    const result = await this.waitForTask(task.taskId)
+    return { deleted: result.completed - (result.failed || 0), failed: result.failed || 0 }
   }
 
   getThumbnailUrl(gid: number): string {
@@ -782,6 +827,38 @@ class EhViewerAPI {
     return this.request<FileListResponse>(url);
   }
 
+  async getEntries(root: string, path = '', sort = 'name', order = 'asc'): Promise<EntriesResponse> {
+    const params = new URLSearchParams();
+    params.set('path', path);
+    params.set('sort', sort);
+    params.set('order', order);
+    return this.request<EntriesResponse>(`/api/v1/folders/${encodeURIComponent(root)}/entries?${params.toString()}`);
+  }
+
+  /** 目录归档：返回 202 + taskId */
+  async archivePath(root: string, path: string): Promise<AsyncTaskResponse> {
+    return this.request<AsyncTaskResponse>(`/api/v1/folders/${encodeURIComponent(root)}/archive?path=${encodeURIComponent(path)}`);
+  }
+
+  /** 删除文件或递归删除目录：返回 202 + taskId */
+  async deleteEntry(root: string, path: string): Promise<AsyncTaskResponse> {
+    return this.request<AsyncTaskResponse>(`/api/v1/folders/${encodeURIComponent(root)}/entries?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+  }
+
+  /** 任务归档 ZIP 下载链接 */
+  getTaskDownloadUrl(taskId: string): string {
+    let url = `${this.baseUrl}/api/v1/tasks/${encodeURIComponent(taskId)}/download`;
+    if (this.token) url += `?token=${this.token}`;
+    return url;
+  }
+
+  /** 文件直接下载（走 archive 端点，支持嵌套路径与 Range） */
+  getEntryDownloadUrl(root: string, path: string): string {
+    let url = `${this.baseUrl}/api/v1/folders/${encodeURIComponent(root)}/archive?path=${encodeURIComponent(path)}`;
+    if (this.token) url += `&token=${this.token}`;
+    return url;
+  }
+
   getFileDownloadUrl(folder: string, filename: string): string {
     let url = `${this.baseUrl}/api/v1/folders/${encodeURIComponent(folder)}/files/${encodeURIComponent(filename)}`;
     if (this.token) url += `?token=${this.token}`;
@@ -796,6 +873,23 @@ class EhViewerAPI {
     return this.request(`/api/v1/folders/${encodeURIComponent(folder)}/files/${encodeURIComponent(filename)}`, {
       method: 'DELETE',
     });
+  }
+
+  async getTaskStatus(taskId: string): Promise<TransferTaskStatus> {
+    return this.request<TransferTaskStatus>(`/api/v1/tasks/${encodeURIComponent(taskId)}`)
+  }
+
+  async waitForTask(taskId: string, maxWait = 10 * 60 * 1000): Promise<TransferTaskStatus> {
+    const started = Date.now()
+    while (Date.now() - started < maxWait) {
+      const task = await this.getTaskStatus(taskId)
+      if (task.status === 'completed') return task
+      if (task.status === 'failed' || task.status === 'cancelled') {
+        throw new Error(task.error || `任务${task.status}`)
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+    throw new Error('任务处理超时，请稍后在任务中心查看状态')
   }
 
   async batchDeleteFiles(folder: string, filenames: string[]): Promise<{ deleted: number; failed: number }> {
@@ -1041,7 +1135,9 @@ class EhViewerAPI {
   }
 
   async deleteDownload(gid: number): Promise<{ success: boolean; message: string; gid: number }> {
-    return this.request(`/api/v1/downloads/${gid}`, { method: 'DELETE' })
+    const task = await this.request<AsyncTaskResponse>(`/api/v1/downloads/${gid}`, { method: 'DELETE' })
+    await this.waitForTask(task.taskId)
+    return { success: true, message: 'Download deleted', gid }
   }
 
   async batchStartDownloads(gids: number[]): Promise<{ success: boolean; message: string; count: number }> {
@@ -1059,10 +1155,12 @@ class EhViewerAPI {
   }
 
   async batchDeleteDownloads(gids: number[]): Promise<{ success: boolean; message: string; count: number }> {
-    return this.request('/api/v1/downloads/batch', {
+    const task = await this.request<AsyncTaskResponse>('/api/v1/downloads/batch', {
       method: 'DELETE',
       body: JSON.stringify({ gids }),
     })
+    await this.waitForTask(task.taskId)
+    return { success: true, message: 'Batch delete completed', count: gids.length }
   }
 
   // ==================== Relay Download ====================

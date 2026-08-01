@@ -906,6 +906,8 @@
     <string name="settings_advanced_download_category_priority_order_summary">拖拽排序画廊类型，最顶上的最先开始下载</string>
     <string name="settings_advanced_download_treat_removed_as_complete">将被移除的画廊视为已完成</string>
     <string name="settings_advanced_download_treat_removed_as_complete_summary">若画廊已被源站移除，则自动标记为下载完成</string>
+    <string name="settings_advanced_duplicate_download_blocking">重复下载拦截</string>
+    <string name="settings_advanced_duplicate_download_blocking_summary">不再添加已记录在下载历史中的画廊</string>
     <string name="settings_advanced_download_prefetch_pages">排序前预取页数</string>
     <string name="settings_advanced_download_prefetch_pages_summary">排序前从网络获取页面数量，确保排序顺序准确</string>
     <string name="settings_advanced_download_prefetch_pages_concurrency">预取页数并发上限</string>

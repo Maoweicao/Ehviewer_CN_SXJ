@@ -51,6 +51,15 @@
         tools:ignore="SpUsage"/>
 
     <ImageView
+        android:id="@+id/merged"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="top|left"
+        android:layout_margin="4dp"
+        android:visibility="gone"
+        app:srcCompat="@drawable/v_merge_x24" />
+
+    <ImageView
         android:id="@+id/selected"
         android:layout_width="24dp"
         android:layout_height="24dp"

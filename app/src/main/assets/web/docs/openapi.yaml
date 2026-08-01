@@ -360,6 +360,29 @@ components:
           items:
             $ref: "#/components/schemas/FileItem"
 
+    FileEntry:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: 相对路径
+        isDirectory:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        sizeFormatted:
+          type: string
+        extension:
+          type: string
+        lastModified:
+          type: integer
+          format: int64
+        lastModifiedFormatted:
+          type: string
+
     FilePreviewResponse:
       type: object
       properties:
@@ -553,6 +576,26 @@ components:
         message:
           type: string
 
+    AsyncTaskResponse:
+      type: object
+      required: [success, accepted, taskId, status]
+      properties:
+        success:
+          type: boolean
+          example: true
+        accepted:
+          type: boolean
+          example: true
+        taskId:
+          type: string
+          example: "delete-uuid-xxx"
+        status:
+          type: string
+          example: "pending"
+        total:
+          type: integer
+          example: 1
+
     ThumbnailParams:
       type: object
       properties:
@@ -577,7 +620,7 @@ components:
           example: "compress-uuid-xxx"
         type:
           type: string
-          enum: [push, compress, relay]
+          enum: [push, compress, relay, delete]
         subType:
           type: string
           example: "downloads"
@@ -597,6 +640,12 @@ components:
         completed:
           type: integer
           example: 2
+        failed:
+          type: integer
+          example: 0
+        error:
+          type: string
+          nullable: true
         createdTime:
           type: integer
           format: int64
@@ -912,6 +961,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Galleries]
+      summary: 异步删除画廊
+      description: 创建删除任务。任务完成前请通过 /api/v1/tasks/{taskId} 查询状态。
+      operationId: deleteGallery
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "202":
+          description: 删除任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncTaskResponse"
 
   # ==================== Integrity Check ====================
   /api/v1/folders/{folder}/files/{filename}/hash:
@@ -1088,25 +1156,6 @@ paths:
                     items:
                       type: string
 
-    delete:
-      tags: [Galleries]
-      summary: 删除画廊
-      operationId: deleteGallery
-      parameters:
-        - name: gid
-          in: path
-          required: true
-          schema:
-            type: integer
-            format: int64
-      responses:
-        "200":
-          description: 删除成功
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/SuccessResponse"
-
   /api/v1/galleries/batch:
     delete:
       tags: [Galleries]
@@ -1280,7 +1329,7 @@ paths:
     get:
       tags: [Folders]
       summary: 获取文件夹列表
-      description: 获取 EhViewer 所有可用文件夹
+      description: 获取 EhViewer 根目录与当前画廊下载目录两个逻辑根
       operationId: getFolders
       responses:
         "200":
@@ -1289,6 +1338,169 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FolderListResponse"
+
+  /api/v1/folders/{root}/entries:
+    get:
+      tags: [Folders]
+      summary: 浏览目录条目
+      description: 按相对路径浏览目录，返回文件和目录混合列表，目录始终排在前面
+      operationId: getEntries
+      parameters:
+        - name: root
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ehviewer, downloads]
+        - name: path
+          in: query
+          description: 相对路径，空为根目录
+          schema:
+            type: string
+            default: ""
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [name, size, time]
+            default: name
+        - name: order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: asc
+      responses:
+        "200":
+          description: 目录条目
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  root:
+                    type: string
+                  path:
+                    type: string
+                  parentPath:
+                    type: string
+                  total:
+                    type: integer
+                  entries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FileEntry"
+        "400":
+          description: 非法路径
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 目录不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [Folders]
+      summary: 删除文件或递归删除目录
+      description: 异步任务删除，返回 202 + taskId。需开启远程删除开关。
+      operationId: deleteEntry
+      parameters:
+        - name: root
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ehviewer, downloads]
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: 删除任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncTaskResponse"
+        "403":
+          description: 远程删除未开启
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "400":
+          description: 非法路径或不能删除根目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 路径不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/folders/{root}/archive:
+    get:
+      tags: [Folders]
+      summary: 文件直接下载或目录ZIP归档
+      description: 文件路径直接返回内容（支持 Range），目录路径创建异步打包任务返回 202 + taskId
+      operationId: archivePath
+      parameters:
+        - name: root
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ehviewer, downloads]
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          description: 断点续传范围（仅文件）
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 文件内容
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 部分内容（断点续传）
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "202":
+          description: 目录归档任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncTaskResponse"
+        "400":
+          description: 非法路径或不能归档根目录
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 路径不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ==================== Files ====================
   /api/v1/folders/{folder}/files:
@@ -1720,7 +1932,7 @@ paths:
           description: 任务类型筛选
           schema:
             type: string
-            enum: [all, push, compress]
+          enum: [all, push, compress, delete]
             default: all
         - name: status
           in: query
@@ -1743,6 +1955,50 @@ paths:
                       $ref: "#/components/schemas/UnifiedTask"
                   total:
                     type: integer
+
+  /api/v1/tasks/{taskId}/download:
+    get:
+      tags: [Tasks]
+      summary: 下载任务归档ZIP
+      description: 下载目录归档任务生成的 ZIP，支持 Range 断点续传
+      operationId: downloadTaskFile
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: Range
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ZIP 文件
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: 部分内容（断点续传）
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: 任务未完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务或文件不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   /api/v1/tasks/{taskId}:
     get:
@@ -1999,12 +2255,12 @@ paths:
                   items:
                     type: integer
       responses:
-        "200":
-          description: 批量删除完成
+        "202":
+          description: 批量删除任务已创建
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SuccessResponse"
+                $ref: "#/components/schemas/AsyncTaskResponse"
 
   /api/v1/downloads/{gid}:
     get:
@@ -2041,12 +2297,12 @@ paths:
           schema:
             type: integer
       responses:
-        "200":
-          description: 删除成功
+        "202":
+          description: 删除任务已创建
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SuccessResponse"
+                $ref: "#/components/schemas/AsyncTaskResponse"
 
   /api/v1/downloads/{gid}/start:
     post:

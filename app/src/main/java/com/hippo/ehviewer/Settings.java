@@ -2030,6 +2030,16 @@ public class Settings {
         putBoolean(KEY_ADVANCED_DOWNLOAD_SORT_ENABLED, value);
     }
 
+    public static final String KEY_DUPLICATE_DOWNLOAD_BLOCKING_ENABLED = "duplicate_download_blocking_enabled";
+
+    public static boolean getDuplicateDownloadBlockingEnabled() {
+        return getBoolean(KEY_DUPLICATE_DOWNLOAD_BLOCKING_ENABLED, true);
+    }
+
+    public static void setDuplicateDownloadBlockingEnabled(boolean value) {
+        putBoolean(KEY_DUPLICATE_DOWNLOAD_BLOCKING_ENABLED, value);
+    }
+
     public static final String KEY_DOWNLOAD_CATEGORY_PRIORITY_ORDER = "download_category_priority_order";
 
     public static String getDownloadCategoryPriorityOrder() {

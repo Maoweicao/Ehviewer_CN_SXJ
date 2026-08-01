@@ -21,11 +21,14 @@ import android.content.Context;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.FileTreeTaskExecutor;
 import com.hippo.ehviewer.transfer.core.TaskManager;
 import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.ehviewer.ui.task.BackgroundTaskInfo;
 import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager;
 
+import java.io.File;
+import java.io.FileInputStream;
 import java.util.List;
 
 import fi.iki.elonen.NanoHTTPD;
@@ -51,6 +54,12 @@ public class TasksApiHandler extends BaseApiHandler {
         // GET /api/v1/tasks - list all transfer tasks
         if (uri.equals("/api/v1/tasks")) {
             return handleGetAllTasks(session);
+        }
+
+        // GET /api/v1/tasks/{taskId}/download - 下载归档ZIP
+        if (uri.matches("/api/v1/tasks/[^/]+/download")) {
+            String taskId = uri.substring("/api/v1/tasks/".length(), uri.length() - "/download".length());
+            return handleTaskDownload(session, taskId);
         }
 
         // GET /api/v1/tasks/{taskId} - get transfer task status
@@ -121,6 +130,54 @@ public class TasksApiHandler extends BaseApiHandler {
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
+        } catch (Exception e) {
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * GET /api/v1/tasks/{taskId}/download
+     */
+    private NanoHTTPD.Response handleTaskDownload(NanoHTTPD.IHTTPSession session, String taskId) {
+        UnifiedTask task = taskManager.getTask(taskId);
+        if (task == null) {
+            return ResponseBuilder.notFound("Task");
+        }
+        if (!UnifiedTask.STATUS_COMPLETED.equals(task.status)) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Task not completed");
+        }
+        File file = FileTreeTaskExecutor.getInstance().getArchive(taskId);
+        if (file == null || !file.exists()) {
+            return ResponseBuilder.notFound("File");
+        }
+        try {
+            long fileLength = file.length();
+            String rangeHeader = session.getHeaders().get("range");
+            if (rangeHeader != null && rangeHeader.startsWith("bytes=")) {
+                String range = rangeHeader.substring(6);
+                String[] parts = range.split("-");
+                long start = Long.parseLong(parts[0]);
+                long end = parts.length > 1 && !parts[1].isEmpty() ? Long.parseLong(parts[1]) : fileLength - 1;
+                if (start >= fileLength || end < start) {
+                    return NanoHTTPD.newFixedLengthResponse(
+                            NanoHTTPD.Response.Status.RANGE_NOT_SATISFIABLE, "text/plain", "Range not satisfiable");
+                }
+                if (end >= fileLength) end = fileLength - 1;
+                long length = end - start + 1;
+                FileInputStream fis = new FileInputStream(file);
+                fis.skip(start);
+                NanoHTTPD.Response response = NanoHTTPD.newFixedLengthResponse(
+                        NanoHTTPD.Response.Status.PARTIAL_CONTENT, "application/zip", fis, length);
+                response.addHeader("Content-Range", "bytes " + start + "-" + end + "/" + fileLength);
+                response.addHeader("Content-Disposition", "attachment; filename=\"" + file.getName() + "\"");
+                return response;
+            }
+            FileInputStream fis = new FileInputStream(file);
+            NanoHTTPD.Response response = NanoHTTPD.newFixedLengthResponse(
+                    NanoHTTPD.Response.Status.OK, "application/zip", fis, fileLength);
+            response.addHeader("Content-Disposition", "attachment; filename=\"" + file.getName() + "\"");
+            response.addHeader("Accept-Ranges", "bytes");
+            return response;
         } catch (Exception e) {
             return ResponseBuilder.internalError(e.getMessage());
         }

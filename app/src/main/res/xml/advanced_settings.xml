@@ -250,6 +250,12 @@
             android:summary="@string/settings_advanced_download_always_complete_summary"
             android:title="@string/settings_advanced_download_always_complete" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="duplicate_download_blocking_enabled"
+            android:summary="@string/settings_advanced_duplicate_download_blocking_summary"
+            android:title="@string/settings_advanced_duplicate_download_blocking" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

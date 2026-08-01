@@ -13,23 +13,22 @@ import {
   List,
   SafeArea,
 } from 'antd-mobile'
-import api, { type Folder, type FileItem } from '../api/client'
+import api, { type Folder, type FileEntry } from '../api/client'
 
-type ViewMode = 'folders' | 'files' | 'preview'
+type ViewMode = 'roots' | 'entries' | 'preview'
 
 export default function FileBrowser() {
   const navigate = useNavigate()
-  const [viewMode, setViewMode] = useState<ViewMode>('folders')
+  const [viewMode, setViewMode] = useState<ViewMode>('roots')
   const [folders, setFolders] = useState<Folder[]>([])
-  const [currentFolder, setCurrentFolder] = useState('')
-  const [files, setFiles] = useState<FileItem[]>([])
+  const [currentRoot, setCurrentRoot] = useState('')
+  const [currentPath, setCurrentPath] = useState('')
+  const [entries, setEntries] = useState<FileEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [totalFiles, setTotalFiles] = useState(0)
-  const [filePage, setFilePage] = useState(1)
   const [batchMode, setBatchMode] = useState(false)
-  const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set())
-  const [sort, setSort] = useState('time')
-  const [order, setOrder] = useState('desc')
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [sort, setSort] = useState('name')
+  const [order, setOrder] = useState('asc')
   const [search, setSearch] = useState('')
   const [previewContent, setPreviewContent] = useState('')
   const [previewName, setPreviewName] = useState('')
@@ -43,22 +42,14 @@ export default function FileBrowser() {
     }
   }, [])
 
-  const loadFiles = useCallback(async (folder: string, page: number, s: string, o: string, keyword: string, append = false) => {
+  const loadEntries = useCallback(async (root: string, path: string, s: string, o: string) => {
     setLoading(true)
     try {
-      const data = await api.getFiles(folder, page, 50, s, o, keyword)
-      if (append) {
-        setFiles(prev => [...prev, ...(data.files || [])])
-      } else {
-        setFiles(data.files || [])
-      }
-      setTotalFiles(data.total || 0)
+      const data = await api.getEntries(root, path, s, o)
+      setEntries(data.entries || [])
     } catch (e: unknown) {
-      console.error('loadFiles error:', e)
-      if (!append) {
-        setFiles([])
-        setTotalFiles(0)
-      }
+      console.error('loadEntries error:', e)
+      setEntries([])
     } finally {
       setLoading(false)
     }
@@ -66,130 +57,154 @@ export default function FileBrowser() {
 
   useEffect(() => {
     loadFolders()
-  }, [])
+  }, [loadFolders])
 
-  const openFolder = (name: string) => {
-    setCurrentFolder(name)
-    setFiles([])
-    setTotalFiles(0)
-    setFilePage(1)
+  const openRoot = (root: string) => {
+    setCurrentRoot(root)
+    setCurrentPath('')
+    setEntries([])
     setBatchMode(false)
-    setSelectedFiles(new Set())
+    setSelectedPaths(new Set())
     setSearch('')
-    setViewMode('files')
-    loadFiles(name, 1, sort, order, '')
+    setViewMode('entries')
+    loadEntries(root, '', sort, order)
+  }
+
+  const openEntry = (entry: FileEntry) => {
+    if (entry.isDirectory) {
+      setCurrentPath(entry.path)
+      setEntries([])
+      setBatchMode(false)
+      setSelectedPaths(new Set())
+      setSearch('')
+      loadEntries(currentRoot, entry.path, sort, order)
+    } else {
+      handlePreview(entry)
+    }
   }
 
   const handleSearch = (val: string) => {
     setSearch(val)
-    setFilePage(1)
-    loadFiles(currentFolder, 1, sort, order, val)
   }
 
   const handleSortChange = (val: string) => {
     setSort(val)
-    setFilePage(1)
-    loadFiles(currentFolder, 1, val, order, search)
+    loadEntries(currentRoot, currentPath, val, order)
   }
 
   const handleOrderChange = (val: string) => {
     setOrder(val)
-    setFilePage(1)
-    loadFiles(currentFolder, 1, sort, val, search)
+    loadEntries(currentRoot, currentPath, sort, val)
   }
 
-  const handleLoadMore = () => {
-    const nextPage = filePage + 1
-    setFilePage(nextPage)
-    loadFiles(currentFolder, nextPage, sort, order, search, true)
-  }
-
-  const hasMore = files.length < totalFiles
-
-  const handlePreview = async (file: FileItem) => {
+  const handlePreview = async (entry: FileEntry) => {
     try {
-      const data = await api.previewFile(currentFolder, file.name)
+      const data = await api.previewFile(currentRoot, entry.path)
       setPreviewContent(data.content || '')
-      setPreviewName(file.name)
+      setPreviewName(entry.name)
       setViewMode('preview')
     } catch {
       Toast.show({ content: '预览失败', icon: 'fail' })
     }
   }
 
-  const handleDownload = (file: FileItem) => {
-    const url = api.getFileDownloadUrl(currentFolder, file.name)
+  const handleDownload = async (entry: FileEntry) => {
+    if (entry.isDirectory) {
+      Toast.show({ content: '正在创建目录归档...', icon: 'loading' })
+      try {
+        const task = await api.archivePath(currentRoot, entry.path)
+        await api.waitForTask(task.taskId)
+        const ok = await Dialog.confirm({
+          content: '目录归档已完成，是否下载 ZIP？',
+          confirmText: '下载',
+        })
+        if (ok) {
+          const a = document.createElement('a')
+          a.href = api.getTaskDownloadUrl(task.taskId)
+          a.download = `${entry.name}.zip`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+        }
+      } catch (e: any) {
+        Toast.show({ content: e?.message || '归档失败', icon: 'fail' })
+      }
+      return
+    }
+    const url = api.getEntryDownloadUrl(currentRoot, entry.path)
     const a = document.createElement('a')
     a.href = url
-    a.download = file.name
+    a.download = entry.name
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    Toast.show({ content: `开始下载: ${file.name}` })
+    Toast.show({ content: `开始下载: ${entry.name}` })
   }
 
-  const handleDelete = async (file: FileItem) => {
+  const handleDelete = async (entry: FileEntry) => {
     const result = await Dialog.confirm({
-      content: `确定要删除 ${file.name} 吗？`,
+      content: `确定要删除${entry.isDirectory ? '文件夹' : '文件'} ${entry.name} 吗？${entry.isDirectory ? '（将递归删除其中所有内容）' : ''}`,
     })
-    if (result) {
-      try {
-        await api.deleteFile(currentFolder, file.name)
-        Toast.show({ content: '删除成功', icon: 'success' })
-        loadFiles(currentFolder, filePage, sort, order, search)
-      } catch {
-        Toast.show({ content: '删除失败', icon: 'fail' })
-      }
+    if (!result) return
+    try {
+      const task = await api.deleteEntry(currentRoot, entry.path)
+      await api.waitForTask(task.taskId)
+      Toast.show({ content: '删除成功', icon: 'success' })
+      loadEntries(currentRoot, currentPath, sort, order)
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '删除失败', icon: 'fail' })
     }
   }
 
   const toggleBatchMode = () => {
     setBatchMode(!batchMode)
-    if (batchMode) setSelectedFiles(new Set())
+    if (batchMode) setSelectedPaths(new Set())
   }
 
-  const toggleFileSelection = (name: string) => {
-    const newSet = new Set(selectedFiles)
-    if (newSet.has(name)) {
-      newSet.delete(name)
+  const toggleSelection = (path: string) => {
+    const newSet = new Set(selectedPaths)
+    if (newSet.has(path)) {
+      newSet.delete(path)
     } else {
-      newSet.add(name)
+      newSet.add(path)
     }
-    setSelectedFiles(newSet)
+    setSelectedPaths(newSet)
   }
 
   const toggleSelectAll = () => {
-    if (selectedFiles.size === files.length) {
-      setSelectedFiles(new Set())
+    if (selectedPaths.size === entries.length) {
+      setSelectedPaths(new Set())
     } else {
-      setSelectedFiles(new Set(files.map(f => f.name)))
+      setSelectedPaths(new Set(entries.map((e) => e.path)))
     }
   }
 
   const handleBatchDelete = async () => {
-    if (selectedFiles.size === 0) {
-      Toast.show({ content: '请先选择文件' })
+    if (selectedPaths.size === 0) {
+      Toast.show({ content: '请先选择文件或文件夹' })
       return
     }
     const result = await Dialog.confirm({
-      content: `确定要删除 ${selectedFiles.size} 个文件吗？`,
+      content: `确定要删除选中的 ${selectedPaths.size} 个文件/文件夹吗？`,
     })
-    if (result) {
-      try {
-        Toast.show({ content: '正在删除...', icon: 'loading' })
-        await api.batchDeleteFiles(currentFolder, Array.from(selectedFiles))
-        Toast.show({ content: `成功删除 ${selectedFiles.size} 个文件`, icon: 'success' })
-        setBatchMode(false)
-        setSelectedFiles(new Set())
-        loadFiles(currentFolder, 1, sort, order, search)
-      } catch (e: any) {
-        Toast.show({ content: e?.message || '删除失败', icon: 'fail' })
+    if (!result) return
+    try {
+      Toast.show({ content: '正在删除...', icon: 'loading' })
+      for (const path of Array.from(selectedPaths)) {
+        const task = await api.deleteEntry(currentRoot, path)
+        await api.waitForTask(task.taskId)
       }
+      Toast.show({ content: '删除完成', icon: 'success' })
+      setBatchMode(false)
+      setSelectedPaths(new Set())
+      loadEntries(currentRoot, currentPath, sort, order)
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '删除失败', icon: 'fail' })
     }
   }
 
-  const fileIcon = (ext: string, isGallery?: boolean) => {
-    if (isGallery) return '📚'
+  const fileIcon = (entry: FileEntry) => {
+    if (entry.isDirectory) return '📁'
     const m: Record<string, string> = {
       txt: '📄', log: '📋', json: '🔧', xml: '🔧', html: '🌐', css: '🎨',
       js: '⚡', java: '☕', kt: '🟣', py: '🐍', sh: '💻', md: '📝',
@@ -197,26 +212,43 @@ export default function FileBrowser() {
       zip: '📦', rar: '📦', '7z': '📦', tar: '📦', gz: '📦',
       pdf: '📕', doc: '📘', xls: '📊', ppt: '📙',
       mp3: '🎵', wav: '🎵', mp4: '🎬', avi: '🎬', mkv: '🎬',
-      folder: '📁',
     }
-    return m[ext] || '📄'
+    return m[entry.extension] || '📄'
   }
 
   const goBack = () => {
     if (viewMode === 'preview') {
-      setViewMode('files')
-    } else if (viewMode === 'files') {
-      setViewMode('folders')
-      setBatchMode(false)
-      setSelectedFiles(new Set())
+      setViewMode('entries')
+    } else if (viewMode === 'entries') {
+      if (currentPath) {
+        const idx = currentPath.lastIndexOf('/')
+        const parent = idx > 0 ? currentPath.substring(0, idx) : ''
+        setCurrentPath(parent)
+        setBatchMode(false)
+        setSelectedPaths(new Set())
+        setSearch('')
+        loadEntries(currentRoot, parent, sort, order)
+      } else {
+        setViewMode('roots')
+        setBatchMode(false)
+        setSelectedPaths(new Set())
+      }
     }
   }
 
-  const hasBack = viewMode !== 'folders'
-  const title = viewMode === 'folders' ? '文件管理' : viewMode === 'preview' ? previewName : currentFolder
+  const hasBack = viewMode !== 'roots'
+  const title = viewMode === 'roots'
+    ? '文件管理'
+    : viewMode === 'preview'
+      ? previewName
+      : currentPath ? `${currentPath}` : (folders.find((f) => f.name === currentRoot)?.displayName || currentRoot)
 
   const sortLabel = sort === 'time' ? '按时间' : sort === 'name' ? '按名称' : '按大小'
   const orderLabel = order === 'desc' ? '降序' : '升序'
+
+  const filteredEntries = search
+    ? entries.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
+    : entries
 
   return (
     <div>
@@ -224,7 +256,7 @@ export default function FileBrowser() {
         backArrow={hasBack}
         onBack={goBack}
         right={
-          viewMode === 'files' ? (
+          viewMode === 'entries' ? (
             <div style={{ display: 'flex', gap: 12 }}>
               <span
                 style={{ cursor: 'pointer', fontSize: 18 }}
@@ -239,22 +271,22 @@ export default function FileBrowser() {
         {title}
       </NavBar>
 
-      {/* Folders View */}
-      {viewMode === 'folders' && (
+      {/* Roots View */}
+      {viewMode === 'roots' && (
         <div className="page-content">
           {folders.length === 0 ? (
-            <Empty description="暂无文件夹" style={{ padding: '60px 0' }} />
+            <Empty description="暂无可用根目录" style={{ padding: '60px 0' }} />
           ) : (
             <List>
               {folders.map((f) => (
                 <List.Item
                   key={f.name}
                   description={f.path}
-                  onClick={() => openFolder(f.name)}
+                  onClick={() => openRoot(f.name)}
                   clickable
-                  extra={<span style={{ fontSize: 12, color: 'var(--text-light, #666)' }}>{f.fileCount}个文件, {f.totalSizeFormatted}</span>}
+                  extra={<span style={{ fontSize: 12, color: 'var(--text-light, #666)' }}>{f.displayName || ''}</span>}
                 >
-                  {f.name}
+                  {f.displayName || f.name}
                 </List.Item>
               ))}
             </List>
@@ -262,11 +294,11 @@ export default function FileBrowser() {
         </div>
       )}
 
-      {/* Files View */}
-      {viewMode === 'files' && (
+      {/* Entries View */}
+      {viewMode === 'entries' && (
         <>
           <SearchBar
-            placeholder="搜索文件..."
+            placeholder="搜索当前目录..."
             value={search}
             onChange={setSearch}
             onSearch={handleSearch}
@@ -293,46 +325,53 @@ export default function FileBrowser() {
             </Dropdown>
             {batchMode && (
               <Button size="mini" onClick={toggleSelectAll}>
-                {selectedFiles.size === files.length ? '取消全选' : '全选'}
+                {selectedPaths.size === entries.length ? '取消全选' : '全选'}
               </Button>
             )}
             <span style={{ fontSize: 12, color: 'var(--text-light, #666)', marginLeft: 'auto' }}>
-              {files.length}/{totalFiles}
+              {filteredEntries.length} 项
             </span>
           </div>
           <div className="page-content">
-            {loading && files.length === 0 ? (
+            {loading && entries.length === 0 ? (
               <div className="loading-container">
                 <SpinLoading style={{ '--size': '48px' }} />
               </div>
-            ) : !loading && files.length === 0 ? (
-              <Empty description="暂无文件" style={{ padding: '60px 0' }} />
+            ) : !loading && filteredEntries.length === 0 ? (
+              <Empty description="目录为空" style={{ padding: '60px 0' }} />
             ) : (
               <List>
-                {files.map((file) => (
+                {filteredEntries.map((entry) => (
                   <List.Item
-                    key={file.name}
+                    key={entry.path}
                     description={
                       <div style={{ textAlign: 'right' }}>
-                        <div>{file.isGallery ? `${file.pages || 0} 页` : file.sizeFormatted}</div>
-                        <div style={{ fontSize: 12, color: 'var(--text-light, #666)' }}>
-                          {file.isGallery ? `共 ${file.fileCount || 0} 个文件` : file.lastModifiedFormatted}
-                        </div>
+                        {entry.isDirectory ? <div>文件夹</div> : <div>{entry.sizeFormatted}</div>}
+                        {!entry.isDirectory && (
+                          <div style={{ fontSize: 12, color: 'var(--text-light, #666)' }}>
+                            {entry.lastModifiedFormatted}
+                          </div>
+                        )}
                       </div>
                     }
                     extra={
                       !batchMode ? (
                         <div style={{ display: 'flex', gap: 8 }}>
-                          {file.isGallery ? (
-                            <Button size="mini" color="primary" onClick={() => navigate(`/gallery/${file.gid}`)}>
-                              查看
-                            </Button>
+                          {entry.isDirectory ? (
+                            <>
+                              <Button size="mini" color="primary" onClick={() => handleDownload(entry)}>
+                                下载ZIP
+                              </Button>
+                              <Button size="mini" color="danger" onClick={() => handleDelete(entry)}>
+                                删除
+                              </Button>
+                            </>
                           ) : (
                             <>
-                              <Button size="mini" color="primary" onClick={() => handleDownload(file)}>
+                              <Button size="mini" color="primary" onClick={() => handleDownload(entry)}>
                                 下载
                               </Button>
-                              <Button size="mini" color="danger" onClick={() => handleDelete(file)}>
+                              <Button size="mini" color="danger" onClick={() => handleDelete(entry)}>
                                 删除
                               </Button>
                             </>
@@ -344,43 +383,30 @@ export default function FileBrowser() {
                     <div style={{ display: 'flex', alignItems: 'center' }}>
                       {batchMode && (
                         <Checkbox
-                          checked={selectedFiles.has(file.name)}
-                          onChange={() => toggleFileSelection(file.name)}
+                          checked={selectedPaths.has(entry.path)}
+                          onChange={() => toggleSelection(entry.path)}
                           style={{ marginRight: 8 }}
                         />
                       )}
                       <span className="file-icon" style={{ marginRight: 8 }}>
-                        {fileIcon(file.extension, file.isGallery)}
+                        {fileIcon(entry)}
                       </span>
                       <span
                         style={{ color: 'var(--primary, #2196f3)', cursor: 'pointer' }}
-                        onClick={() => {
-                          if (file.isGallery && file.gid) {
-                            navigate(`/gallery/${file.gid}`)
-                          } else {
-                            handlePreview(file)
-                          }
-                        }}
+                        onClick={() => openEntry(entry)}
                       >
-                        {file.name}
+                        {entry.name}
                       </span>
                     </div>
                   </List.Item>
                 ))}
               </List>
             )}
-            {hasMore && !loading && (
-              <div style={{ padding: '16px', textAlign: 'center' }}>
-                <Button onClick={handleLoadMore} loading={loading}>
-                  加载更多
-                </Button>
-              </div>
-            )}
           </div>
-          {batchMode && selectedFiles.size > 0 && (
+          {batchMode && selectedPaths.size > 0 && (
             <div style={{ position: 'fixed', bottom: 50, left: 0, right: 0, padding: '8px 16px', background: 'var(--card-bg, #fff)', borderTop: '1px solid var(--border, #e0e0e0)' }}>
               <Button block color="danger" onClick={handleBatchDelete}>
-                删除选中 ({selectedFiles.size})
+                删除选中 ({selectedPaths.size})
               </Button>
             </div>
           )}
@@ -392,18 +418,6 @@ export default function FileBrowser() {
       {viewMode === 'preview' && (
         <div className="page-content">
           <pre className="preview-text">{previewContent}</pre>
-          <div style={{ padding: '16px 0' }}>
-            <Button
-              block
-              color="primary"
-              onClick={() => {
-                const file = files.find((f) => f.name === previewName)
-                if (file) handleDownload(file)
-              }}
-            >
-              下载
-            </Button>
-          </div>
         </div>
       )}
     </div>

@@ -181,6 +181,19 @@ public class DownloadsScene extends ToolbarScene
     private static final String KEY_PAGE_SIZE = "page_size";
     private static final String KEY_SEARCH_KEY = "search_key";
     private static final String KEY_LAST_FILTER_SORT_ID = "last_filter_sort_id";
+    private static final String KEY_ADVANCED_FILTER_ACTIVE = "advanced_filter_active";
+    private static final String KEY_FILTER_CATEGORY_IDS = "filter_category_ids";
+    private static final String KEY_FILTER_STATUS_IDS = "filter_status_ids";
+    private static final String KEY_FILTER_SORT_ID = "filter_sort_id";
+    private static final String KEY_FILTER_TIME_FROM = "filter_time_from";
+    private static final String KEY_FILTER_TIME_TO = "filter_time_to";
+    private static final String KEY_FILTER_SIZE_FROM = "filter_size_from";
+    private static final String KEY_FILTER_SIZE_TO = "filter_size_to";
+    private static final String KEY_FILTER_PAGE_FROM = "filter_page_from";
+    private static final String KEY_FILTER_PAGE_TO = "filter_page_to";
+    private static final String KEY_FILTER_DUPLICATE_ONLY = "filter_duplicate_only";
+    private static final String KEY_FILTER_RATING_FROM = "filter_rating_from";
+    private static final String KEY_FILTER_RATING_TO = "filter_rating_to";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
@@ -260,6 +273,32 @@ public class DownloadsScene extends ToolbarScene
     private DownloadListInfosExecutor mCurrentExecutor;
     public String searchKey = null;
     private int mLastFilterSortId = 0;
+
+    /*---------------
+     Advanced filter state (survives rotation, cleared when the activity is destroyed)
+     ---------------*/
+    private boolean mAdvancedFilterActive = false;
+    @Nullable
+    private Set<Integer> mFilterCategoryIds;
+    @Nullable
+    private Set<Integer> mFilterStatusIds;
+    private int mFilterSortId = R.id.sort_by_default;
+    @Nullable
+    private Long mFilterTimeFrom;
+    @Nullable
+    private Long mFilterTimeTo;
+    @Nullable
+    private Long mFilterSizeFrom;
+    @Nullable
+    private Long mFilterSizeTo;
+    @Nullable
+    private Long mFilterPageFrom;
+    @Nullable
+    private Long mFilterPageTo;
+    private boolean mFilterDuplicateOnly = false;
+    private float mFilterRatingFrom = 0f;
+    private float mFilterRatingTo = 5f;
+    private boolean mPendingRestoreFilter = false;
 
     private int mInitPosition = -1;
 
@@ -445,10 +484,27 @@ public class DownloadsScene extends ToolbarScene
         pageSize = savedInstanceState.getInt(KEY_PAGE_SIZE, 1);
         searchKey = savedInstanceState.getString(KEY_SEARCH_KEY);
         mLastFilterSortId = savedInstanceState.getInt(KEY_LAST_FILTER_SORT_ID, 0);
+
+        mAdvancedFilterActive = savedInstanceState.getBoolean(KEY_ADVANCED_FILTER_ACTIVE, false);
+        ArrayList<Integer> categoryIds = savedInstanceState.getIntegerArrayList(KEY_FILTER_CATEGORY_IDS);
+        mFilterCategoryIds = categoryIds != null && !categoryIds.isEmpty() ? new HashSet<>(categoryIds) : null;
+        ArrayList<Integer> statusIds = savedInstanceState.getIntegerArrayList(KEY_FILTER_STATUS_IDS);
+        mFilterStatusIds = statusIds != null && !statusIds.isEmpty() ? new HashSet<>(statusIds) : null;
+        mFilterSortId = savedInstanceState.getInt(KEY_FILTER_SORT_ID, R.id.sort_by_default);
+        mFilterTimeFrom = savedInstanceState.containsKey(KEY_FILTER_TIME_FROM) ? savedInstanceState.getLong(KEY_FILTER_TIME_FROM) : null;
+        mFilterTimeTo = savedInstanceState.containsKey(KEY_FILTER_TIME_TO) ? savedInstanceState.getLong(KEY_FILTER_TIME_TO) : null;
+        mFilterSizeFrom = savedInstanceState.containsKey(KEY_FILTER_SIZE_FROM) ? savedInstanceState.getLong(KEY_FILTER_SIZE_FROM) : null;
+        mFilterSizeTo = savedInstanceState.containsKey(KEY_FILTER_SIZE_TO) ? savedInstanceState.getLong(KEY_FILTER_SIZE_TO) : null;
+        mFilterPageFrom = savedInstanceState.containsKey(KEY_FILTER_PAGE_FROM) ? savedInstanceState.getLong(KEY_FILTER_PAGE_FROM) : null;
+        mFilterPageTo = savedInstanceState.containsKey(KEY_FILTER_PAGE_TO) ? savedInstanceState.getLong(KEY_FILTER_PAGE_TO) : null;
+        mFilterDuplicateOnly = savedInstanceState.getBoolean(KEY_FILTER_DUPLICATE_ONLY, false);
+        mFilterRatingFrom = savedInstanceState.getFloat(KEY_FILTER_RATING_FROM, 0f);
+        mFilterRatingTo = savedInstanceState.getFloat(KEY_FILTER_RATING_TO, 5f);
+
         updateForLabel();
-        if (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default) {
-            gotoFilterAndSort(mLastFilterSortId);
-        }
+        // Defer applying filters until the view is created to avoid touching null views
+        mPendingRestoreFilter = mAdvancedFilterActive
+                || (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default);
     }
 
     @Override
@@ -460,6 +516,44 @@ public class DownloadsScene extends ToolbarScene
         outState.putInt(KEY_PAGE_SIZE, pageSize);
         outState.putString(KEY_SEARCH_KEY, searchKey);
         outState.putInt(KEY_LAST_FILTER_SORT_ID, mLastFilterSortId);
+
+        outState.putBoolean(KEY_ADVANCED_FILTER_ACTIVE, mAdvancedFilterActive);
+        if (mFilterCategoryIds != null) {
+            outState.putIntegerArrayList(KEY_FILTER_CATEGORY_IDS, new ArrayList<>(mFilterCategoryIds));
+        }
+        if (mFilterStatusIds != null) {
+            outState.putIntegerArrayList(KEY_FILTER_STATUS_IDS, new ArrayList<>(mFilterStatusIds));
+        }
+        outState.putInt(KEY_FILTER_SORT_ID, mFilterSortId);
+        if (mFilterTimeFrom != null) {
+            outState.putLong(KEY_FILTER_TIME_FROM, mFilterTimeFrom);
+        }
+        if (mFilterTimeTo != null) {
+            outState.putLong(KEY_FILTER_TIME_TO, mFilterTimeTo);
+        }
+        if (mFilterSizeFrom != null) {
+            outState.putLong(KEY_FILTER_SIZE_FROM, mFilterSizeFrom);
+        }
+        if (mFilterSizeTo != null) {
+            outState.putLong(KEY_FILTER_SIZE_TO, mFilterSizeTo);
+        }
+        if (mFilterPageFrom != null) {
+            outState.putLong(KEY_FILTER_PAGE_FROM, mFilterPageFrom);
+        }
+        if (mFilterPageTo != null) {
+            outState.putLong(KEY_FILTER_PAGE_TO, mFilterPageTo);
+        }
+        outState.putBoolean(KEY_FILTER_DUPLICATE_ONLY, mFilterDuplicateOnly);
+        outState.putFloat(KEY_FILTER_RATING_FROM, mFilterRatingFrom);
+        outState.putFloat(KEY_FILTER_RATING_TO, mFilterRatingTo);
+    }
+
+    private void applyPendingFilter() {
+        if (mAdvancedFilterActive) {
+            applyAdvancedFilter();
+        } else if (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default) {
+            gotoFilterAndSort(mLastFilterSortId);
+        }
     }
 
     @Nullable
@@ -772,6 +866,10 @@ public class DownloadsScene extends ToolbarScene
         super.onViewCreated(view, savedInstanceState);
         updateTitle();
         setNavigationIcon(R.drawable.v_arrow_left_dark_x24);
+        if (mPendingRestoreFilter) {
+            mPendingRestoreFilter = false;
+            applyPendingFilter();
+        }
     }
 
     @Override
@@ -1197,6 +1295,44 @@ public class DownloadsScene extends ToolbarScene
             }
         });
 
+        if (mAdvancedFilterActive) {
+            if (mFilterCategoryIds != null && !mFilterCategoryIds.contains(EhUtils.ALL_CATEGORY)) {
+                categoryTable.setSelectedCategories(mFilterCategoryIds);
+            }
+            if (mFilterStatusIds != null && !mFilterStatusIds.isEmpty()) {
+                statusAdapter.setSelectedItems(mFilterStatusIds);
+            }
+            if (mFilterSortId != R.id.sort_by_default) {
+                Set<Integer> savedSort = new HashSet<>();
+                savedSort.add(mFilterSortId);
+                sortAdapter.setSelectedItems(savedSort);
+                selectedSortId[0] = mFilterSortId;
+            }
+            if (mFilterTimeFrom != null) {
+                timeFromInput.setText(formatTimeInput(mFilterTimeFrom));
+            }
+            if (mFilterTimeTo != null) {
+                timeToInput.setText(formatTimeInput(mFilterTimeTo));
+            }
+            if (mFilterSizeFrom != null) {
+                sizeFromInput.setText(formatSizeInput(mFilterSizeFrom));
+            }
+            if (mFilterSizeTo != null) {
+                sizeToInput.setText(formatSizeInput(mFilterSizeTo));
+            }
+            if (mFilterPageFrom != null) {
+                pageFromInput.setText(String.valueOf(mFilterPageFrom));
+            }
+            if (mFilterPageTo != null) {
+                pageToInput.setText(String.valueOf(mFilterPageTo));
+            }
+            duplicateCheckbox.setChecked(mFilterDuplicateOnly);
+            ratingFromBar.setRating(mFilterRatingFrom);
+            ratingToBar.setRating(mFilterRatingTo);
+            ratingFrom[0] = mFilterRatingFrom;
+            ratingTo[0] = mFilterRatingTo;
+        }
+
         AlertDialog dialog = new AlertDialog.Builder(context)
                 .setView(linearLayout)
                 .setCancelable(true)
@@ -1242,20 +1378,65 @@ public class DownloadsScene extends ToolbarScene
 
             dialog.dismiss();
 
-            mProgressView.setVisibility(View.VISIBLE);
-            if (mRecyclerView != null) {
-                mRecyclerView.setVisibility(View.GONE);
-            }
+            // Stash the advanced filter state so it survives rotation
+            mFilterCategoryIds = categoryIds;
+            mFilterStatusIds = selectedStatusIds;
+            mFilterSortId = sortId;
+            mFilterTimeFrom = timeFrom;
+            mFilterTimeTo = timeTo;
+            mFilterSizeFrom = sizeFrom;
+            mFilterSizeTo = sizeTo;
+            mFilterPageFrom = pageFrom;
+            mFilterPageTo = pageTo;
+            mFilterDuplicateOnly = duplicateOnly;
+            mFilterRatingFrom = ratFrom;
+            mFilterRatingTo = ratTo;
+            mAdvancedFilterActive = true;
+            mLastFilterSortId = 0;
 
-            updateForLabel();
-
-            DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
-            executor.setDownloadSearchingListener(this);
-            cancelCurrentExecutor();
-            executor.executeFilterAndSort(categoryIds, selectedStatusIds, sortId, timeFrom, timeTo, sizeFrom, sizeTo, pageFrom, pageTo, duplicateOnly, ratFrom, ratTo);
-            mCurrentExecutor = executor;
-            searching = true;
+            applyAdvancedFilter();
         });
+    }
+
+    private void applyAdvancedFilter() {
+        mProgressView.setVisibility(View.VISIBLE);
+        if (mRecyclerView != null) {
+            mRecyclerView.setVisibility(View.GONE);
+        }
+
+        updateForLabel();
+
+        DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
+        executor.setDownloadSearchingListener(this);
+        cancelCurrentExecutor();
+        executor.executeFilterAndSort(mFilterCategoryIds, mFilterStatusIds, mFilterSortId,
+                mFilterTimeFrom, mFilterTimeTo, mFilterSizeFrom, mFilterSizeTo,
+                mFilterPageFrom, mFilterPageTo, mFilterDuplicateOnly, mFilterRatingFrom, mFilterRatingTo);
+        mCurrentExecutor = executor;
+        searching = true;
+    }
+
+    private String formatTimeInput(Long time) {
+        if (time == null) {
+            return "";
+        }
+        return new java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(time));
+    }
+
+    private String formatSizeInput(Long size) {
+        if (size == null) {
+            return "";
+        }
+        if (size % (1024L * 1024 * 1024) == 0) {
+            return (size / (1024L * 1024 * 1024)) + "GB";
+        }
+        if (size % (1024L * 1024) == 0) {
+            return (size / (1024L * 1024)) + "MB";
+        }
+        if (size % 1024L == 0) {
+            return (size / 1024L) + "KB";
+        }
+        return String.valueOf(size);
     }
 
     private Long parseTimeInput(String text) {
@@ -2175,7 +2356,10 @@ public class DownloadsScene extends ToolbarScene
 
     private void gotoFilterAndSort(int id) {
         mLastFilterSortId = id;
-        mProgressView.setVisibility(View.VISIBLE);
+        mAdvancedFilterActive = false;
+        if (mProgressView != null) {
+            mProgressView.setVisibility(View.VISIBLE);
+        }
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.GONE);
         }

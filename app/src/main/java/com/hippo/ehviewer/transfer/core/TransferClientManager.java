@@ -61,7 +61,9 @@ public class TransferClientManager {
     public TransferClientManager(Context context) {
         this.context = context.getApplicationContext();
         this.httpClient = new OkHttpClient.Builder()
-                .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                 .build();
         this.mainHandler = new Handler(Looper.getMainLooper());
     }
@@ -132,7 +134,9 @@ public class TransferClientManager {
                     .post(requestBody)
                     .build();
 
-            httpClient.newCall(request).execute();
+            try (Response ignored = httpClient.newCall(request).execute()) {
+                // Ensure the connection can be reused after registration.
+            }
         } catch (Exception e) {
             Log.w(TAG, "Failed to register to device", e);
         }
@@ -150,7 +154,9 @@ public class TransferClientManager {
                 try {
                     String url = "http://" + host + ":" + port + "/api/v1/connect";
                     Request request = new Request.Builder().url(url).delete().build();
-                    httpClient.newCall(request).execute();
+                    try (Response ignored = httpClient.newCall(request).execute()) {
+                        // Best-effort unregister.
+                    }
                 } catch (Exception e) {
                     Log.w(TAG, "Failed to unregister from device", e);
                 }

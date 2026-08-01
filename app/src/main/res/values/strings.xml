@@ -877,6 +877,8 @@
     <string name="settings_advanced_download_category_priority_order_summary">Drag to reorder gallery types, topmost downloads first</string>
     <string name="settings_advanced_download_treat_removed_as_complete">Treat removed galleries as completed</string>
     <string name="settings_advanced_download_treat_removed_as_complete_summary">Mark download as finished if gallery has been removed from source</string>
+    <string name="settings_advanced_duplicate_download_blocking">Block duplicate downloads</string>
+    <string name="settings_advanced_duplicate_download_blocking_summary">Do not add galleries already recorded in download history</string>
     <string name="settings_advanced_download_prefetch_pages">Prefetch page counts before sort</string>
     <string name="settings_advanced_download_prefetch_pages_summary">Fetch page counts from network before sorting to ensure accurate ordering</string>
     <string name="settings_advanced_download_prefetch_pages_concurrency">Prefetch concurrency limit</string>

@@ -30,6 +30,8 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.DeleteTaskExecutor;
+import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.lib.yorozuya.collect.LongList;
 
@@ -420,18 +422,9 @@ public class DownloadApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Download");
             }
 
-            long finalGid = gid;
-            runOnUiThreadSync(() -> downloadManager.deleteDownload(finalGid));
-
-            // 清除缓存
-            ResponseCache.getInstance().invalidateGalleries();
-
-            JSONObject response = new JSONObject();
-            response.put("success", true);
-            response.put("message", "Download deleted");
-            response.put("gid", gid);
-
-            return ResponseBuilder.jsonSuccess(response.toJSONString());
+            UnifiedTask task = DeleteTaskExecutor.getInstance().submitDownloadDelete(
+                    context, java.util.Collections.singletonList(gid));
+            return ResponseBuilder.accepted(deleteTaskJson(task));
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to delete download", e);
@@ -522,27 +515,27 @@ public class DownloadApiHandler extends BaseApiHandler {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "No GIDs provided");
             }
 
-            LongList gidList = new LongList(gidsArray.size());
+            java.util.List<Long> gids = new java.util.ArrayList<>();
             for (int i = 0; i < gidsArray.size(); i++) {
-                gidList.add(gidsArray.getLong(i));
+                gids.add(gidsArray.getLong(i));
             }
-
-            runOnUiThreadSync(() -> downloadManager.deleteRangeDownload(gidList));
-
-            // 清除缓存
-            ResponseCache.getInstance().invalidateGalleries();
-
-            JSONObject response = new JSONObject();
-            response.put("success", true);
-            response.put("message", "Batch delete completed");
-            response.put("count", gidsArray.size());
-
-            return ResponseBuilder.jsonSuccess(response.toJSONString());
+            UnifiedTask task = DeleteTaskExecutor.getInstance().submitDownloadDelete(context, gids);
+            return ResponseBuilder.accepted(deleteTaskJson(task));
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to batch delete downloads", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
+    }
+
+    private String deleteTaskJson(UnifiedTask task) {
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("accepted", true);
+        response.put("taskId", task.taskId);
+        response.put("status", task.status);
+        response.put("total", task.total);
+        return response.toJSONString();
     }
 
     // ==================== 工具方法 ====================

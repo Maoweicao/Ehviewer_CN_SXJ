@@ -45,6 +45,10 @@ public class ResponseBuilder {
     public static NanoHTTPD.Response jsonSuccess(NanoHTTPD.Response.Status status, String json) {
         return NanoHTTPD.newFixedLengthResponse(status, MIME_JSON, json);
     }
+
+    public static NanoHTTPD.Response accepted(String json) {
+        return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.ACCEPTED, MIME_JSON, json);
+    }
     
     /**
      * 创建JSON错误响应

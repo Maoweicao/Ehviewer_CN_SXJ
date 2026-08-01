@@ -39,6 +39,7 @@ import com.hippo.ehviewer.cache.GalleryCacheManager;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
+import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
@@ -1024,6 +1025,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
         // Save to
         EhDB.putDownloadInfo(info);
+        if (state == DownloadInfo.STATE_FINISH) {
+            EhDB.recordDownloadCompleted(info, EhDB.getDownloadDirname(info.gid));
+        }
 
         // 保存 .ehviewer.extra.json 缓存文件（仅当传入的是 GalleryDetail 时，包含完整的上传者和远程状态）
         if (galleryInfo instanceof GalleryDetail) {
