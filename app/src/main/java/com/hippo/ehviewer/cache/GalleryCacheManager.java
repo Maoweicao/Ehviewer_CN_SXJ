@@ -33,6 +33,7 @@ import com.hippo.ehviewer.client.data.GalleryTagGroup;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.spider.SpiderDen;
+import com.hippo.ehviewer.util.ImageMimeUtils;
 import com.hippo.unifile.UniFile;
 import com.hippo.beerbelly.BeerBelly;
 import com.hippo.lib.yorozuya.IOUtils;
@@ -85,6 +86,7 @@ public class GalleryCacheManager {
     private static final String KEY_IS_DELETED = "isDeleted";
     private static final String KEY_CACHE_TIME = "cacheTime";
     private static final String KEY_THUMB_BASE64_TYPE = "thumbBase64Type";
+    private static final String KEY_THUMB_BASE64_MIME = "thumbBase64Mime";
     
     private static GalleryCacheManager sInstance;
     private final Context mContext;
@@ -454,6 +456,9 @@ public class GalleryCacheManager {
             if (thumbBase64 != null) {
                 jsonObject.put(KEY_THUMB_BASE64, thumbBase64);
                 jsonObject.put(KEY_THUMB_BASE64_TYPE, thumbBase64Type);
+                // 记录实际图片格式，供下游生成 data URI 时使用正确的 MIME
+                jsonObject.put(KEY_THUMB_BASE64_MIME,
+                        ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP)));
             }
             
             // 转换标签

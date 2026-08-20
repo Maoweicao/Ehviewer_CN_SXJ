@@ -23,7 +23,6 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.util.LruCache;
 import android.net.Uri;
@@ -54,7 +53,6 @@ import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.task.TaskExecutor;
 import com.hippo.ehviewer.task.impl.StartRangeDownloadTask;
 import com.hippo.lib.yorozuya.collect.LongList;
-import com.hippo.lib.yorozuya.ResourcesUtils;
 import com.hippo.ehviewer.gallery.A7ZipArchive;
 import com.hippo.ehviewer.gallery.Pipe;
 import com.hippo.ehviewer.spider.SpiderInfo;
@@ -345,6 +343,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             return;
         }
 
+        // 预下载合并阶段：以彩色进度条展示合并过程
+        if (info.phase == DownloadInfo.PHASE_MERGE) {
+            bindMergeProgress(holder, info);
+            return;
+        }
+
         // Check if this is an incremental update
         boolean isIncrementalUpdate = info.incremental;
         
@@ -401,8 +405,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
         holder.state.setText(state);
 
-        if (info.state == DownloadInfo.STATE_WAIT && mWaitList != null) {
-            int pos = mWaitList.indexOf(info);
+        if (info.state == DownloadInfo.STATE_WAIT) {
+            int pos = indexInWaitList(info);
             if (pos >= 0) {
                 holder.queuePosition.setText(String.valueOf(pos + 1));
                 holder.queuePosition.setVisibility(View.VISIBLE);
@@ -443,8 +447,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         if (info.state == DownloadInfo.STATE_DOWNLOAD) {
             holder.queuePosition.setText("↓");
             holder.queuePosition.setVisibility(View.VISIBLE);
-        } else if (info.state == DownloadInfo.STATE_WAIT && mWaitList != null) {
-            int pos = mWaitList.indexOf(info);
+        } else if (info.state == DownloadInfo.STATE_WAIT) {
+            int pos = indexInWaitList(info);
             if (pos >= 0) {
                 holder.queuePosition.setText(String.valueOf(pos + 1));
                 holder.queuePosition.setVisibility(View.VISIBLE);
@@ -475,26 +479,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             holder.progressBar.setMax(info.total);
             holder.progressBar.setProgress(info.finished);
 
-            // Phase-based progress bar color
-            switch (info.phase) {
-                case DownloadInfo.PHASE_COPY: {
-                    int themeColor = ResourcesUtils.getAttrColor(
-                        mScene.getEHContext(), androidx.appcompat.R.attr.colorPrimary);
-                    int inverseColor = Color.rgb(
-                        255 - Color.red(themeColor),
-                        255 - Color.green(themeColor),
-                        255 - Color.blue(themeColor));
-                    holder.progressBar.getProgressDrawable()
-                        .setColorFilter(inverseColor, PorterDuff.Mode.SRC_IN);
-                    break;
-                }
-                case DownloadInfo.PHASE_DOWNLOAD:
-                    holder.progressBar.getProgressDrawable().clearColorFilter();
-                    break;
-                default:
-                    holder.progressBar.getProgressDrawable().clearColorFilter();
-                    break;
-            }
+            // Phase-based progress bar color (蓝=下载 橙=复制 紫=校验 青绿=合并)
+            holder.progressBar.getProgressDrawable()
+                    .setColorFilter(getPhaseColor(info.phase), PorterDuff.Mode.SRC_IN);
 
             if (isIncrementalUpdate) {
                 String galleryTitle = EhUtils.getSuitableTitle(info);
@@ -511,10 +498,72 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             case DownloadInfo.PHASE_COPY:
                 holder.speed.setText(mScene.getString(R.string.phase_copying));
                 break;
+            case DownloadInfo.PHASE_VERIFY:
+                holder.speed.setText(mScene.getString(R.string.phase_verifying));
+                break;
+            case DownloadInfo.PHASE_MERGE:
+                holder.speed.setText(mScene.getString(R.string.phase_merging));
+                break;
             case DownloadInfo.PHASE_DOWNLOAD:
             default:
                 holder.speed.setText(com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(speed, false) + "/S");
                 break;
+        }
+    }
+
+    /**
+     * 分阶段彩色进度条颜色：蓝=下载，橙=复制，紫=校验，青绿=合并。
+     */
+    private int getPhaseColor(int phase) {
+        switch (phase) {
+            case DownloadInfo.PHASE_COPY:
+                return 0xFFFF9800; // 橙
+            case DownloadInfo.PHASE_VERIFY:
+                return 0xFF9C27B0; // 紫
+            case DownloadInfo.PHASE_MERGE:
+                return 0xFF009688; // 青绿
+            case DownloadInfo.PHASE_DOWNLOAD:
+            default:
+                return 0xFF2196F3; // 蓝
+        }
+    }
+
+    /**
+     * 预下载合并阶段展示：青绿进度条 + 百分比。
+     */
+    @SuppressLint("SetTextI18n")
+    private void bindMergeProgress(DownloadHolder holder, DownloadInfo info) {
+        holder.uploader.setVisibility(View.GONE);
+        holder.rating.setVisibility(View.GONE);
+        holder.category.setVisibility(View.GONE);
+        holder.readProgress.setVisibility(View.GONE);
+        holder.state.setVisibility(View.GONE);
+        holder.progressBar.setVisibility(View.VISIBLE);
+        holder.percent.setVisibility(View.VISIBLE);
+        holder.speed.setVisibility(View.VISIBLE);
+        holder.folderTime.setVisibility(View.GONE);
+        holder.folderSize.setVisibility(View.GONE);
+        holder.start.setVisibility(View.GONE);
+        holder.stop.setVisibility(View.VISIBLE);
+        holder.queuePosition.setText("⇄");
+        holder.queuePosition.setVisibility(View.VISIBLE);
+
+        if (info.total > 0 && info.finished >= 0) {
+            holder.percent.setText(info.finished + "%");
+            holder.progressBar.setIndeterminate(false);
+            holder.progressBar.setMax(100);
+            holder.progressBar.setProgress(Math.min(info.finished, 100));
+        } else {
+            holder.percent.setText(null);
+            holder.progressBar.setIndeterminate(true);
+        }
+        holder.progressBar.getProgressDrawable()
+                .setColorFilter(0xFF009688, PorterDuff.Mode.SRC_IN);
+        String detail = info.mergeDetail;
+        if (detail != null && !detail.isEmpty()) {
+            holder.speed.setText(detail);
+        } else {
+            holder.speed.setText(mScene.getString(R.string.phase_merging));
         }
     }
 
@@ -910,6 +959,25 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         this.mWaitList = waitList;
     }
 
+    /**
+     * 返回当前下载队列中的序号（0 起），使用 DownloadManager 的实时等待队列。
+     * 适配器重建（旋转屏幕 / 切换页码 / 筛选刷新）后 mWaitList 可能为空，
+     * 直接查询 DownloadManager 可保证队列序号始终正确显示。
+     */
+    private int indexInWaitList(DownloadInfo info) {
+        LinkedList<DownloadInfo> list = mWaitList;
+        if (mCallback != null) {
+            DownloadManager dm = mCallback.getDownloadManager();
+            if (dm != null) {
+                list = dm.getWaitList();
+            }
+        }
+        if (list == null) {
+            return -1;
+        }
+        return list.indexOf(info);
+    }
+
     public class DownloadHolder extends AbstractDraggableItemViewHolder implements View.OnClickListener {
 
         public final LoadImageView thumb;
@@ -1019,7 +1087,13 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             } else if (stop == v) {
                 DownloadManager downloadManager = mCallback.getDownloadManager();
                 if (null != downloadManager) {
-                    downloadManager.stopDownload(list.get(mCallback.positionInList(index)).gid);
+                    DownloadInfo info = list.get(mCallback.positionInList(index));
+                    if (info.phase == DownloadInfo.PHASE_MERGE) {
+                        // 预下载合并阶段：停止 = 取消合并，随后按正常方式进入下载队列
+                        downloadManager.cancelPreMergeDownload(info.gid);
+                    } else {
+                        downloadManager.stopDownload(info.gid);
+                    }
                 }
             }
         }

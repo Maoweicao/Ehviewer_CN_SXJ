@@ -1,6 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  NavBar,
   SearchBar,
   Tabs,
   Picker,
@@ -17,6 +16,7 @@ import api, {
 import Pagination from '../components/Pagination'
 import FilterPanel, { type FilterState, type SortCondition } from '../components/FilterPanel'
 import GalleryCard from '../components/GalleryCard'
+import FullScreenLoading from '../components/FullScreenLoading'
 
 function buildSortExpr(conditions: SortCondition[]): string {
   return conditions.map((c) => `${c.field}:${c.order}`).join(',')
@@ -284,10 +284,6 @@ export default function GalleryList() {
 
   return (
     <div>
-      <NavBar backArrow={false} style={{ '--height': '48px', background: 'var(--card-bg, #fff)' }}>
-        EhViewer Remote
-      </NavBar>
-
       <div className="filter-bar">
         <div className="filter-bar-row1">
           <SearchBar
@@ -340,11 +336,9 @@ export default function GalleryList() {
         <Tabs.Tab title="收藏" key="favorites" />
       </Tabs>
 
-      <div className="page-content">
+      <div className={`page-content ${viewMode === 'pagination' ? 'gallery-page-pagination' : ''}`}>
         {loading && galleries.length === 0 ? (
-          <div className="loading-container">
-            <SpinLoading style={{ '--size': '48px' }} />
-          </div>
+          <FullScreenLoading text="加载画廊中..." />
         ) : !loading && galleries.length === 0 ? (
           <Empty description="暂无画廊数据" style={{ padding: '60px 0' }} />
         ) : (
@@ -371,16 +365,18 @@ export default function GalleryList() {
             )}
 
             {viewMode === 'pagination' && (
-              <Pagination
-                page={pageNum}
-                totalPages={totalPages}
-                total={total}
-                pageSize={pageSize}
-                viewMode={viewMode}
-                onPageChange={handlePageChange}
-                onPageSizeChange={handlePageSizeChange}
-                onViewModeChange={handleViewModeChange}
-              />
+              <div className="gallery-pagination-bar">
+                <Pagination
+                  page={pageNum}
+                  totalPages={totalPages}
+                  total={total}
+                  pageSize={pageSize}
+                  viewMode={viewMode}
+                  onPageChange={handlePageChange}
+                  onPageSizeChange={handlePageSizeChange}
+                  onViewModeChange={handleViewModeChange}
+                />
+              </div>
             )}
 
             {viewMode === 'infinite' && (

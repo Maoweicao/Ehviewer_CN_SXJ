@@ -27,6 +27,7 @@ import androidx.annotation.Nullable;
 import com.hippo.ehviewer.dao.DaoSession;
 import com.hippo.ehviewer.dao.DownloadedFile;
 import com.hippo.ehviewer.dao.DownloadedFilesDao;
+import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.unifile.UniFile;
@@ -35,24 +36,32 @@ import com.hippo.lib.yorozuya.IOUtils;
 import com.hippo.lib.yorozuya.MathUtils;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class DownloadedFileManager {
 
     private static final String TAG = DownloadedFileManager.class.getSimpleName();
     private static DownloadedFileManager sInstance;
+
+    // 物化视图表：串连 DOWNLOAD_DIRNAME 与 DOWNLOADED_FILES，按画廊聚合总大小（字节）
+    private static final String GALLERY_SIZE_TABLE = "DOWNLOADED_GALLERY_SIZE";
 
     private final Context mContext;
     private final DownloadedFilesDao mDownloadedFilesDao;
@@ -63,6 +72,7 @@ public class DownloadedFileManager {
     public static final int SCAN_STATUS_ERROR = 3;
 
     private volatile int mScanStatus = SCAN_STATUS_IDLE;
+    private final Object mScanLock = new Object();
     private final AtomicInteger mScanProgress = new AtomicInteger(0);
     private final AtomicInteger mScanTotal = new AtomicInteger(0);
     private String mScanError;
@@ -85,6 +95,120 @@ public class DownloadedFileManager {
         DaoSession daoSession = EhDB.getDaoSession();
         mDownloadedFilesDao = daoSession.getDownloadedFilesDao();
         ensureFileTokenColumn();
+        ensureGallerySizeView();
+    }
+
+    /**
+     * 确保物化视图表存在：串连 DOWNLOAD_DIRNAME（下载目录表）与 DOWNLOADED_FILES（下载文件表），
+     * 按画廊 gid 聚合出总大小。若 DOWNLOADED_FILES 未记录（未执行过扫描），
+     * 该表仍可依赖下载目录名定位实际目录并回退扫描。
+     */
+    private void ensureGallerySizeView() {
+        try {
+            mDownloadedFilesDao.getDatabase().execSQL(
+                    "CREATE TABLE IF NOT EXISTS \"" + GALLERY_SIZE_TABLE + "\" (" +
+                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ," +
+                            "\"TOTAL_SIZE\" INTEGER NOT NULL DEFAULT 0);");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to create DOWNLOADED_GALLERY_SIZE view", e);
+        }
+    }
+
+    /**
+     * 刷新物化视图：把 DOWNLOAD_DIRNAME 与 DOWNLOADED_FILES 聚合后的总大小写入物化视图表。
+     */
+    public void refreshGallerySizeView() {
+        try {
+            mDownloadedFilesDao.getDatabase().execSQL("DELETE FROM \"" + GALLERY_SIZE_TABLE + "\"");
+            mDownloadedFilesDao.getDatabase().execSQL(
+                    "INSERT OR REPLACE INTO \"" + GALLERY_SIZE_TABLE + "\" (GID, TOTAL_SIZE) " +
+                            "SELECT d.GID, COALESCE(SUM(f.SIZE), 0) " +
+                            "FROM DOWNLOAD_DIRNAME d " +
+                            "LEFT JOIN DOWNLOADED_FILES f ON f.GID = d.GID AND f.STATUS = " + DownloadedFile.STATUS_NORMAL + " " +
+                            "GROUP BY d.GID");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to refresh DOWNLOADED_GALLERY_SIZE view", e);
+        }
+    }
+
+    /**
+     * 从物化视图批量查询指定画廊的总大小（单位：字节）。未命中返回 0。
+     */
+    private Map<Long, Long> queryGallerySizeView(@NonNull List<Long> gids) {
+        Map<Long, Long> result = new HashMap<>();
+        List<Long> queryGids = new ArrayList<>(gids.size());
+        for (Long gid : gids) {
+            if (gid != null) {
+                queryGids.add(gid);
+            }
+        }
+        if (queryGids.isEmpty()) {
+            return result;
+        }
+        StringBuilder placeholders = new StringBuilder();
+        String[] args = new String[queryGids.size()];
+        for (int i = 0; i < queryGids.size(); i++) {
+            if (i > 0) {
+                placeholders.append(',');
+            }
+            placeholders.append('?');
+            args[i] = String.valueOf(queryGids.get(i));
+        }
+        Cursor cursor = null;
+        try {
+            cursor = mDownloadedFilesDao.getDatabase().rawQuery(
+                    "SELECT GID, TOTAL_SIZE FROM \"" + GALLERY_SIZE_TABLE + "\" WHERE GID IN (" + placeholders + ")",
+                    args);
+            while (cursor != null && cursor.moveToNext()) {
+                long gid = cursor.getLong(0);
+                long size = cursor.isNull(1) ? 0L : cursor.getLong(1);
+                result.put(gid, Math.max(size, 0L));
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "queryGallerySizeView failed", e);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 回退方案：直接扫描实际下载目录计算总大小（单位：字节）。
+     * 目录不存在或不可读时返回 -1。
+     */
+    private long calculateGalleryDirSize(long gid) {
+        try {
+            GalleryInfo gi = new GalleryInfo();
+            gi.gid = gid;
+            UniFile dir = SpiderDen.getExistingGalleryDownloadDir(gi);
+            if (dir == null || !dir.isDirectory()) {
+                return -1;
+            }
+            return calculateFolderSize(dir);
+        } catch (Exception e) {
+            return -1;
+        }
+    }
+
+    private long calculateFolderSize(UniFile folder) {
+        long totalSize = 0;
+        UniFile[] files = folder.listFiles();
+        if (files == null) {
+            return 0;
+        }
+        for (UniFile file : files) {
+            if (file.isFile()) {
+                long fileSize = file.length();
+                if (fileSize > 0) {
+                    totalSize += fileSize;
+                }
+            } else if (file.isDirectory()) {
+                totalSize += calculateFolderSize(file);
+            }
+        }
+        return totalSize;
     }
 
     private void ensureFileTokenColumn() {
@@ -123,68 +247,175 @@ public class DownloadedFileManager {
         return path != null ? new File(path) : null;
     }
 
+    /** shell 输出条目数上限，防止异常时无限累积 */
+    private static final int MAX_SHELL_OUTPUT_ENTRIES = 200000;
+    /** 单条路径长度上限（超出视为异常并丢弃该条目） */
+    private static final int MAX_SHELL_PATH_LENGTH = 4096;
+    /** 错误流读取上限（字节），防止 stderr 巨大导致 OOM */
+    private static final int MAX_SHELL_ERROR_BYTES = 64 * 1024;
+
+    /**
+     * 单次 find 一次性列出下载目录下所有画廊文件（深度 1 为画廊目录、深度 2 为画廊内文件），
+     * 取代原先每目录两次 shell 进程（cat .ehviewer + find 文件）的做法。
+     * 使用 -print0 以 '\0' 分隔，避免文件名含空格/换行时被拆散。
+     *
+     * 流式读取进程输出并按 '\0' 增量分隔，避免把整段输出载入内存导致 OOM。
+     *
+     * @return 绝对路径列表；shell 不可用或失败时返回 null
+     */
     @Nullable
-    private List<File> listGalleryDirectoriesShell(@NonNull File downloadDir) {
-        String command = "find " + escapeShellArg(downloadDir.getAbsolutePath()) + " -maxdepth 1 -mindepth 1 -type d 2>/dev/null";
-        String output = executeShellCommand("/system/bin/sh", "-c", command);
-        if (output == null) {
-            return null;
-        }
-        List<File> dirs = new ArrayList<>();
-        for (String line : output.split("\n")) {
-            if (line.isEmpty()) {
-                continue;
-            }
-            dirs.add(new File(line));
-        }
-        return dirs;
+    private List<String> listAllGalleryFilesShell(@NonNull File downloadDir) {
+        String command = "find " + escapeShellArg(downloadDir.getAbsolutePath())
+                + " -maxdepth 2 -mindepth 1 -type f -print0 2>/dev/null";
+        return executeShellCommandList("/system/bin/sh", "-c", command);
     }
 
+    /**
+     * 执行 shell 命令并流式读取 stdout，按 '\0' 分隔返回字符串列表。
+     * 不会一次性载入整个输出，适用于输出可能很大的场景。
+     */
     @Nullable
-    private List<String> listFilesShell(@NonNull File directory) {
-        String command = "find " + escapeShellArg(directory.getAbsolutePath()) + " -maxdepth 1 -mindepth 1 -type f 2>/dev/null";
-        String output = executeShellCommand("/system/bin/sh", "-c", command);
-        if (output == null) {
-            return null;
-        }
-        List<String> files = new ArrayList<>();
-        for (String line : output.split("\n")) {
-            if (!line.isEmpty()) {
-                files.add(line);
-            }
-        }
-        return files;
-    }
-
-    @Nullable
-    private String readFileShell(@NonNull File file) {
-        if (!file.exists() || !file.isFile()) {
-            return null;
-        }
-        String command = "cat " + escapeShellArg(file.getAbsolutePath()) + " 2>/dev/null";
-        return executeShellCommand("/system/bin/sh", "-c", command);
-    }
-
-    private String escapeShellArg(@NonNull String arg) {
-        return "'" + arg.replace("'", "'\\''") + "'";
-    }
-
-    @Nullable
-    private String executeShellCommand(@NonNull String... command) {
+    private List<String> executeShellCommandList(@NonNull String... command) {
+        Process process = null;
         try {
-            Process process = Runtime.getRuntime().exec(command);
-            String output = IOUtils.readString(process.getInputStream(), StandardCharsets.UTF_8.name());
-            String error = IOUtils.readString(process.getErrorStream(), StandardCharsets.UTF_8.name());
+            process = Runtime.getRuntime().exec(command);
+
+            List<String> result = new ArrayList<>();
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8), 8 * 1024);
+            StringBuilder sb = new StringBuilder(256);
+            boolean tooLong = false;
+            int c;
+            try {
+                while ((c = reader.read()) != -1) {
+                    if (c == '\0') {
+                        if (sb.length() > 0) {
+                            if (!tooLong) {
+                                result.add(sb.toString());
+                            }
+                            sb.setLength(0);
+                            tooLong = false;
+                            if (result.size() >= MAX_SHELL_OUTPUT_ENTRIES) {
+                                Log.w(TAG, "Shell output exceeds " + MAX_SHELL_OUTPUT_ENTRIES + " entries, aborting");
+                                return null;
+                            }
+                        }
+                    } else {
+                        if (sb.length() >= MAX_SHELL_PATH_LENGTH) {
+                            tooLong = true;
+                        } else {
+                            sb.append((char) c);
+                        }
+                    }
+                }
+            } finally {
+                IOUtils.closeQuietly(reader);
+            }
+            if (sb.length() > 0 && !tooLong) {
+                result.add(sb.toString());
+            }
+
+            // 读取错误流（有上限，防止 stderr 巨大导致 OOM）
+            String error = readShellErrorCapped(process.getErrorStream());
             int exitCode = process.waitFor();
             if (exitCode != 0) {
                 Log.w(TAG, "Shell command failed: " + Arrays.toString(command) + " exit=" + exitCode + " err=" + error);
                 return null;
             }
-            return output;
+            return result;
         } catch (Exception e) {
             Log.w(TAG, "Failed to execute shell command: " + Arrays.toString(command), e);
             return null;
+        } finally {
+            if (process != null) {
+                try {
+                    process.destroy();
+                } catch (Exception ignored) {
+                }
+            }
         }
+    }
+
+    /**
+     * 有上限地读取进程错误流，避免 stderr 输出巨大时把内存耗尽。
+     */
+    @Nullable
+    private String readShellErrorCapped(@Nullable InputStream errorStream) {
+        if (errorStream == null) {
+            return null;
+        }
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buffer = new byte[4096];
+            int total = 0;
+            int len;
+            while ((len = errorStream.read(buffer)) != -1) {
+                total += len;
+                if (total > MAX_SHELL_ERROR_BYTES) {
+                    Log.w(TAG, "Shell stderr exceeds " + MAX_SHELL_ERROR_BYTES + " bytes, truncating");
+                    break;
+                }
+                baos.write(buffer, 0, len);
+            }
+            return baos.toString(StandardCharsets.UTF_8.name());
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to read shell error stream", e);
+            return null;
+        } finally {
+            IOUtils.closeQuietly(errorStream);
+        }
+    }
+
+    /**
+     * 直接读取小文件内容（如 .ehviewer），避免为每个画廊启动 cat 进程。
+     */
+    @Nullable
+    private String readFileContent(@Nullable File file) {
+        if (file == null || !file.exists() || !file.isFile()) {
+            return null;
+        }
+        FileInputStream fis = null;
+        try {
+            fis = new FileInputStream(file);
+            return IOUtils.readString(fis, StandardCharsets.UTF_8.name());
+        } catch (IOException e) {
+            Log.w(TAG, "Failed to read file: " + file.getAbsolutePath(), e);
+            return null;
+        } finally {
+            IOUtils.closeQuietly(fis);
+        }
+    }
+
+    /**
+     * 从旧格式 .ehviewer 内容解析画廊标题（第 3 行为 title）。
+     * VERSION2 格式或无法解析时返回 null。
+     */
+    @Nullable
+    private String parseOldFormatTitle(@Nullable String content) {
+        if (content == null) {
+            return null;
+        }
+        String[] lines = content.split("\n", 4);
+        if (lines.length < 3) {
+            return null;
+        }
+        if ("VERSION2".equals(lines[0].trim())) {
+            return null;
+        }
+        String title = lines[2].trim();
+        return title.isEmpty() ? null : title;
+    }
+
+    /**
+     * 提取文件扩展名（不含点号），无扩展名返回空串。
+     */
+    private String extensionOf(String filename) {
+        int dotIndex = filename.lastIndexOf('.');
+        return dotIndex > 0 ? filename.substring(dotIndex + 1) : "";
+    }
+
+    private String escapeShellArg(@NonNull String arg) {
+        return "'" + arg.replace("'", "'\\''") + "'";
     }
 
     /**
@@ -219,23 +450,6 @@ public class DownloadedFileManager {
             if (file != null) {
                 Log.d(TAG, "Found normal status file by fileToken: " + token + ", filename: " + file.getFilename());
                 return file;
-            }
-
-            // SQL 追踪打印，便于排查
-            try {
-                Cursor cursor = mDownloadedFilesDao.getDatabase().rawQuery(
-                        "SELECT TOKEN, FILE_TOKEN, GID, FILENAME, PATH, STATUS FROM DOWNLOADED_FILES WHERE TOKEN = ?",
-                        new String[]{token});
-                if (cursor != null) {
-                    Log.d(TAG, "Database query for token " + token + " returned " + cursor.getCount() + " rows");
-                    while (cursor.moveToNext()) {
-                        Log.d(TAG, String.format("ROW: token=%s, fileToken=%s, gid=%d, filename=%s, path=%s, status=%d",
-                                cursor.getString(0), cursor.isNull(1) ? "null" : cursor.getString(1), cursor.getLong(2), cursor.getString(3), cursor.getString(4), cursor.getInt(5)));
-                    }
-                    cursor.close();
-                }
-            } catch (Exception sqlExp) {
-                Log.e(TAG, "Failed to execute debug SQL for token: " + token, sqlExp);
             }
 
             Log.d(TAG, "No file found for token: " + token);
@@ -416,6 +630,7 @@ public class DownloadedFileManager {
         try {
             return mDownloadedFilesDao.queryBuilder()
                     .where(DownloadedFilesDao.Properties.Gid.eq(gid))
+                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
                     .orderAsc(DownloadedFilesDao.Properties.Filename)
                     .list();
         } catch (Exception e) {
@@ -535,7 +750,9 @@ public class DownloadedFileManager {
     }
 
     /**
-     * 批量获取多个画廊文件总大小（单位：字节）
+     * 批量获取多个画廊文件总大小（单位：字节）。
+     * 查询顺序：物化视图（DOWNLOADED_GALLERY_SIZE）-> DOWNLOADED_FILES 聚合 -> 实际目录扫描。
+     * 目录扫描结果回写物化视图，后续查询秒开。
      */
     @NonNull
     public Map<Long, Long> getGalleryFilesTotalSizeMap(@NonNull List<Long> gids) {
@@ -550,27 +767,53 @@ public class DownloadedFileManager {
             }
         }
 
+        // 1) 先查物化视图（缓存）
+        Set<Long> needQuery = new HashSet<>();
+        Map<Long, Long> viewSizes = queryGallerySizeView(gids);
+        for (Long gid : gids) {
+            if (gid == null) {
+                continue;
+            }
+            long size = viewSizes.getOrDefault(gid, 0L);
+            if (size > 0L) {
+                result.put(gid, size);
+            } else {
+                needQuery.add(gid);
+            }
+        }
+        if (needQuery.isEmpty()) {
+            return result;
+        }
+
+        // 2) 再查 DOWNLOADED_FILES 聚合
+        List<Long> queryGids = new ArrayList<>(needQuery);
         StringBuilder placeholders = new StringBuilder();
-        String[] args = new String[gids.size() + 1];
+        String[] args = new String[queryGids.size() + 1];
         args[0] = String.valueOf(DownloadedFile.STATUS_NORMAL);
-        for (int i = 0; i < gids.size(); i++) {
+        for (int i = 0; i < queryGids.size(); i++) {
             if (i > 0) {
                 placeholders.append(',');
             }
             placeholders.append('?');
-            args[i + 1] = String.valueOf(gids.get(i));
+            args[i + 1] = String.valueOf(queryGids.get(i));
         }
 
         String sql = "SELECT GID, SUM(COALESCE(SIZE, 0)) FROM DOWNLOADED_FILES "
                 + "WHERE STATUS = ? AND GID IN (" + placeholders + ") GROUP BY GID";
 
+        Set<Long> dirFallback = new HashSet<>();
         Cursor cursor = null;
         try {
             cursor = mDownloadedFilesDao.getDatabase().rawQuery(sql, args);
             while (cursor != null && cursor.moveToNext()) {
                 long gid = cursor.getLong(0);
                 long size = cursor.isNull(1) ? 0L : cursor.getLong(1);
-                result.put(gid, Math.max(size, 0L));
+                if (size > 0L) {
+                    result.put(gid, size);
+                    upsertGallerySizeView(gid, size);
+                } else {
+                    dirFallback.add(gid);
+                }
             }
         } catch (Exception e) {
             Log.e(TAG, "Error getting gallery files total size map", e);
@@ -579,8 +822,38 @@ public class DownloadedFileManager {
                 cursor.close();
             }
         }
+        // 未在 DOWNLOADED_FILES 中出现过的 gid 也走目录扫描
+        for (Long gid : queryGids) {
+            if (result.getOrDefault(gid, 0L) <= 0L) {
+                dirFallback.add(gid);
+            }
+        }
+
+        // 3) 最后扫描实际下载目录，并回写物化视图缓存
+        if (!dirFallback.isEmpty()) {
+            for (Long gid : dirFallback) {
+                long size = calculateGalleryDirSize(gid);
+                if (size > 0L) {
+                    result.put(gid, size);
+                    upsertGallerySizeView(gid, size);
+                }
+            }
+        }
 
         return result;
+    }
+
+    /**
+     * 写入/更新物化视图缓存。
+     */
+    private void upsertGallerySizeView(long gid, long size) {
+        try {
+            mDownloadedFilesDao.getDatabase().execSQL(
+                    "INSERT OR REPLACE INTO \"" + GALLERY_SIZE_TABLE + "\" (GID, TOTAL_SIZE) VALUES (?, ?)",
+                    new Object[]{gid, Math.max(size, 0L)});
+        } catch (Exception e) {
+            Log.e(TAG, "upsertGallerySizeView failed, gid=" + gid, e);
+        }
     }
 
     /**
@@ -654,102 +927,85 @@ public class DownloadedFileManager {
      * @param progressListener 进度监听器
      */
     public void scanDownloadDirectories(@Nullable DownloadedFileManagerScanListener progressListener) {
-        if (mScanStatus != SCAN_STATUS_IDLE) {
-            Log.w(TAG, "Scan already in progress");
-            return;
+        synchronized (mScanLock) {
+            if (mScanStatus != SCAN_STATUS_IDLE) {
+                String msg = "已有扫描在进行中，请稍后再试";
+                Log.w(TAG, msg);
+                if (progressListener != null) {
+                    progressListener.onError(new IllegalStateException(msg));
+                }
+                return;
+            }
+            mScanStatus = SCAN_STATUS_SCANNING;
         }
 
         new Thread(() -> {
-            mScanStatus = SCAN_STATUS_SCANNING;
             mScanProgress.set(0);
             mScanTotal.set(0);
             mScanError = null;
 
             try {
-                // 检查数据库表是否存在
+                // 检查数据库表是否存在，缺失时创建
                 Log.i(TAG, "Starting scan, checking database connection");
                 try {
-                    // 尝试查询表是否存在
                     long count = mDownloadedFilesDao.count();
                     Log.i(TAG, "DownloadedFiles table exists, current record count: " + count);
                 } catch (Exception e) {
-                    Log.e(TAG, "Error checking DownloadedFiles table, table may not exist: " + e.getMessage(), e);
-                    // 尝试重新创建表
-                    try {
-                        Log.i(TAG, "Attempting to create DOWNLOADED_FILES table");
-                        mDownloadedFilesDao.getDatabase().execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
-                                "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
-                                "\"FILE_TOKEN\" TEXT," +
-                                "\"GID\" INTEGER NOT NULL ," +
-                                "\"FILENAME\" TEXT NOT NULL ," +
-                                "\"MD5\" TEXT," +
-                                "\"PATH\" TEXT NOT NULL ," +
-                                "\"SIZE\" INTEGER," +
-                                "\"DOWNLOAD_TIME\" INTEGER NOT NULL ," +
-                                "\"LAST_ACCESSED\" INTEGER," +
-                                "\"STATUS\" INTEGER NOT NULL );");
-                        Log.i(TAG, "DOWNLOADED_FILES table created or already exists");
-                    } catch (Exception e2) {
-                        Log.e(TAG, "Failed to create DOWNLOADED_FILES table: " + e2.getMessage(), e2);
-                        throw new RuntimeException("Failed to create DOWNLOADED_FILES table", e2);
-                    }
+                    Log.e(TAG, "DownloadedFiles table missing, recreating: " + e.getMessage(), e);
+                    createDownloadedFilesTable();
                 }
 
-                // 清空现有表
-                Log.i(TAG, "Clearing existing records from DOWNLOADED_FILES table");
-                try {
-                    mDownloadedFilesDao.deleteAll();
-                    Log.i(TAG, "Successfully cleared DOWNLOADED_FILES table");
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to clear DOWNLOADED_FILES table: " + e.getMessage(), e);
-                    // 如果是表不存在错误，尝试创建表
-                    if (e.getMessage() != null && e.getMessage().contains("no such table")) {
-                        Log.i(TAG, "Table does not exist, attempting to create it");
-                        mDownloadedFilesDao.getDatabase().execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
-                                "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
-                                "\"FILE_TOKEN\" TEXT," +
-                                "\"GID\" INTEGER NOT NULL ," +
-                                "\"FILENAME\" TEXT NOT NULL ," +
-                                "\"MD5\" TEXT," +
-                                "\"PATH\" TEXT NOT NULL ," +
-                                "\"SIZE\" INTEGER," +
-                                "\"DOWNLOAD_TIME\" INTEGER NOT NULL ," +
-                                "\"LAST_ACCESSED\" INTEGER," +
-                                "\"STATUS\" INTEGER NOT NULL );");
-                        Log.i(TAG, "DOWNLOADED_FILES table created");
-                    } else {
-                        throw e;
-                    }
+                // 载入现有记录，供增量对账使用（不再清空表，保留文件级历史）
+                Map<String, DownloadedFile> existingByToken = loadAllFilesByToken();
+                Map<Long, Set<String>> existingTokensByGid = new HashMap<>();
+                for (DownloadedFile f : existingByToken.values()) {
+                    existingTokensByGid.computeIfAbsent(f.getGid(), k -> new HashSet<>()).add(f.getToken());
                 }
 
                 // 获取下载目录
-                Log.i(TAG, "Getting download location from settings");
                 UniFile downloadDir = Settings.getDownloadLocation();
                 if (downloadDir == null) {
-                    Log.e(TAG, "Download location is not set in settings");
                     throw new RuntimeException("Download location not set");
                 }
                 Log.i(TAG, "Download location: " + downloadDir.getUri());
 
-                // 扫描所有画廊目录
-                List<UniFile> galleryDirs = new ArrayList<>();
+                // 单次 find 枚举全部画廊文件（file URI 场景），失败则回退 UniFile 枚举
+                Map<String, List<String>> filesByDir = null;
                 File downloadDirFile = toFile(downloadDir);
-                boolean shellUsed = false;
                 if (downloadDirFile != null) {
-                    List<File> shellDirs = listGalleryDirectoriesShell(downloadDirFile);
-                    if (shellDirs != null) {
-                        shellUsed = true;
-                        for (File shellDir : shellDirs) {
-                            if (shellDir != null) {
-                                UniFile uniDir = UniFile.fromFile(shellDir);
-                                if (uniDir != null && uniDir.isDirectory()) {
-                                    galleryDirs.add(uniDir);
-                                }
+                    List<String> allFiles = listAllGalleryFilesShell(downloadDirFile);
+                    if (allFiles != null) {
+                        filesByDir = new HashMap<>();
+                        for (String path : allFiles) {
+                            if (TextUtils.isEmpty(path)) {
+                                continue;
                             }
+                            File f = new File(path);
+                            File parent = f.getParentFile();
+                            if (parent == null) {
+                                continue;
+                            }
+                            filesByDir.computeIfAbsent(parent.getAbsolutePath(), k -> new ArrayList<>()).add(path);
                         }
                     }
                 }
-                if (!shellUsed) {
+
+                // 由文件父目录推导画廊目录
+                List<UniFile> galleryDirs = new ArrayList<>();
+                if (filesByDir != null) {
+                    for (String dirPath : filesByDir.keySet()) {
+                        File dirFile = new File(dirPath);
+                        if (!dirFile.isDirectory()) {
+                            continue;
+                        }
+                        UniFile uniDir = UniFile.fromFile(dirFile);
+                        if (uniDir != null && uniDir.isDirectory()) {
+                            galleryDirs.add(uniDir);
+                        }
+                    }
+                }
+                if (galleryDirs.isEmpty()) {
+                    // SAF 或 find 失败/无文件时回退 UniFile 枚举
                     UniFile[] allEntries = downloadDir.listFiles();
                     if (allEntries != null) {
                         for (UniFile entry : allEntries) {
@@ -762,42 +1018,54 @@ public class DownloadedFileManager {
 
                 int totalDirs = galleryDirs.size();
                 mScanTotal.set(totalDirs);
-                Log.i(TAG, "Found " + totalDirs + " gallery directories to scan (shellUsed=" + shellUsed + ")");
+                Log.i(TAG, "Found " + totalDirs + " gallery directories to scan");
 
                 if (totalDirs == 0) {
                     Log.w(TAG, "No gallery directories found, nothing to scan");
                 }
 
-                final int batchSize = 50;
+                Set<Long> seenGids = new HashSet<>();
+                ScanAccumulator acc = new ScanAccumulator();
                 int processed = 0;
-                int batchCount = (totalDirs + batchSize - 1) / batchSize;
-                for (int batch = 0; batch < batchCount; batch++) {
-                    int startIndex = batch * batchSize;
-                    int endIndex = Math.min(totalDirs, startIndex + batchSize);
-                    Log.i(TAG, "Scanning batch " + (batch + 1) + " / " + batchCount + " (directories " + (startIndex + 1) + " to " + endIndex + ")");
 
-                    for (int i = startIndex; i < endIndex; i++) {
-                        UniFile galleryDir = galleryDirs.get(i);
-                        String dirName = galleryDir.getName();
-                        Log.d(TAG, "Scanning gallery directory [" + (i + 1) + "/" + totalDirs + "]: " + dirName);
-
-                        try {
-                            scanGalleryDirectory(galleryDir);
-                            Log.d(TAG, "Successfully scanned gallery directory: " + dirName);
-                        } catch (Exception e) {
-                            Log.e(TAG, "Error scanning gallery directory: " + dirName, e);
+                for (UniFile galleryDir : galleryDirs) {
+                    if (galleryDir == null) {
+                        continue;
+                    }
+                    String dirName = galleryDir.getName();
+                    try {
+                        List<String> dirFiles = null;
+                        File galleryDirFile = toFile(galleryDir);
+                        if (galleryDirFile != null && filesByDir != null) {
+                            dirFiles = filesByDir.get(galleryDirFile.getAbsolutePath());
                         }
+                        scanGalleryDirectory(galleryDir, dirFiles, existingByToken, existingTokensByGid, seenGids, acc);
+                    } catch (Exception e) {
+                        Log.e(TAG, "Error scanning gallery directory: " + dirName, e);
+                    }
 
-                        processed++;
-                        mScanProgress.set(processed);
-                        if (progressListener != null) {
-                            progressListener.onProgress(processed, totalDirs);
-                        }
+                    processed++;
+                    mScanProgress.set(processed);
+                    if (progressListener != null) {
+                        progressListener.onProgress(processed, totalDirs);
                     }
                 }
 
-                mScanStatus = SCAN_STATUS_COMPLETED;
+                // 磁盘上已不存在的画廊/文件标记为 STATUS_DELETED，保留文件级历史
+                acc.markedDeleted += markMissingFilesDeleted(existingByToken, existingTokensByGid, seenGids);
 
+                // 刷新物化视图，保证下载列表大小展示与对账结果一致
+                refreshGallerySizeView();
+
+                Log.i(TAG, "Scan completed: dirs=" + totalDirs
+                        + ", galleries=" + acc.galleryCount
+                        + ", files=" + acc.scannedFiles
+                        + ", new=" + acc.newFiles
+                        + ", updated=" + acc.updatedFiles
+                        + ", markedDeleted=" + acc.markedDeleted
+                        + ", historyRebuilt=" + acc.historyRebuilt);
+
+                mScanStatus = SCAN_STATUS_COMPLETED;
                 if (progressListener != null) {
                     progressListener.onCompleted();
                 }
@@ -809,6 +1077,8 @@ public class DownloadedFileManager {
                 if (progressListener != null) {
                     progressListener.onError(e);
                 }
+            } finally {
+                mScanStatus = SCAN_STATUS_IDLE;
             }
         }).start();
     }
@@ -816,25 +1086,31 @@ public class DownloadedFileManager {
     /**
      * 扫描单个画廊目录
      */
-    private void scanGalleryDirectory(UniFile galleryDir) throws Exception {
-        Log.d(TAG, "Scanning gallery directory: " + galleryDir.getName());
+    private void scanGalleryDirectory(
+            UniFile galleryDir,
+            @Nullable List<String> shellFiles,
+            Map<String, DownloadedFile> existingByToken,
+            Map<Long, Set<String>> existingTokensByGid,
+            Set<Long> seenGids,
+            ScanAccumulator acc) throws Exception {
+        String dirName = galleryDir.getName();
 
-        // 检查.ehviewer文件
+        // 检查 .ehviewer 文件
         UniFile ehviewerFile = galleryDir.findFile(".ehviewer");
         if (ehviewerFile == null) {
-            Log.d(TAG, "No .ehviewer file found in directory: " + galleryDir.getName());
+            Log.d(TAG, "No .ehviewer file found in directory: " + dirName);
             return;
         }
-        Log.d(TAG, "Found .ehviewer file: " + ehviewerFile.getUri());
 
-        // 读取SpiderInfo
+        // 读取 SpiderInfo
         SpiderInfo spiderInfo;
+        String oldFormatTitle = null;
         File galleryDirFile = toFile(galleryDir);
         if (galleryDirFile != null) {
-            String ehviewerContent = readFileShell(new File(galleryDirFile, ".ehviewer"));
+            String ehviewerContent = readFileContent(new File(galleryDirFile, ".ehviewer"));
             if (ehviewerContent != null) {
-                Log.d(TAG, "Read .ehviewer file from shell for directory: " + galleryDir.getName());
                 spiderInfo = SpiderInfo.read(new ByteArrayInputStream(ehviewerContent.getBytes(StandardCharsets.UTF_8)));
+                oldFormatTitle = parseOldFormatTitle(ehviewerContent);
             } else {
                 spiderInfo = SpiderInfo.read(ehviewerFile);
             }
@@ -842,204 +1118,258 @@ public class DownloadedFileManager {
             spiderInfo = SpiderInfo.read(ehviewerFile);
         }
         if (spiderInfo == null) {
-            Log.w(TAG, "Failed to read SpiderInfo from .ehviewer file: " + ehviewerFile.getUri());
+            Log.w(TAG, "Failed to read SpiderInfo from .ehviewer file: " + dirName);
             return;
         }
-        Log.d(TAG, "Read SpiderInfo for GID: " + spiderInfo.gid + ", token: " + spiderInfo.token);
 
-        // 扫描图片文件
-        List<String> shellFiles = null;
-        if (galleryDirFile != null) {
-            shellFiles = listFilesShell(galleryDirFile);
+        long gid = spiderInfo.gid;
+        seenGids.add(gid);
+        acc.galleryCount++;
+
+        // 补建下载历史：磁盘上存在但下载历史/下载列表均缺失的画廊
+        if (!EhDB.hasDownloadHistory(gid) && EhDB.getDownloadInfo(gid) == null) {
+            try {
+                EhDB.recordDownloadHistoryFromScan(gid, spiderInfo.token, oldFormatTitle, dirName);
+                acc.historyRebuilt++;
+                Log.i(TAG, "Rebuilt download history for gid=" + gid + ", dir=" + dirName);
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to record download history for gid=" + gid, e);
+            }
         }
 
-        int imageCount = 0;
+        // 本画廊在 DB 中的 token 集合（用于标记磁盘上已缺失的文件）
+        Set<String> gidTokens = existingTokensByGid.computeIfAbsent(gid, k -> new HashSet<>());
+        Set<String> seenTokens = new HashSet<>();
+
+        List<DownloadedFile> toInsert = new ArrayList<>();
+        List<DownloadedFile> toUpdate = new ArrayList<>();
+
+        int fileCount = 0;
         if (shellFiles != null) {
-            Log.d(TAG, "Found " + shellFiles.size() + " files in directory via shell");
             for (String filePath : shellFiles) {
                 if (TextUtils.isEmpty(filePath)) {
                     continue;
                 }
                 File fileObj = new File(filePath);
                 if (!fileObj.exists() || fileObj.isDirectory()) {
-                    Log.d(TAG, "Skipping non-file from shell listing: " + filePath);
                     continue;
                 }
-                String filename = fileObj.getName();
-                if (filename == null) {
-                    Log.d(TAG, "Skipping file with null name from shell listing");
-                    continue;
-                }
-
-                if (filename.startsWith(".")) {
-                    Log.d(TAG, "Skipping hidden file: " + filename);
-                    continue;
-                }
-
-                Log.d(TAG, "Processing file: " + filename);
-
-                // 检查是否是图片文件
-                String extension = "";
-                int dotIndex = filename.lastIndexOf('.');
-                if (dotIndex > 0) {
-                    extension = filename.substring(dotIndex + 1);
-                }
-
-                if (TextUtils.isEmpty(extension)) {
-                    Log.d(TAG, "Skipping file without extension: " + filename);
-                    continue;
-                }
-
-                if (!isImageExtension(extension)) {
-                    Log.d(TAG, "Skipping non-image file (" + extension + "): " + filename);
-                    continue;
-                }
-
-                Log.d(TAG, "File is image with extension: " + extension);
-
-                // 调试：打印文件名字符
-                Log.d(TAG, "Filename characters: " + Arrays.toString(filename.toCharArray()));
-
-                // 从文件名提取token（假设格式为 index-token.ext 或 index.ext）
-                String rawToken = extractTokenFromFilename(filename);
-                if (rawToken == null) {
-                    Log.w(TAG, "Could not extract token from filename: " + filename);
-                    continue;
-                }
-
-                String fileToken = null;
-                String dbToken;
-                if (rawToken.matches("\\d+")) {
-                    // 纯数字文件名，尝试从 .ehviewer 的 pTokenMap 恢复真实 fileToken
-                    int index = Integer.parseInt(rawToken);
-                    if (spiderInfo.pTokenMap != null) {
-                        String resolvedToken = spiderInfo.pTokenMap.get(index);
-                        if (resolvedToken != null && !SpiderInfo.TOKEN_FAILED.equals(resolvedToken)) {
-                            fileToken = resolvedToken;
-                            dbToken = resolvedToken;
-                            Log.d(TAG, "Resolved fileToken from .ehviewer for index " + index + ": " + resolvedToken);
-                        } else {
-                            dbToken = spiderInfo.gid + "_" + rawToken;
-                            Log.d(TAG, "No fileToken in .ehviewer for index " + index + ", using fallback composite token: " + dbToken);
-                        }
-                    } else {
-                        dbToken = spiderInfo.gid + "_" + rawToken;
-                        Log.d(TAG, "pTokenMap missing, using fallback composite token: " + dbToken);
-                    }
-                } else {
-                    dbToken = rawToken;
-                    fileToken = rawToken;
-                }
-
-                Log.d(TAG, "Final dbToken: " + dbToken + ", fileToken: " + fileToken + " from filename: " + filename + ", raw token: " + rawToken);
-
-                // 添加文件信息
-                String path = fileObj.getAbsolutePath();
-                long size = fileObj.length();
-
-                try {
-                    addOrUpdateFile(dbToken, fileToken, spiderInfo.gid, filename, path, size);
-                    Log.d(TAG, "Successfully added file to database: " + filename);
-                    imageCount++;
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to add file to database: " + filename, e);
+                if (reconcileImageFile(gid, fileObj.getName(), fileObj.getAbsolutePath(), fileObj.length(),
+                        spiderInfo, existingByToken, seenTokens, toInsert, toUpdate, acc)) {
+                    fileCount++;
                 }
             }
         } else {
             UniFile[] imageFiles = galleryDir.listFiles();
             if (imageFiles == null) {
-                Log.d(TAG, "No files found in directory: " + galleryDir.getName());
+                Log.d(TAG, "No files found in directory: " + dirName);
                 return;
             }
-            Log.d(TAG, "Found " + imageFiles.length + " files in directory via UniFile");
             for (UniFile file : imageFiles) {
                 if (file.isDirectory()) {
-                    Log.d(TAG, "Skipping directory: " + file.getName());
                     continue;
                 }
-
                 String filename = file.getName();
-                if (filename == null) {
-                    Log.d(TAG, "Skipping file with null name");
+                String path = file.getUri() != null ? file.getUri().getPath() : null;
+                if (filename == null || path == null) {
                     continue;
                 }
-
-                if (filename.startsWith(".")) {
-                    Log.d(TAG, "Skipping hidden file: " + filename);
-                    continue;
-                }
-
-                Log.d(TAG, "Processing file: " + filename);
-
-                // 检查是否是图片文件
-                String extension = "";
-                int dotIndex = filename.lastIndexOf('.');
-                if (dotIndex > 0) {
-                    extension = filename.substring(dotIndex + 1);
-                }
-
-                if (TextUtils.isEmpty(extension)) {
-                    Log.d(TAG, "Skipping file without extension: " + filename);
-                    continue;
-                }
-
-                if (!isImageExtension(extension)) {
-                    Log.d(TAG, "Skipping non-image file (" + extension + "): " + filename);
-                    continue;
-                }
-
-                Log.d(TAG, "File is image with extension: " + extension);
-
-                // 调试：打印文件名字符
-                Log.d(TAG, "Filename characters: " + Arrays.toString(filename.toCharArray()));
-
-                // 从文件名提取token（假设格式为 index-token.ext 或 index.ext）
-                String rawToken = extractTokenFromFilename(filename);
-                if (rawToken == null) {
-                    Log.w(TAG, "Could not extract token from filename: " + filename);
-                    continue;
-                }
-
-                String fileToken = null;
-                String dbToken;
-                if (rawToken.matches("\\d+")) {
-                    // 纯数字文件名，尝试从 .ehviewer 的 pTokenMap 恢复真实 fileToken
-                    int index = Integer.parseInt(rawToken);
-                    if (spiderInfo.pTokenMap != null) {
-                        String resolvedToken = spiderInfo.pTokenMap.get(index);
-                        if (resolvedToken != null && !SpiderInfo.TOKEN_FAILED.equals(resolvedToken)) {
-                            fileToken = resolvedToken;
-                            dbToken = resolvedToken;
-                            Log.d(TAG, "Resolved fileToken from .ehviewer for index " + index + ": " + resolvedToken);
-                        } else {
-                            dbToken = spiderInfo.gid + "_" + rawToken;
-                            Log.d(TAG, "No fileToken in .ehviewer for index " + index + ", using fallback composite token: " + dbToken);
-                        }
-                    } else {
-                        dbToken = spiderInfo.gid + "_" + rawToken;
-                        Log.d(TAG, "pTokenMap missing, using fallback composite token: " + dbToken);
-                    }
-                } else {
-                    dbToken = rawToken;
-                    fileToken = rawToken;
-                }
-
-                Log.d(TAG, "Final dbToken: " + dbToken + ", fileToken: " + fileToken + " from filename: " + filename + ", raw token: " + rawToken);
-
-                // 添加文件信息
-                String path = file.getUri().getPath();
-                long size = file.length();
-
-                try {
-                    addOrUpdateFile(dbToken, fileToken, spiderInfo.gid, filename, path, size);
-                    Log.d(TAG, "Successfully added file to database: " + filename);
-                    imageCount++;
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to add file to database: " + filename, e);
+                if (reconcileImageFile(gid, filename, path, file.length(),
+                        spiderInfo, existingByToken, seenTokens, toInsert, toUpdate, acc)) {
+                    fileCount++;
                 }
             }
         }
-        Log.i(TAG, "Scanned " + imageCount + " image files in gallery directory: " + galleryDir.getName());
+
+        // 批量写库（不计算 MD5：MD5 在应用中无消费者，全量读图算 MD5 是扫描慢的主因）
+        if (!toInsert.isEmpty()) {
+            mDownloadedFilesDao.insertInTx(toInsert);
+        }
+        if (!toUpdate.isEmpty()) {
+            mDownloadedFilesDao.updateInTx(toUpdate);
+        }
+
+        // 标记本画廊在 DB 中但磁盘已缺失的文件为已删除，保留文件级历史
+        gidTokens.removeAll(seenTokens);
+        if (!gidTokens.isEmpty()) {
+            List<DownloadedFile> stale = new ArrayList<>(gidTokens.size());
+            for (String token : gidTokens) {
+                DownloadedFile f = existingByToken.get(token);
+                if (f != null && f.getStatus() == DownloadedFile.STATUS_NORMAL) {
+                    f.setStatus(DownloadedFile.STATUS_DELETED);
+                    stale.add(f);
+                }
+            }
+            if (!stale.isEmpty()) {
+                mDownloadedFilesDao.updateInTx(stale);
+                acc.markedDeleted += stale.size();
+            }
+            gidTokens.clear();
+        }
+
+        acc.scannedFiles += fileCount;
+        Log.i(TAG, "Scanned gallery directory: " + dirName + ", files=" + fileCount
+                + ", new=" + toInsert.size() + ", updated=" + toUpdate.size());
+    }
+
+    /**
+     * 对账单个图片文件：命中现有记录则更新（保留 download_time/历史），否则新建。
+     * 返回该文件是否为可记录的图片文件。
+     */
+    private boolean reconcileImageFile(
+            long gid,
+            String filename,
+            String path,
+            long size,
+            SpiderInfo spiderInfo,
+            Map<String, DownloadedFile> existingByToken,
+            Set<String> seenTokens,
+            List<DownloadedFile> toInsert,
+            List<DownloadedFile> toUpdate,
+            ScanAccumulator acc) {
+        if (filename == null || filename.startsWith(".")) {
+            return false;
+        }
+        if (!isImageExtension(extensionOf(filename))) {
+            return false;
+        }
+
+        String rawToken = extractTokenFromFilename(filename);
+        if (rawToken == null) {
+            return false;
+        }
+
+        String fileToken = null;
+        String dbToken;
+        if (rawToken.matches("\\d+")) {
+            // 纯数字文件名，尝试从 .ehviewer 的 pTokenMap 恢复真实 fileToken
+            int index;
+            try {
+                index = Integer.parseInt(rawToken);
+            } catch (NumberFormatException e) {
+                return false;
+            }
+            String resolvedToken = spiderInfo.pTokenMap != null ? spiderInfo.pTokenMap.get(index) : null;
+            if (resolvedToken != null && !SpiderInfo.TOKEN_FAILED.equals(resolvedToken)) {
+                fileToken = resolvedToken;
+                dbToken = resolvedToken;
+            } else {
+                dbToken = gid + "_" + rawToken;
+            }
+        } else {
+            dbToken = rawToken;
+            fileToken = rawToken;
+        }
+
+        DownloadedFile existing = existingByToken.get(dbToken);
+        boolean isNew;
+        if (existing == null) {
+            existing = new DownloadedFile();
+            existing.setToken(dbToken);
+            existing.setFileToken(fileToken);
+            existing.setGid(gid);
+            existing.setFilename(filename);
+            existing.setDownload_time(System.currentTimeMillis());
+            existing.setStatus(DownloadedFile.STATUS_NORMAL);
+            existingByToken.put(dbToken, existing);
+            isNew = true;
+            acc.newFiles++;
+        } else {
+            isNew = false;
+            if (existing.getStatus() != DownloadedFile.STATUS_NORMAL) {
+                existing.setStatus(DownloadedFile.STATUS_NORMAL);
+            }
+            acc.updatedFiles++;
+        }
+        existing.setPath(path);
+        existing.setLast_accessed(System.currentTimeMillis());
+        if (size > 0) {
+            existing.setSize(size);
+        }
+        seenTokens.add(dbToken);
+        if (isNew) {
+            toInsert.add(existing);
+        } else {
+            toUpdate.add(existing);
+        }
+        return true;
+    }
+
+    /**
+     * 创建 DOWNLOADED_FILES 表（含 FILE_TOKEN 列，与 DAO schema 一致）。
+     */
+    private void createDownloadedFilesTable() throws Exception {
+        mDownloadedFilesDao.getDatabase().execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
+                "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
+                "\"FILE_TOKEN\" TEXT," +
+                "\"GID\" INTEGER NOT NULL ," +
+                "\"FILENAME\" TEXT NOT NULL ," +
+                "\"MD5\" TEXT," +
+                "\"PATH\" TEXT NOT NULL ," +
+                "\"SIZE\" INTEGER," +
+                "\"DOWNLOAD_TIME\" INTEGER NOT NULL ," +
+                "\"LAST_ACCESSED\" INTEGER," +
+                "\"STATUS\" INTEGER NOT NULL );");
+    }
+
+    /**
+     * 载入 DOWNLOADED_FILES 全部记录到内存，供增量对账使用。
+     */
+    @NonNull
+    private Map<String, DownloadedFile> loadAllFilesByToken() {
+        Map<String, DownloadedFile> map = new HashMap<>();
+        try {
+            for (DownloadedFile f : mDownloadedFilesDao.loadAll()) {
+                if (f != null && f.getToken() != null) {
+                    map.put(f.getToken(), f);
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to load existing DOWNLOADED_FILES records", e);
+        }
+        return map;
+    }
+
+    /**
+     * 标记磁盘上已不存在的画廊的全部文件为 STATUS_DELETED，保留文件级历史。
+     *
+     * @return 标记删除的记录数
+     */
+    private int markMissingFilesDeleted(
+            Map<String, DownloadedFile> existingByToken,
+            Map<Long, Set<String>> existingTokensByGid,
+            Set<Long> seenGids) {
+        List<DownloadedFile> stale = new ArrayList<>();
+        for (Map.Entry<Long, Set<String>> entry : existingTokensByGid.entrySet()) {
+            long gid = entry.getKey();
+            if (seenGids.contains(gid)) {
+                // 已按画廊在 scanGalleryDirectory 内处理过
+                continue;
+            }
+            for (String token : entry.getValue()) {
+                DownloadedFile f = existingByToken.get(token);
+                if (f != null && f.getStatus() == DownloadedFile.STATUS_NORMAL) {
+                    f.setStatus(DownloadedFile.STATUS_DELETED);
+                    stale.add(f);
+                }
+            }
+        }
+        if (!stale.isEmpty()) {
+            mDownloadedFilesDao.updateInTx(stale);
+        }
+        return stale.size();
+    }
+
+    /**
+     * 扫描过程中的累计统计信息
+     */
+    private static class ScanAccumulator {
+        int galleryCount;
+        int scannedFiles;
+        int newFiles;
+        int updatedFiles;
+        int markedDeleted;
+        int historyRebuilt;
     }
 
         /**
@@ -1063,12 +1393,10 @@ public class DownloadedFileManager {
         @Nullable
         private String extractTokenFromFilename (String filename){
             if (TextUtils.isEmpty(filename)) {
-                Log.d(TAG, "extractTokenFromFilename: filename is null or empty");
                 return null;
             }
 
             String trimmedFilename = filename.trim();
-            Log.d(TAG, "extractTokenFromFilename called with: '" + filename + "' (trimmed: '" + trimmedFilename + "'), length: " + filename.length() + ", trimmed length: " + trimmedFilename.length());
 
             // 使用修剪后的文件名
             // 查找最后一个点号（支持半角点号 '.' 和全角点号 '．'）
@@ -1077,26 +1405,19 @@ public class DownloadedFileManager {
                 // 尝试全角点号
                 lastDot = trimmedFilename.lastIndexOf('．');
             }
-            Log.d(TAG, "lastDot position: " + lastDot);
 
             if (lastDot <= 0) {
-                Log.d(TAG, "No valid dot found in filename, returning null");
                 return null;
             }
 
             int lastDash = trimmedFilename.lastIndexOf('-', lastDot);
-            Log.d(TAG, "lastDash position: " + lastDash);
 
             if (lastDash > 0) {
                 // 格式1: index-token.ext
-                String token = trimmedFilename.substring(lastDash + 1, lastDot);
-                Log.d(TAG, "Format 1 (index-token.ext) extracted token: " + token);
-                return token;
+                return trimmedFilename.substring(lastDash + 1, lastDot);
             } else {
                 // 格式2: index.ext - 使用不带扩展名的文件名作为token
-                String token = trimmedFilename.substring(0, lastDot);
-                Log.d(TAG, "Format 2 (index.ext) extracted token: " + token);
-                return token;
+                return trimmedFilename.substring(0, lastDot);
             }
         }
 

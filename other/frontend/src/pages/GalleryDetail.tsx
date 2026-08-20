@@ -7,13 +7,68 @@ import {
   Rate,
   List,
   Button,
-  SpinLoading,
   Dialog,
   Toast,
   ActionSheet,
   Input,
 } from 'antd-mobile'
 import api, { type GalleryDetail as GalleryDetailType, type SystemInfo, GALLERY_STATES, getCategoryLabel, getCategoryColor } from '../api/client'
+import FullScreenLoading from '../components/FullScreenLoading'
+
+const TAG_NAMESPACE_COLORS: Record<string, string> = {
+  artist: '#e91e63',
+  language: '#2196f3',
+  female: '#9c27b0',
+  male: '#4caf50',
+  group: '#ff9800',
+  series: '#00bcd4',
+  character: '#ff5722',
+  parody: '#795548',
+  writer: '#8bc34a',
+  mixed: '#607d8b',
+  cosplay: '#3f51b5',
+  other: '#607d8b',
+}
+
+const TAG_NAMESPACE_ORDER = [
+  'language',
+  'artist',
+  'female',
+  'male',
+  'group',
+  'series',
+  'character',
+  'parody',
+  'writer',
+  'mixed',
+  'cosplay',
+]
+
+function buildTagGroups(tags: string[]): Array<{ name: string; color: string; items: string[] }> {
+  const map = new Map<string, string[]>()
+  for (const t of tags) {
+    const idx = t.indexOf(':')
+    const name = idx > 0 ? t.slice(0, idx) : 'other'
+    const value = idx >= 0 ? t.slice(idx + 1) : t
+    const list = map.get(name)
+    if (list) {
+      list.push(value)
+    } else {
+      map.set(name, [value])
+    }
+  }
+  const groups: Array<{ name: string; color: string; items: string[] }> = []
+  for (const name of TAG_NAMESPACE_ORDER) {
+    const items = map.get(name)
+    if (items) groups.push({ name, color: TAG_NAMESPACE_COLORS[name] || 'var(--text-light)', items })
+  }
+  for (const [name, items] of map) {
+    if (!TAG_NAMESPACE_ORDER.includes(name)) {
+      groups.push({ name, color: TAG_NAMESPACE_COLORS[name] || 'var(--text-light)', items })
+    }
+  }
+  return groups
+}
 
 export default function GalleryDetail() {
   const { gid } = useParams<{ gid: string }>()
@@ -307,9 +362,7 @@ export default function GalleryDetail() {
     return (
       <div>
         <NavBar onBack={() => navigate(-1)}>画廊详情</NavBar>
-        <div className="loading-container" style={{ minHeight: '60vh' }}>
-          <SpinLoading style={{ '--size': '48px' }} />
-        </div>
+        <FullScreenLoading text="加载详情中..." />
       </div>
     )
   }
@@ -352,6 +405,45 @@ export default function GalleryDetail() {
           </Tag>
         </div>
       </div>
+
+      {detail.tags && detail.tags.length > 0 && (
+        <div style={{ padding: '4px 16px 8px' }}>
+          <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 14 }}>标签 ({detail.tags.length})</div>
+          {buildTagGroups(detail.tags).map((group) => (
+            <div key={group.name} style={{ marginBottom: 10 }}>
+              {group.name !== 'other' && (
+                <div
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: group.color,
+                    marginBottom: 4,
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {group.name}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {group.items.map((value) => (
+                  <Tag
+                    key={value}
+                    fill="outline"
+                    style={{
+                      '--border-color': group.color,
+                      '--text-color': group.color,
+                      fontSize: 11,
+                      borderRadius: 12,
+                    }}
+                  >
+                    {value}
+                  </Tag>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div style={{ padding: '0 16px' }}>
         <List>
@@ -397,32 +489,8 @@ export default function GalleryDetail() {
               </Tag>
             }
           >
-            远程上传页面
+             远程上传页面
           </List.Item>
-          {detail.tags && detail.tags.length > 0 && (
-            <List.Item>
-              <div style={{ marginBottom: 8, fontWeight: 500 }}>标签</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {detail.tags.map((t) => {
-                  const [prefix, ...rest] = t.split(':')
-                  const value = rest.join(':')
-                  return (
-                    <Tag
-                      key={t}
-                      fill="outline"
-                      style={{
-                        '--border-color': prefix === 'artist' ? '#e91e63' : prefix === 'language' ? '#2196f3' : prefix === 'female' ? '#9c27b0' : prefix === 'male' ? '#4caf50' : 'var(--border)',
-                        '--text-color': prefix === 'artist' ? '#e91e63' : prefix === 'language' ? '#2196f3' : prefix === 'female' ? '#9c27b0' : prefix === 'male' ? '#4caf50' : 'var(--text-light)',
-                        fontSize: 11,
-                      }}
-                    >
-                      {value || t}
-                    </Tag>
-                  )
-                })}
-              </div>
-            </List.Item>
-          )}
         </List>
       </div>
 

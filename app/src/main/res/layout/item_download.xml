@@ -186,6 +186,8 @@
                 android:layout_height="wrap_content"
                 android:layout_above="@id/progress_bar"
                 android:layout_alignLeft="@id/title"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textSize="@dimen/text_super_small"/>
 
             <TextView
@@ -193,8 +195,11 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_above="@id/progress_bar"
+                android:layout_toRightOf="@id/percent"
                 android:layout_alignParentRight="true"
                 android:layout_marginRight="8dp"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:textSize="@dimen/text_super_small"/>
 
         </RelativeLayout>

@@ -55,7 +55,13 @@ public class DownloadInfo extends GalleryInfo {
 	public static final int PHASE_IDLE = -1;
 	public static final int PHASE_COPY = 0;
 	public static final int PHASE_DOWNLOAD = 1;
+	public static final int PHASE_VERIFY = 2;
+	public static final int PHASE_MERGE = 3;
 	public int phase = PHASE_IDLE;
+
+	// transient UI state: 预下载合并的实时步骤说明（不入库）
+	@Transient
+	public String mergeDetail;
 
 
 	@Generated

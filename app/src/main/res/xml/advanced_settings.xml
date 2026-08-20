@@ -256,6 +256,14 @@
             android:summary="@string/settings_advanced_duplicate_download_blocking_summary"
             android:title="@string/settings_advanced_duplicate_download_blocking" />
 
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="merge_scan_mode"
+            android:title="@string/settings_advanced_merge_scan_mode_title"
+            android:summary="@string/settings_advanced_merge_scan_mode_summary"
+            app:entries="@array/merge_scan_mode_entries"
+            app:entryValues="@array/merge_scan_mode_entry_values" />
+
     </PreferenceCategory>
 
     <PreferenceCategory

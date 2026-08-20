@@ -101,7 +101,7 @@ import com.hippo.ehviewer.client.parser.GalleryListParser;
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.QuickSearch;
-import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.download.DownloadDeleteHelper;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.event.SomethingNeedRefresh;
 import com.hippo.ehviewer.milestone.MilestoneManager;
@@ -1462,11 +1462,7 @@ public final class GalleryListScene extends BaseScene
                             break;
                         case 1: // Download
                             if (downloaded) {
-                                new AlertDialog.Builder(getDialogContext())
-                                        .setTitle(R.string.download_remove_dialog_title)
-                                        .setMessage(getString(R.string.download_remove_dialog_message, gi.title))
-                                        .setPositiveButton(android.R.string.ok, (dialog1, which1) -> mDownloadManager.deleteDownload(gi.gid))
-                                        .show();
+                                DownloadDeleteHelper.showDeleteDialog(getDialogContext(), gi);
                             } else {
                                 CommonOperations.startDownload(activity, gi, false);
                             }

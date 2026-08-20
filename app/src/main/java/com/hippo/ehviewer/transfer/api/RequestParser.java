@@ -16,7 +16,11 @@
 
 package com.hippo.ehviewer.transfer.api;
 
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -29,29 +33,50 @@ import fi.iki.elonen.NanoHTTPD;
  * HTTP请求解析工具
  */
 public class RequestParser {
+
+    private static final String TAG = "RequestParser";
     
     /**
      * 读取请求体为字符串
+     *
+     * 注意：NanoHTTPD 2.3.1 的 {@link NanoHTTPD.IHTTPSession#parseBody(java.util.Map)}
+     * 只会为 POST/PUT 方法提取请求体，DELETE/PATCH 等方法的请求体会被读取后直接丢弃，
+     * 导致 bodyMap 中拿不到任何内容。因此这里：
+     * - POST/PUT 继续走 parseBody（支持 multipart/form-data、urlencoded、原始 JSON）；
+     * - 其余方法直接从未消费的原始输入流读取请求体。
      */
     public static String readBody(NanoHTTPD.IHTTPSession session) throws IOException {
-        Map<String, String> bodyMap = new HashMap<>();
-        try {
-            session.parseBody(bodyMap);
-        } catch (NanoHTTPD.ResponseException e) {
-            throw new IOException(e);
+        NanoHTTPD.Method method = session.getMethod();
+        if (method == NanoHTTPD.Method.POST || method == NanoHTTPD.Method.PUT) {
+            Map<String, String> bodyMap = new HashMap<>();
+            try {
+                session.parseBody(bodyMap);
+            } catch (NanoHTTPD.ResponseException e) {
+                throw new IOException(e);
+            }
+
+            String body = bodyMap.get("postData");
+            if (body != null) {
+                TransferLogger.getInstance().d(TAG, "读取请求体: " + body.length() + " 字符 (postData)");
+                return body;
+            }
+
+            // PUT 的 parseBody 会把内容保存到临时文件并放入 "content"
+            String contentPath = bodyMap.get("content");
+            if (contentPath != null) {
+                File file = new File(contentPath);
+                if (file.isFile()) {
+                    try (InputStream is = new FileInputStream(file)) {
+                        String content = readAll(is, -1);
+                        TransferLogger.getInstance().d(TAG, "读取请求体: " + content.length() + " 字符 (PUT content)");
+                        return content;
+                    }
+                }
+            }
         }
-        
-        String body = bodyMap.get("postData");
-        if (body != null) {
-            return body;
-        }
-        
-        // 尝试从输入流读取
-        InputStream is = session.getInputStream();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        byte[] buf = new byte[4096];
-        int len;
-        
+
+        // 直接从原始输入流读取（未调用 parseBody，请求体仍未被消费）
+        // 仅在能确定 Content-Length 时才读取，避免 keep-alive 连接上无请求体时阻塞等待 EOF。
         String contentLength = session.getHeaders().get("content-length");
         long expectedLength = 0;
         if (contentLength != null) {
@@ -60,14 +85,30 @@ public class RequestParser {
             } catch (NumberFormatException ignored) {
             }
         }
-        
+        if (expectedLength <= 0) {
+            return "";
+        }
+
+        String body = readAll(session.getInputStream(), expectedLength);
+        TransferLogger.getInstance().d(TAG, "读取请求体: " + body.length() + " 字符 (原始流)");
+        return body;
+    }
+
+    /**
+     * 从输入流读取全部内容为字符串，expectedLength &gt; 0 时最多读取指定字节数。
+     */
+    private static String readAll(InputStream is, long expectedLength) throws IOException {
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int len;
+        long totalRead = 0;
         while ((len = is.read(buf)) > 0) {
             bos.write(buf, 0, len);
-            if (expectedLength > 0 && bos.size() >= expectedLength) {
+            totalRead += len;
+            if (expectedLength > 0 && totalRead >= expectedLength) {
                 break;
             }
         }
-        
         return bos.toString(StandardCharsets.UTF_8.name());
     }
     

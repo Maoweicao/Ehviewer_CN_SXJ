@@ -5,23 +5,27 @@ import {
   Tag,
   Button,
   Empty,
-  SpinLoading,
   Toast,
   Dialog,
   Tabs,
+  Popup,
 } from 'antd-mobile'
 import api, {
   type PushTask,
   type CompressTask,
   type RelayTask,
   type RelayDirection,
+  type BackgroundTaskInfo,
+  type BackgroundTaskType,
 } from '../api/client'
+import FullScreenLoading from '../components/FullScreenLoading'
 
 type UnifiedTaskItem = {
   taskId: string
   type: 'push' | 'compress'
   subType?: string
   status: string
+  paused?: boolean
   sourceDevice?: string
   progress: number
   total: number
@@ -75,6 +79,15 @@ export default function TaskCenter() {
   const [relayLoading, setRelayLoading] = useState(false)
   const [relayDirection, setRelayDirection] = useState<'all' | RelayDirection>('all')
   const [relayStatus, setRelayStatus] = useState<'all' | string>('all')
+  const [bgTasks, setBgTasks] = useState<{ active: BackgroundTaskInfo[]; completed: BackgroundTaskInfo[] }>({
+    active: [],
+    completed: [],
+  })
+  const [bgLoading, setBgLoading] = useState(false)
+  const [taskTypes, setTaskTypes] = useState<BackgroundTaskType[]>([])
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createLoading, setCreateLoading] = useState(false)
+  const [logDialog, setLogDialog] = useState<{ task: BackgroundTaskInfo; logs: string[] } | null>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadTasks = useCallback(async () => {
@@ -102,6 +115,7 @@ export default function TaskCenter() {
           taskId: t.taskId,
           type: 'compress' as const,
           status: t.status,
+          paused: t.paused,
           progress: t.progress,
           total: t.totalGalleries,
           completed: t.completedGalleries,
@@ -136,13 +150,36 @@ export default function TaskCenter() {
     }
   }, [relayStatus, relayDirection])
 
+  const loadBackgroundTasks = useCallback(async () => {
+    setBgLoading(true)
+    try {
+      const res = await api.getBackgroundTasks()
+      setBgTasks({ active: res.active || [], completed: res.completed || [] })
+    } catch (e) {
+      console.error('Failed to load background tasks:', e)
+    } finally {
+      setBgLoading(false)
+    }
+  }, [])
+
+  const loadTaskTypes = useCallback(async () => {
+    try {
+      const res = await api.getBackgroundTaskTypes()
+      setTaskTypes(res.taskTypes || [])
+    } catch (e) {
+      console.error('Failed to load task types:', e)
+    }
+  }, [])
+
   useEffect(() => {
     loadTasks()
     loadRelayTasks()
 
     // Poll every 3 seconds while on unified tabs
     timerRef.current = setInterval(() => {
-      if (activeTab.startsWith('relay')) {
+      if (activeTab === 'background') {
+        loadBackgroundTasks()
+      } else if (activeTab.startsWith('relay')) {
         loadRelayTasks()
       } else {
         loadTasks()
@@ -191,16 +228,52 @@ export default function TaskCenter() {
     }
   }
 
-  const handleCancel = async (taskId: string) => {
+  const handleCancel = async (task: UnifiedTaskItem) => {
     const result = await Dialog.confirm({ content: '确定要取消此任务吗？' })
     if (!result) return
 
     try {
-      await api.request(`/api/v1/tasks/${taskId}`, { method: 'DELETE' })
+      if (task.type === 'compress') {
+        await api.request(`/api/v1/compress/tasks/${encodeURIComponent(task.taskId)}`, { method: 'DELETE' })
+      } else {
+        await api.request(`/api/v1/tasks/${task.taskId}`, { method: 'DELETE' })
+      }
       Toast.show({ content: '已取消', icon: 'success' })
       loadTasks()
     } catch {
       Toast.show({ content: '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handlePauseCompress = async (taskId: string) => {
+    try {
+      await api.request(`/api/v1/compress/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' })
+      Toast.show({ content: '已暂停', icon: 'success' })
+      loadTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleResumeCompress = async (taskId: string) => {
+    try {
+      await api.request(`/api/v1/compress/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' })
+      Toast.show({ content: '已恢复', icon: 'success' })
+      loadTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleStopCompress = async (taskId: string) => {
+    const ok = await Dialog.confirm({ content: '确定要停止此压缩任务吗？' })
+    if (!ok) return
+    try {
+      await api.request(`/api/v1/compress/tasks/${encodeURIComponent(taskId)}/stop`, { method: 'POST' })
+      Toast.show({ content: '已停止', icon: 'success' })
+      loadTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
     }
   }
 
@@ -277,6 +350,187 @@ export default function TaskCenter() {
     } catch {
       Toast.show({ content: '操作失败', icon: 'fail' })
     }
+  }
+
+  // ===== 后台任务操作 =====
+
+  const handleCreateTask = async (className: string) => {
+    setCreateLoading(true)
+    try {
+      const res = await api.createBackgroundTask(className)
+      Toast.show({ content: '任务已创建', icon: 'success' })
+      setCreateOpen(false)
+      loadBackgroundTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '创建失败', icon: 'fail' })
+    } finally {
+      setCreateLoading(false)
+    }
+  }
+
+  const handlePauseBg = async (taskId: string) => {
+    try {
+      await api.pauseBackgroundTask(taskId)
+      Toast.show({ content: '已暂停', icon: 'success' })
+      loadBackgroundTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleResumeBg = async (taskId: string) => {
+    try {
+      await api.resumeBackgroundTask(taskId)
+      Toast.show({ content: '已恢复', icon: 'success' })
+      loadBackgroundTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleStopBg = async (taskId: string) => {
+    const ok = await Dialog.confirm({ content: '确定要停止此任务吗？' })
+    if (!ok) return
+    try {
+      await api.stopBackgroundTask(taskId)
+      Toast.show({ content: '已停止', icon: 'success' })
+      loadBackgroundTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleDeleteBg = async (task: BackgroundTaskInfo) => {
+    const ok = await Dialog.confirm({ content: `确定删除「${task.taskName}」吗？` })
+    if (!ok) return
+    try {
+      await api.deleteBackgroundTask(task.taskId)
+      Toast.show({ content: '已删除', icon: 'success' })
+      loadBackgroundTasks()
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '操作失败', icon: 'fail' })
+    }
+  }
+
+  const handleViewLogs = async (task: BackgroundTaskInfo) => {
+    try {
+      const res = await api.getBackgroundTaskLogs(task.taskId)
+      setLogDialog({ task, logs: res.logs || [] })
+    } catch (e: any) {
+      Toast.show({ content: e?.message || '获取日志失败', icon: 'fail' })
+    }
+  }
+
+  const BG_STATE_LABELS: Record<string, string> = {
+    PENDING: '等待中',
+    RUNNING: '运行中',
+    PAUSED: '已暂停',
+    COMPLETED: '已完成',
+    FAILED: '失败',
+    CANCELLED: '已取消',
+  }
+
+  const BG_STATE_COLORS: Record<string, string> = {
+    PENDING: '#ff9800',
+    RUNNING: '#2196f3',
+    PAUSED: '#ff9800',
+    COMPLETED: '#4caf50',
+    FAILED: '#f44336',
+    CANCELLED: '#795548',
+  }
+
+  const renderBackgroundTask = (task: BackgroundTaskInfo) => {
+    const isTerminal = task.isCompleted || task.isCancelled
+    return (
+      <div
+        key={task.taskId}
+        style={{
+          background: 'var(--card-bg, #fff)',
+          borderRadius: 8,
+          padding: 16,
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: `4px solid ${BG_STATE_COLORS[task.state] || '#9e9e9e'}`,
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8, gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, wordBreak: 'break-all' }}>{task.taskName}</div>
+            {task.taskDescription && (
+              <div style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 2 }}>{task.taskDescription}</div>
+            )}
+          </div>
+          <Tag
+            color="primary"
+            fill="solid"
+            style={{
+              '--background-color': BG_STATE_COLORS[task.state] || '#9e9e9e',
+              '--text-color': '#fff',
+              '--border-color': 'transparent',
+              fontSize: 11,
+              flexShrink: 0,
+            }}
+          >
+            {BG_STATE_LABELS[task.state] || task.state}
+          </Tag>
+        </div>
+
+        {!isTerminal && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-light)', marginBottom: 4 }}>
+              <span>
+                {task.progressPercentage >= 0
+                  ? `${task.currentProgress} / ${task.totalProgress}`
+                  : '进度未知'}
+              </span>
+              {task.estimatedRemainingMs && task.estimatedRemainingMs > 0 && (
+                <span>剩余约 {(task.estimatedRemainingMs / 60000).toFixed(1)} 分钟</span>
+              )}
+            </div>
+            <div style={{ height: 6, background: 'var(--progress-bg)', borderRadius: 3, overflow: 'hidden' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${task.progressPercentage >= 0 ? task.progressPercentage : 100}%`,
+                  background: task.state === 'PAUSED' ? '#ff9800' : '#2196f3',
+                  borderRadius: 3,
+                  transition: 'width 0.3s',
+                  opacity: task.progressPercentage >= 0 ? 1 : 0.3,
+                }}
+              />
+            </div>
+            {task.progressDetail && (
+              <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 4 }}>{task.progressDetail}</div>
+            )}
+          </div>
+        )}
+
+        {task.errorMessage && (
+          <div style={{ fontSize: 12, color: '#f44336', marginBottom: 8 }}>⚠️ {task.errorMessage}</div>
+        )}
+
+        <div style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>
+          <span>类型: {task.taskType}</span>
+          {task.isPausable && <span style={{ marginLeft: 8 }}>· 支持暂停</span>}
+          <div>开始: {formatTime(task.startTime)}</div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+          <Button size="small" color="default" onClick={() => handleViewLogs(task)}>日志</Button>
+          {!isTerminal && task.state === 'RUNNING' && task.isPausable && (
+            <Button size="small" color="primary" onClick={() => handlePauseBg(task.taskId)}>暂停</Button>
+          )}
+          {task.state === 'PAUSED' && (
+            <Button size="small" color="primary" onClick={() => handleResumeBg(task.taskId)}>继续</Button>
+          )}
+          {!isTerminal && (
+            <Button size="small" color="warning" onClick={() => handleStopBg(task.taskId)}>停止</Button>
+          )}
+          {isTerminal && (
+            <Button size="small" color="default" onClick={() => handleDeleteBg(task)}>删除</Button>
+          )}
+        </div>
+      </div>
+    )
   }
 
   const formatTime = (timestamp?: number | null) => {
@@ -450,12 +704,40 @@ export default function TaskCenter() {
         <Tabs.Tab title={`全部 (${tasks.length})`} key="all" />
         <Tabs.Tab title={`进行中 (${tasks.filter(t => !isTerminal(t.status)).length})`} key="active" />
         <Tabs.Tab title={`已完成 (${tasks.filter(t => t.status === 'completed').length})`} key="completed" />
+        <Tabs.Tab title={`后台 (${bgTasks.active.length + bgTasks.completed.length})`} key="background" />
         <Tabs.Tab title={`接力 (${relayTasks.length})`} key="relay-all" />
         <Tabs.Tab title={`失败 (${tasks.filter(t => ['failed', 'cancelled', 'rejected'].includes(t.status)).length})`} key="failed" />
       </Tabs>
 
       <div className="page-content">
-        {activeTab.startsWith('relay') ? (
+        {activeTab === 'background' ? (
+          <>
+            <div style={{ padding: '8px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
+              <span style={{ fontSize: 13, color: 'var(--text-light)' }}>
+                后台任务 {bgTasks.active.length + bgTasks.completed.length} 个
+              </span>
+              <Button size="small" color="primary" onClick={() => { loadTaskTypes(); setCreateOpen(true) }}>
+                新建任务
+              </Button>
+            </div>
+            {bgLoading && bgTasks.active.length === 0 && bgTasks.completed.length === 0 ? (
+              <FullScreenLoading text="加载后台任务中..." />
+            ) : bgTasks.active.length === 0 && bgTasks.completed.length === 0 ? (
+              <Empty description="暂无后台任务" style={{ padding: '60px 0' }} />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 12 }}>
+                {bgTasks.active.length > 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--text-light)', paddingLeft: 4 }}>运行中 ({bgTasks.active.length})</div>
+                )}
+                {bgTasks.active.map(renderBackgroundTask)}
+                {bgTasks.completed.length > 0 && (
+                  <div style={{ fontSize: 12, color: 'var(--text-light)', paddingLeft: 4, marginTop: 8 }}>已完成 ({bgTasks.completed.length})</div>
+                )}
+                {bgTasks.completed.map(renderBackgroundTask)}
+              </div>
+            )}
+          </>
+        ) : activeTab.startsWith('relay') ? (
           // ===== 接力下载 Tab =====
           <>
             {/* 子筛选 */}
@@ -496,9 +778,7 @@ export default function TaskCenter() {
             </div>
 
             {relayLoading && relayTasks.length === 0 ? (
-              <div className="loading-container">
-                <SpinLoading style={{ '--size': '48px' }} />
-              </div>
+              <FullScreenLoading text="加载接力任务中..." />
             ) : relayFiltered.length === 0 ? (
               <Empty description="暂无接力任务" style={{ padding: '60px 0' }} />
             ) : (
@@ -508,9 +788,7 @@ export default function TaskCenter() {
             )}
           </>
         ) : unifiedLoading && tasks.length === 0 ? (
-          <div className="loading-container">
-            <SpinLoading style={{ '--size': '48px' }} />
-          </div>
+          <FullScreenLoading text="加载任务中..." />
         ) : filteredTasks.length === 0 ? (
           <Empty description="暂无任务" style={{ padding: '60px 0' }} />
         ) : (
@@ -591,19 +869,33 @@ export default function TaskCenter() {
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
                   {task.status === 'pending' && task.type === 'push' && (
                     <>
                       <Button size="small" color="primary" onClick={() => handleAccept(task.taskId)}>接受</Button>
                       <Button size="small" color="danger" onClick={() => handleReject(task.taskId)}>拒绝</Button>
                     </>
                   )}
+                  {task.type === 'compress' && task.status === 'in_progress' && !task.paused && (
+                    <Button size="small" color="primary" onClick={() => handlePauseCompress(task.taskId)}>暂停</Button>
+                  )}
+                  {task.type === 'compress' && task.status === 'in_progress' && task.paused && (
+                    <Button size="small" color="primary" onClick={() => handleResumeCompress(task.taskId)}>继续</Button>
+                  )}
                   {!isTerminal(task.status) && (
-                    <Button size="small" color="warning" onClick={() => handleCancel(task.taskId)}>取消</Button>
+                    <>
+                      <Button size="small" color="warning" onClick={() => handleCancel(task)}>取消</Button>
+                      {task.type === 'compress' && (
+                        <Button size="small" color="danger" onClick={() => handleStopCompress(task.taskId)}>停止</Button>
+                      )}
+                    </>
                   )}
                   {isTerminal(task.status) && (
                     <Button size="small" color="default" onClick={() => {
-                      api.request(`/api/v1/tasks/${task.taskId}`, { method: 'DELETE' }).then(loadTasks)
+                      const url = task.type === 'compress'
+                        ? `/api/v1/compress/tasks/${task.taskId}`
+                        : `/api/v1/tasks/${task.taskId}`
+                      api.request(url, { method: 'DELETE' }).then(loadTasks)
                     }}>
                       移除
                     </Button>
@@ -614,6 +906,106 @@ export default function TaskCenter() {
           </div>
         )}
       </div>
+
+      {/* 新建任务弹层 */}
+      <Popup
+        visible={createOpen}
+        onMaskClick={() => setCreateOpen(false)}
+        onClose={() => setCreateOpen(false)}
+        bodyStyle={{ maxHeight: '70vh', overflow: 'auto', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}
+      >
+        <div style={{ padding: 16 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>新建后台任务</div>
+          {taskTypes.length === 0 ? (
+            <Empty description="加载任务类型中..." style={{ padding: '40px 0' }} />
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>
+                以下为无需参数、可一键创建的任务：
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {taskTypes
+                  .filter((t) => !t.requiresParams)
+                  .map((t) => (
+                    <div
+                      key={t.taskClassName}
+                      onClick={() => !createLoading && handleCreateTask(t.taskClassName)}
+                      style={{
+                        background: 'var(--card-bg, #fff)',
+                        border: '1px solid var(--border, #eee)',
+                        borderRadius: 8,
+                        padding: '10px 12px',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 500 }}>{t.displayName}</div>
+                        {t.description && (
+                          <div style={{ fontSize: 12, color: 'var(--text-light)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {t.description}
+                          </div>
+                        )}
+                      </div>
+                      <Tag color="primary" fill="outline" style={{ fontSize: 10, flexShrink: 0 }}>
+                        {t.taskType}
+                      </Tag>
+                    </div>
+                  ))}
+              </div>
+              <Button
+                block
+                color="default"
+                style={{ marginTop: 12 }}
+                onClick={() => setCreateOpen(false)}
+              >
+                关闭
+              </Button>
+            </>
+          )}
+        </div>
+      </Popup>
+
+      {/* 任务日志弹层 */}
+      {logDialog && (
+        <Popup
+          visible={!!logDialog}
+          onMaskClick={() => setLogDialog(null)}
+          onClose={() => setLogDialog(null)}
+          bodyStyle={{ maxHeight: '70vh', overflow: 'auto', borderTopLeftRadius: 12, borderTopRightRadius: 12 }}
+        >
+          <div style={{ padding: 16 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 4 }}>{logDialog.task.taskName}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 12 }}>任务日志（{logDialog.logs.length} 条）</div>
+            {logDialog.logs.length === 0 ? (
+              <Empty description="暂无日志" style={{ padding: '30px 0' }} />
+            ) : (
+              <pre
+                style={{
+                  background: 'rgba(0,0,0,0.04)',
+                  borderRadius: 8,
+                  padding: 12,
+                  fontSize: 11,
+                  lineHeight: 1.6,
+                  maxHeight: 320,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-all',
+                  fontFamily: 'monospace',
+                  margin: 0,
+                }}
+              >
+                {logDialog.logs.join('\n')}
+              </pre>
+            )}
+            <Button block color="default" style={{ marginTop: 12 }} onClick={() => setLogDialog(null)}>
+              关闭
+            </Button>
+          </div>
+        </Popup>
+      )}
     </div>
   )
 }

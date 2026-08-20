@@ -19,7 +19,6 @@ package com.hippo.ehviewer.transfer.api;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -30,10 +29,11 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
-import com.hippo.ehviewer.transfer.core.DeleteTaskExecutor;
-import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.lib.yorozuya.collect.LongList;
+import com.hippo.ehviewer.BackgroundTaskManager;
+import com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -41,6 +41,7 @@ import java.util.Date;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -80,7 +81,7 @@ public class DownloadApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         String path = uri.split("\\?")[0];
 
@@ -100,7 +101,7 @@ public class DownloadApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         String path = uri.split("\\?")[0];
 
@@ -136,7 +137,7 @@ public class DownloadApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("DELETE", uri);
+        logRequest("DELETE", uri, session);
 
         String path = uri.split("\\?")[0];
 
@@ -166,6 +167,8 @@ public class DownloadApiHandler extends BaseApiHandler {
             String stateFilter = RequestParser.getQueryParameter(session, "state", "all");
             String label = RequestParser.getQueryParameter(session, "label");
             String search = RequestParser.getQueryParameter(session, "search");
+            TransferLogger.getInstance().d(TAG, "获取下载任务列表: page=" + page + ", limit=" + limit +
+                    ", state=" + stateFilter + ", label=" + label + ", search=" + search);
 
             List<DownloadInfo> allList;
             if ("默认".equals(label) || "default".equals(label)) {
@@ -238,10 +241,11 @@ public class DownloadApiHandler extends BaseApiHandler {
 
             sb.append("]}");
 
+            TransferLogger.getInstance().i(TAG, "获取下载任务列表成功: total=" + total + ", 返回 " + pageList.size() + " 个");
             return ResponseBuilder.jsonSuccess(sb.toString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get downloads", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get downloads", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -251,6 +255,7 @@ public class DownloadApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleGetDownload(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().d(TAG, "获取下载任务详情: gid=" + gid);
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             if (info == null) {
                 return ResponseBuilder.notFound("Download");
@@ -259,7 +264,7 @@ public class DownloadApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(formatDownloadJson(info, true));
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get download", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -273,6 +278,8 @@ public class DownloadApiHandler extends BaseApiHandler {
             JSONObject json = JSON.parseObject(body);
 
             long gid = json.getLongValue("gid");
+            TransferLogger.getInstance().i(TAG, "创建下载任务: gid=" + gid +
+                    ", startImmediately=" + json.getBooleanValue("startImmediately"));
             if (gid <= 0) {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Invalid gid");
             }
@@ -323,10 +330,11 @@ public class DownloadApiHandler extends BaseApiHandler {
             response.put("gid", gid);
             response.put("state", state == DownloadInfo.STATE_WAIT ? "wait" : "none");
 
+            TransferLogger.getInstance().i(TAG, "创建下载任务成功: gid=" + gid + ", state=" + (state == DownloadInfo.STATE_WAIT ? "wait" : "none"));
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to create download", e);
+            TransferLogger.getInstance().e(TAG, "Failed to create download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -336,6 +344,7 @@ public class DownloadApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleStartDownload(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().i(TAG, "开始/恢复下载: gid=" + gid);
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             if (info == null) {
                 return ResponseBuilder.notFound("Download");
@@ -363,10 +372,11 @@ public class DownloadApiHandler extends BaseApiHandler {
             response.put("gid", gid);
             response.put("state", stateName);
 
+            TransferLogger.getInstance().i(TAG, "开始下载成功: gid=" + gid + ", state=" + stateName);
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start download", e);
+            TransferLogger.getInstance().e(TAG, "Failed to start download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -376,6 +386,7 @@ public class DownloadApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handlePauseDownload(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().i(TAG, "暂停下载: gid=" + gid);
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             if (info == null) {
                 return ResponseBuilder.notFound("Download");
@@ -400,10 +411,11 @@ public class DownloadApiHandler extends BaseApiHandler {
             response.put("gid", gid);
             response.put("state", stateName);
 
+            TransferLogger.getInstance().i(TAG, "暂停下载成功: gid=" + gid + ", state=" + stateName);
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to pause download", e);
+            TransferLogger.getInstance().e(TAG, "Failed to pause download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -417,17 +429,17 @@ public class DownloadApiHandler extends BaseApiHandler {
                 return ResponseBuilder.forbidden("Remote delete is disabled");
             }
 
+            TransferLogger.getInstance().i(TAG, "删除下载任务: gid=" + gid);
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             if (info == null) {
                 return ResponseBuilder.notFound("Download");
             }
 
-            UnifiedTask task = DeleteTaskExecutor.getInstance().submitDownloadDelete(
-                    context, java.util.Collections.singletonList(gid));
-            return ResponseBuilder.accepted(deleteTaskJson(task));
+            boolean deleteFiles = parseDeleteFiles(session);
+            return submitDeleteTask(java.util.Collections.singletonList(gid), deleteFiles);
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to delete download", e);
+            TransferLogger.getInstance().e(TAG, "Failed to delete download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -452,6 +464,7 @@ public class DownloadApiHandler extends BaseApiHandler {
 
             runOnUiThreadSync(() -> DownloadService.startRangeDownload(context, gidList));
 
+            TransferLogger.getInstance().i(TAG, "批量开始下载: " + gidsArray.size() + " 个任务");
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("message", "Batch start completed");
@@ -460,7 +473,7 @@ public class DownloadApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to batch start downloads", e);
+            TransferLogger.getInstance().e(TAG, "Failed to batch start downloads", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -485,6 +498,7 @@ public class DownloadApiHandler extends BaseApiHandler {
 
             runOnUiThreadSync(() -> downloadManager.stopRangeDownload(gidList));
 
+            TransferLogger.getInstance().i(TAG, "批量暂停下载: " + gidsArray.size() + " 个任务");
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("message", "Batch pause completed");
@@ -493,7 +507,7 @@ public class DownloadApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to batch pause downloads", e);
+            TransferLogger.getInstance().e(TAG, "Failed to batch pause downloads", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -509,8 +523,12 @@ public class DownloadApiHandler extends BaseApiHandler {
 
             String body = RequestParser.readBody(session);
             JSONObject json = JSON.parseObject(body);
-            JSONArray gidsArray = json.getJSONArray("gids");
 
+            if (json == null) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "No GIDs provided");
+            }
+
+            JSONArray gidsArray = json.getJSONArray("gids");
             if (gidsArray == null || gidsArray.isEmpty()) {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "No GIDs provided");
             }
@@ -519,23 +537,61 @@ public class DownloadApiHandler extends BaseApiHandler {
             for (int i = 0; i < gidsArray.size(); i++) {
                 gids.add(gidsArray.getLong(i));
             }
-            UnifiedTask task = DeleteTaskExecutor.getInstance().submitDownloadDelete(context, gids);
-            return ResponseBuilder.accepted(deleteTaskJson(task));
+            TransferLogger.getInstance().i(TAG, "批量删除下载任务: " + gids.size() + " 个");
+
+            boolean deleteFiles = parseDeleteFiles(session);
+            try {
+                if (json.containsKey("deleteFiles")) {
+                    deleteFiles = json.getBooleanValue("deleteFiles");
+                }
+            } catch (Exception e) {
+                TransferLogger.getInstance().w(TAG, "解析 deleteFiles 请求体失败，使用查询参数/默认值", e);
+            }
+
+            return submitDeleteTask(gids, deleteFiles);
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to batch delete downloads", e);
+            TransferLogger.getInstance().e(TAG, "Failed to batch delete downloads", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
 
-    private String deleteTaskJson(UnifiedTask task) {
+    /**
+     * 提交删除后台任务，返回 202 + 后台任务 taskId。
+     */
+    private NanoHTTPD.Response submitDeleteTask(java.util.List<Long> gids, boolean deleteFiles) {
+        LongList gidList = new LongList(gids.size());
+        for (Long gid : gids) {
+            gidList.add(gid);
+        }
+        DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
+                context, downloadManager, gidList, deleteFiles, null);
+        BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+        return ResponseBuilder.accepted(deleteTaskJson(handle));
+    }
+
+    private String deleteTaskJson(BackgroundTaskManager.TaskHandle handle) {
         JSONObject response = new JSONObject();
         response.put("success", true);
         response.put("accepted", true);
-        response.put("taskId", task.taskId);
-        response.put("status", task.status);
-        response.put("total", task.total);
+        response.put("taskId", handle.taskId);
+        response.put("status", "pending");
+        response.put("taskClassName", DeleteRangeDownloadTask.class.getName());
         return response.toJSONString();
+    }
+
+    /**
+     * 解析 deleteFiles（true/1 为删除本地文件，false 为移入回收站）。
+     * 单个删除取查询参数；批量删除优先取请求体字段，其次查询参数；
+     * 均未指定时取全局设置 isDeleteFilesOnRemoteDelete。
+     */
+    private boolean parseDeleteFiles(NanoHTTPD.IHTTPSession session) {
+        Map<String, String> parms = session.getParms();
+        String value = parms != null ? parms.get("deleteFiles") : null;
+        if (value == null) {
+            return Settings.isDeleteFilesOnRemoteDelete();
+        }
+        return "1".equals(value) || "true".equalsIgnoreCase(value);
     }
 
     // ==================== 工具方法 ====================

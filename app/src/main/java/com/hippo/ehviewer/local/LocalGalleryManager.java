@@ -257,6 +257,9 @@ public class LocalGalleryManager {
             }
         }
 
+        // 将 .ehviewer.extra.ai.json 中的 AI 分析加载进数据库，便于搜索
+        indexAiAnalysisIntoDatabase(directory);
+
         // 兼容旧版本 .ehviewer 文件
         File ehviewerFile = new File(directory, DownloadManager.DOWNLOAD_INFO_FILENAME);
         if (ehviewerFile.exists() && ehviewerFile.isFile()) {
@@ -302,6 +305,83 @@ public class LocalGalleryManager {
         }
 
         return info;
+    }
+
+    /**
+     * 将 .ehviewer.extra.ai.json 中的 AI 分析写入数据库（供下载列表按描述搜索）
+     */
+    private void indexAiAnalysisIntoDatabase(File directory) {
+        if (directory == null || !directory.isDirectory()) {
+            return;
+        }
+        File aiFile = new File(directory, com.hippo.ehviewer.cache.GalleryAiCacheManager.AI_CACHE_FILENAME);
+        if (!aiFile.exists() || !aiFile.isFile()) {
+            return;
+        }
+        try (FileInputStream fis = new FileInputStream(aiFile)) {
+            String content = IOUtils.readString(fis, "UTF-8");
+            if (TextUtils.isEmpty(content)) {
+                return;
+            }
+            JSONObject jsonObject = JSON.parseObject(content);
+            if (jsonObject == null) {
+                return;
+            }
+            com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis analysis =
+                    com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis.fromJson(jsonObject);
+            if (analysis == null || analysis.gid <= 0) {
+                return;
+            }
+            com.hippo.ehviewer.dao.GalleryAiInfo info = new com.hippo.ehviewer.dao.GalleryAiInfo();
+            info.setGid(analysis.gid);
+            info.setSummary(analysis.summary);
+            info.setTags(joinList(analysis.tags));
+            info.setDescriptions(joinPageDescriptions(analysis));
+            info.setAestheticScore(analysis.aestheticScore);
+            info.setUpdatedAt(analysis.analyzedAt > 0 ? analysis.analyzedAt : System.currentTimeMillis());
+            com.hippo.ehviewer.EhDB.putGalleryAiInfo(info);
+        } catch (Exception e) {
+            Log.w(TAG, "无法读取 .ehviewer.extra.ai.json 到数据库", e);
+        }
+    }
+
+    private String joinList(java.util.List<String> list) {
+        if (list == null || list.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String s : list) {
+            if (s != null) {
+                if (sb.length() > 0) {
+                    sb.append('\n');
+                }
+                sb.append(s);
+            }
+        }
+        return sb.toString();
+    }
+
+    private String joinPageDescriptions(com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis analysis) {
+        if (analysis == null || analysis.pages == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (com.hippo.ehviewer.lab.analyze.model.AiPageAnalysis page : analysis.pages) {
+            if (page == null) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append('\n');
+            }
+            sb.append("P").append(page.pageIndex + 1).append(": ");
+            if (page.description != null) {
+                sb.append(page.description);
+            }
+            if (page.tags != null && !page.tags.isEmpty()) {
+                sb.append(" [").append(joinList(page.tags)).append("]");
+            }
+        }
+        return sb.toString();
     }
 
     private void notifyScanStart() {

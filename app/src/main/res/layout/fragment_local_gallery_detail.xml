@@ -125,6 +125,11 @@
                 android:layout_marginBottom="16dp"
                 android:visibility="gone" />
 
+            <include
+                layout="@layout/gallery_detail_ai"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content" />
+
         </LinearLayout>
 
     </ScrollView>

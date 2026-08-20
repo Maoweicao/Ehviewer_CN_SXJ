@@ -172,6 +172,47 @@ body {
   min-height: 200px;
 }
 
+/* ==================== Fullscreen Loading ==================== */
+.fullscreen-loading {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg);
+  color: var(--text-light);
+  font-size: 14px;
+}
+
+/* ==================== Fixed Pagination Bar ==================== */
+.gallery-pagination-bar {
+  position: fixed;
+  bottom: calc(50px + env(safe-area-inset-bottom));
+  left: 0;
+  right: 0;
+  z-index: 90;
+  background: var(--card-bg, #fff);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -1px 6px var(--shadow);
+  padding: 8px 12px;
+}
+
+.gallery-pagination-bar .pagination-container {
+  margin-top: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.gallery-page-pagination {
+  padding-bottom: 200px;
+}
+
 .empty-container {
   display: flex;
   flex-direction: column;

@@ -35,6 +35,9 @@ import java.util.List;
  */
 public class LogAdapter extends RecyclerView.Adapter<LogAdapter.ViewHolder> {
 
+    /** 日志列表容量上限，防止长时间运行后无限累积导致 OOM */
+    private static final int MAX_LOG_ITEMS = 1000;
+
     private final List<LogEntry> logs = new ArrayList<>();
     private RecyclerView recyclerView;
 
@@ -54,6 +57,11 @@ public class LogAdapter extends RecyclerView.Adapter<LogAdapter.ViewHolder> {
      * 添加日志
      */
     public void addLog(LogEntry entry) {
+        // 超出容量上限时移除最旧的日志，防止无限累积
+        while (logs.size() >= MAX_LOG_ITEMS) {
+            logs.remove(0);
+            notifyItemRemoved(0);
+        }
         logs.add(entry);
         notifyItemInserted(logs.size() - 1);
 
@@ -70,7 +78,11 @@ public class LogAdapter extends RecyclerView.Adapter<LogAdapter.ViewHolder> {
      */
     public void setLogs(List<LogEntry> logs) {
         this.logs.clear();
-        this.logs.addAll(logs);
+        // 只保留最新的一部分日志
+        int start = Math.max(0, logs.size() - MAX_LOG_ITEMS);
+        for (int i = start; i < logs.size(); i++) {
+            this.logs.add(logs.get(i));
+        }
         notifyDataSetChanged();
 
         // 滚动到底部

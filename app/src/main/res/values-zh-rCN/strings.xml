@@ -107,11 +107,15 @@
     <string name="settings_category_reading_brightness">阅读亮度</string>
     <string name="settings_category_reading_brightness_summary">阅读时的自定义屏幕亮度</string>
     <string name="settings_category_download_basic">下载基础</string>
-    <string name="settings_category_download_basic_summary">下载位置、媒体扫描与预加载</string>
+    <string name="settings_category_download_basic_summary">下载位置、媒体扫描与下载引擎</string>
     <string name="settings_category_download_speed">速度与线程</string>
     <string name="settings_category_download_speed_summary">多线程下载、超时与最低速度限制</string>
+    <string name="settings_category_download_image">图片与质量</string>
+    <string name="settings_category_download_image_summary">分辨率、原图与预加载</string>
     <string name="settings_category_download_queue">队列与排序</string>
-    <string name="settings_category_download_queue_summary">队列顺序、类型优先级与边看边存</string>
+    <string name="settings_category_download_queue_summary">队列顺序与优先级排序</string>
+    <string name="settings_category_download_behavior">下载行为</string>
+    <string name="settings_category_download_behavior_summary">保持亮屏、列表分页、边看边存与按量网络策略</string>
     <string name="settings_category_download_maintenance">下载维护</string>
     <string name="settings_category_download_maintenance_summary">恢复、合并、清理与校验下载数据</string>
     <string name="settings_category_local">本地画廊</string>
@@ -383,6 +387,21 @@
     <string name="similar_gallery">相似</string>
     <string name="search_cover">搜索封面</string>
     <string name="no_tags">无标签</string>
+    <string name="ai_analysis_title">AI分析</string>
+    <string name="ai_analysis_tags">AI标签</string>
+    <string name="ai_analysis_page_details">每页详情</string>
+    <string name="ai_analysis_page_details_collapse">收起每页详情</string>
+    <string name="ai_analysis_start">开始AI分析</string>
+    <string name="ai_analysis_starting">正在AI分析…</string>
+    <string name="ai_analysis_done">AI分析完成</string>
+    <string name="ai_analysis_failed">AI分析失败</string>
+    <string name="ai_analysis_not_enabled">未启用AI分析，请在实验设置中开启</string>
+    <string name="ai_analysis_no_download">该画廊未下载，AI分析需要本地文件</string>
+    <string name="ai_analysis_cancel">取消</string>
+    <string name="ai_analysis_score">评分：%1$s</string>
+    <string name="ai_analysis_score_na">评分：无</string>
+    <string name="ai_analysis_page_label">第 %1$d 页</string>
+    <string name="ai_analysis_progress">正在分析 %1$d/%2$d（%3$s）</string>
     <string name="no_comments">暂无评论</string>
     <string name="no_more_comments">没有更多评论</string>
     <string name="more_comment">更多评论</string>
@@ -534,6 +553,14 @@
     <string name="download_status_all">全部</string>
     <string name="sort_download_list">排序列表</string>
     <string name="advanced_filter">高级筛选</string>
+    <string name="quick_filter">快捷筛选</string>
+    <string name="quick_filter_big_low_rating">大占用低评分</string>
+    <string name="quick_filter_duplicates">重复作品</string>
+    <string name="quick_filter_low_space_efficiency">低空间效率</string>
+    <string name="quick_filter_low_rating">低评分下载</string>
+    <string name="quick_filter_huge_file">超大文件</string>
+    <string name="quick_filter_old_unfavorited">老旧未收藏</string>
+    <string name="filter_loading">正在加载筛选</string>
     <string name="default_sort">默认</string>
     <string name="sort_by_gallery_id_asc">按ID升序排列</string>
     <string name="sort_by_gallery_id_desc">按ID降序排列</string>
@@ -545,6 +572,8 @@
     <string name="sort_by_name_desc">按名称降序排列</string>
     <string name="sort_by_file_size_asc">按文件大小升序排列</string>
     <string name="sort_by_file_size_desc">按文件大小降序排列</string>
+    <string name="sort_by_state_queue_asc">按状态队列升序排列</string>
+    <string name="sort_by_state_queue_desc">按状态队列降序排列</string>
     <string name="download_start_all">开始全部</string>
     <string name="download_stop_all">停止一切</string>
     <string name="download_reset_reading_progress">重置阅读进度</string>
@@ -556,6 +585,14 @@
     <string name="download_speed_text_2">%1$s，剩余 %2$s</string>
     <string name="phase_copying">本地复制中...</string>
     <string name="phase_copying_notification">正在本地复制文件...</string>
+    <string name="phase_verifying">校验完整性中...</string>
+    <string name="phase_merging">简单重复画廊扫描中...</string>
+    <string name="pre_download_merge_task_name">下载前简单重复画廊扫描</string>
+    <string name="pre_download_merge_task_desc">下载前简单扫描并合并重复画廊</string>
+    <string name="pre_download_merge_fetching">正在拉取画廊 hash...</string>
+    <string name="pre_download_merge_merging">正在合并候选画廊 %1$s...</string>
+    <string name="pre_download_merge_done">下载前简单合并完成</string>
+    <string name="pre_download_merge_waiting">等待扫描槽位，正在排队...</string>
     <string name="remember_download_label">记住下载标签</string>
     <string name="default_download_label">默认下载标签</string>
     <string name="added_to_download_list">已添加到下载列表</string>
@@ -797,6 +834,8 @@
     <string name="settings_download_private_mode_summary">在使用系统下载服务时，下载完成 3 分钟后自动清除系统下载记录。仅当下载位置在 Ehviewer 专属目录内时，才会同时删除已下载的图片；下载位置在公共 Downloads 或 SAF 自定义目录时，图片保留。该开关仅影响启用后新开始的下载。</string>
     <string name="settings_download_private_mode_location_warning_title">下载位置不兼容</string>
     <string name="settings_download_private_mode_location_warning_message">当前下载位置在公共目录或用户自定义目录，隐私模式只能清除系统下载记录，无法删除已下载的图片。如需完整删除图片，请先把下载位置改为 Ehviewer 专属目录（设置 → 下载 → 下载位置）。</string>
+    <string name="settings_download_keep_screen_on">下载时保持亮屏</string>
+    <string name="settings_download_keep_screen_on_summary">下载时保持屏幕常亮并防止自动锁屏，仅在充电时生效。</string>
     <string name="go_to_download_location">前往设置</string>
     <string name="settings_download_download_order_by_asc">正序下载</string>
     <string name="settings_download_download_order_by_asc_summary">下载全部画廊时正序下载</string>
@@ -839,7 +878,7 @@
     <string name="settings_download_show_folder_size">在下载卡片显示文件夹大小</string>
     <string name="settings_download_show_folder_size_summary">在每个下载卡片中显示文件夹大小。</string>
     <string name="settings_download_merge_on_download">下载时合并相同画廊</string>
-    <string name="settings_download_merge_on_download_summary">下载完成后自动扫描并合并同名的重复画廊文件夹</string>
+    <string name="settings_download_merge_on_download_summary">下载前自动扫描并合并同名的重复画廊，剪切复用文件只下载缺失部分</string>
     <string name="merge_duplicate_gallery_single_title">合并画廊</string>
     <string name="merge_duplicate_gallery_single_summary">下载后合并同名画廊</string>
     <string name="settings_download_merge_duplicate_gallery">合并重复的画廊</string>
@@ -899,6 +938,8 @@
     <string name="verify_integrity_start">开始校验下载完整性…</string>
     <string name="verify_integrity_progress">校验中: %1$d/%2$d (完整: %3$d, 不完整: %4$d)</string>
     <string name="verify_integrity_complete">校验完成: %1$d 个完整, %2$d 个不完整（已重置为待下载）</string>
+    <string name="settings_download_loop_until_complete">循环开始下载直至完成</string>
+    <string name="settings_download_loop_until_complete_summary">当一批下载结束时若仍有未完成的任务，将自动循环执行 停止全部→开始全部，直到所有下载完成（最多自动循环 5 次）</string>
     <string name="settings_download_clean_redundancy_started">清理冗余任务已启动，请查看任务管理器以了解进度。</string>
     <string name="settings_advanced_advanced_download_sort">高级下载排序</string>
     <string name="settings_advanced_advanced_download_sort_summary">启用下载队列高级排序功能，包括按画廊类型优先级排序</string>
@@ -969,6 +1010,72 @@
     <string name="performance_log_summary_native">Native: %1$d MB</string>
     <string name="performance_log_summary_threads">线程: %1$d</string>
     <string name="performance_log_summary_download">下载: %1$d / 等待: %2$d</string>
+    <string name="performance_benchmark_title">性能测试</string>
+    <string name="performance_benchmark_summary">测试 CPU、内存与存储性能，可导出文本报告用于诊断</string>
+    <string name="performance_benchmark_device_title">设备信息</string>
+    <string name="performance_benchmark_tip_title">使用提示</string>
+    <string name="performance_benchmark_tip">测试期间会完全占用 CPU 与存储 I/O，机身发热、界面卡顿属于正常现象，请耐心等待。\n\n为获得更稳定的结果，建议关闭省电模式并避免后台高负载；可重复测试 2 次取较好成绩。测试结果受温度、负载、剩余电量影响，仅供参考。</string>
+    <string name="performance_benchmark_run">开始测试</string>
+    <string name="performance_benchmark_export">导出报告</string>
+    <string name="performance_benchmark_running">正在测试：%1$s…</string>
+    <string name="performance_benchmark_done">测试完成，可导出报告</string>
+    <string name="performance_benchmark_failed">测试失败，请重试</string>
+    <string name="performance_benchmark_export_success">报告已保存至 %1$s</string>
+    <string name="performance_benchmark_export_failed">报告导出失败</string>
+    <string name="performance_benchmark_result_title">测试结果</string>
+    <string name="performance_benchmark_rating_excellent">优秀</string>
+    <string name="performance_benchmark_rating_good">良好</string>
+    <string name="performance_benchmark_rating_fair">一般</string>
+    <string name="performance_benchmark_rating_poor">较弱</string>
+    <string name="performance_benchmark_summary_title">综合评估</string>
+    <string name="performance_benchmark_summary_level_excellent">性能强劲</string>
+    <string name="performance_benchmark_summary_level_good">性能较强</string>
+    <string name="performance_benchmark_summary_level_fair">性能中等</string>
+    <string name="performance_benchmark_summary_level_poor">性能较弱</string>
+    <string name="performance_benchmark_summary_desc_excellent">可流畅运行大图库浏览、漫画下载、合并等本应用的全部功能。</string>
+    <string name="performance_benchmark_summary_desc_good">运行应用流畅，大图库浏览与长时间合并等操作也能轻松应对。</string>
+    <string name="performance_benchmark_summary_desc_fair">基础使用流畅，但大图库浏览、漫画下载与合并可能略慢。</string>
+    <string name="performance_benchmark_summary_desc_poor">得分较低，大图库浏览、漫画下载与合并等操作可能明显变慢。</string>
+    <string name="performance_benchmark_summary_chip_format">%1$s %2$d</string>
+    <string name="performance_benchmark_reference_format">参考值(%4$s)：优秀≥%1$s · 良好≥%2$s · 一般≥%3$s</string>
+    <string name="performance_benchmark_cpu_int">CPU 整数运算（SHA-256）</string>
+    <string name="performance_benchmark_cpu_int_summary">整数与哈希计算吞吐，数值越高越好。对应场景：合并重复图库/去重扫描的 MD5 摘要、下载完整性校验、标签数据库哈希、压缩包校验等。</string>
+    <string name="performance_benchmark_cpu_float">CPU 浮点运算</string>
+    <string name="performance_benchmark_cpu_float_summary">双精度点积运算吞吐，数值越高越好。对应场景：图片缩放/滤镜像素运算、封面与缩略图生成、动画与列表滑动的流畅度等。</string>
+    <string name="performance_benchmark_memory">内存读写带宽</string>
+    <string name="performance_benchmark_memory_summary">内存大数组连续读写带宽，数值越高越好。对应场景：大图解码缓冲、图片缓存、解码大图、长列表滑动等需要在内存中大量分配和拷贝数据的操作。</string>
+    <string name="performance_benchmark_storage_seq_write">存储顺序写入</string>
+    <string name="performance_benchmark_storage_seq_write_summary">64MB 大文件连续写入速度（已刷新到磁盘），数值越高越好。对应场景：漫画下载写入 SD 卡、导出数据库/日志/诊断包、压缩文件输出、合并与转存等。</string>
+    <string name="performance_benchmark_storage_seq_read">存储顺序读取</string>
+    <string name="performance_benchmark_storage_seq_read_summary">64MB 大文件应用层连续读取速度，数值越高越好。对应场景：本地阅读翻页读取大图、加载本地压缩漫画解压读取、读取图片缓存等。</string>
+    <string name="performance_benchmark_storage_rand_write">存储 4K 随机写入</string>
+    <string name="performance_benchmark_storage_rand_write_summary">4K 随机写入 IOPS，数值越高越好。对应场景：大量小文件创建/删除、缩略图缓存写入、数据库与索引文件的随机写入等。</string>
+    <string name="performance_benchmark_storage_rand_read">存储 4K 随机读取</string>
+    <string name="performance_benchmark_storage_rand_read_summary">4K 随机读取 IOPS，数值越高越好。对应场景：扫描下载目录与回收站、缩略图加载、数据库与索引文件的随机读取等。</string>
+    <string name="performance_benchmark_unit_ops">次/秒</string>
+    <string name="performance_benchmark_unit_mflops">百万次浮点运算/秒</string>
+    <string name="performance_benchmark_unit_mbps">MB/秒</string>
+    <string name="performance_benchmark_unit_iops">IOPS</string>
+    <string name="performance_benchmark_device_model">设备型号</string>
+    <string name="performance_benchmark_device_soc">处理器</string>
+    <string name="performance_benchmark_device_cores">CPU 核心数</string>
+    <string name="performance_benchmark_device_max_freq">CPU 最高频率</string>
+    <string name="performance_benchmark_device_ram">内存</string>
+    <string name="performance_benchmark_device_storage_free">存储剩余</string>
+    <string name="performance_benchmark_device_android">Android 版本</string>
+    <string name="performance_benchmark_device_app_version">应用版本</string>
+    <string name="performance_benchmark_mhz_format">%1$.0f MHz</string>
+    <string name="performance_benchmark_mb_format">%1$.0f MB</string>
+    <string name="performance_benchmark_report_time">测试时间：%1$s</string>
+    <string name="performance_benchmark_report_app_version">应用版本：%1$s (code %2$d)</string>
+    <string name="performance_benchmark_report_note">说明：测试结果受温度、负载、剩余电量影响，仅供参考。</string>
+    <string name="performance_benchmark_report_value">结果</string>
+    <string name="performance_benchmark_report_rating">评级</string>
+    <string name="performance_benchmark_report_meaning">含义</string>
+    <string name="performance_benchmark_report_header_title">===== EhViewer 性能测试报告 =====</string>
+    <string name="performance_benchmark_report_header_device">===== 设备信息 =====</string>
+    <string name="performance_benchmark_report_header_results">===== 测试结果 =====</string>
+    <string name="performance_benchmark_report_header_end">===== 报告结束 =====</string>
     <string name="settings_advanced_read_cache_size">读取缓存大小</string>
     <string name="settings_advanced_read_cache_size_unlimited">不限</string>
     <string name="settings_advanced_app_language_title">应用语言</string>
@@ -1391,6 +1498,8 @@ SSID: %1$s
     <string name="background_task_detail">任务详情</string>
     <string name="active_tasks">活动任务</string>
     <string name="completed_tasks">已完成任务</string>
+    <string name="running_tasks">运行中任务</string>
+    <string name="waiting_tasks">等待中任务</string>
     <string name="no_background_tasks">无后台任务</string>
     <string name="background_task_clear_completed">清除已完成的任务</string>
     <string name="background_task_cleared_completed">已完成的任务已清除</string>
@@ -1419,6 +1528,10 @@ SSID: %1$s
     <string name="task_paused">任务已暂停</string>
     <string name="task_resumed">任务已恢复</string>
     <string name="task_cancelling">正在取消任务...</string>
+    <string name="task_action_pause">暂停</string>
+    <string name="task_action_resume">恢复</string>
+    <string name="task_action_stop">停止</string>
+    <string name="task_action_delete">删除</string>
     <string name="background_task_submitted">后台任务已提交</string>
     <string name="task_error_format">错误：%1$s</string>
     <string name="task_progress_detail_label">进度详情</string>
@@ -1510,6 +1623,10 @@ SSID: %1$s
     <string name="download_card_folder_time">时间：%1$s</string>
     <string name="download_card_folder_size">大小：%1$s</string>
     <string name="unavailable">不可用</string>
+    <string name="settings_advanced_merge_scan_mode_title">合并画廊扫描方式</string>
+    <string name="settings_advanced_merge_scan_mode_summary">合并重复画廊时使用的扫描方式：Shell 批量或原生 Java</string>
+    <string name="merge_scan_mode_shell">Shell（批量）</string>
+    <string name="merge_scan_mode_native">原生 Java（更快）</string>
     <string name="merge_scanning_galleries">正在扫描已下载的画廊...</string>
     <string name="merge_start_scan">开始扫描已下载的画廊...</string>
     <string name="merge_scan_failed">下载画廊扫描失败</string>
@@ -1548,6 +1665,31 @@ SSID: %1$s
     <string name="table_info">表格：%1$s（共 %2$d 行）</string>
     <string name="column_info">栏目信息：</string>
     <string name="data_sample_preview">数据样本（前10行）：</string>
+    <string name="database_viewer_empty">未找到数据库</string>
+    <string name="database_viewer_no_tables">未找到数据表</string>
+    <string name="database_viewer_table_empty">暂无数据</string>
+    <string name="database_viewer_table_info">数据表：%1$s</string>
+    <string name="database_viewer_share">分享</string>
+    <string name="database_viewer_service_not_ready">后台服务未就绪，请稍后重试</string>
+    <string name="database_viewer_export_cancelled">导出已取消</string>
+    <string name="database_viewer_export_failed">导出失败</string>
+    <string name="database_viewer_export_db_task">导出数据库</string>
+    <string name="database_viewer_export_db_summary">导出数据库：%1$s</string>
+    <string name="database_viewer_export_csv_task">导出数据表CSV</string>
+    <string name="database_viewer_export_csv_summary">导出数据表：%1$s</string>
+    <string name="database_viewer_export_csv">导出CSV</string>
+    <string name="database_viewer_copy_csv">复制CSV</string>
+    <string name="database_viewer_copy_done">已复制到剪贴板</string>
+    <string name="database_viewer_search_mode_keyword">关键词</string>
+    <string name="database_viewer_search_mode_where">WHERE</string>
+    <string name="database_viewer_search_hint">搜索…</string>
+    <string name="database_viewer_search_where_hint" formatted="false">WHERE 表达式，如 name LIKE "%xxx%"</string>
+    <string name="database_viewer_search_clear">清空搜索</string>
+    <string name="database_viewer_search_error">搜索表达式无效</string>
+    <string name="database_viewer_prev_page">◀ 上一页</string>
+    <string name="database_viewer_next_page">下一页 ▶</string>
+    <string name="database_viewer_page_info">第 %1$d / %2$d 页</string>
+    <string name="database_viewer_total_rows">共 %1$d 行</string>
     <string name="wifi_connected_info">已连接到：%1$s\nIP地址：%2$s\n路由：%3$s</string>
     <string name="wifi_connection_failed">通信连接失败</string>
     <string name="wifi_try_reconnect">尝试重新连接</string>
@@ -1871,6 +2013,26 @@ SSID: %1$s
     <string name="lab_ai_ocr_test">测试OCR连接</string>
     <string name="lab_ai_ocr_test_summary">测试与局域网OCR服务器的连接</string>
 
+    <!-- AI图片分析 -->
+    <string name="lab_ai_analyze">AI图片分析</string>
+    <string name="lab_ai_analyze_summary">使用本地多模态模型分析画廊图片，生成 .ehviewer.extra.ai.json</string>
+    <string name="lab_ai_analyze_basic">基本设置</string>
+    <string name="lab_ai_analyze_enable">启用AI图片分析</string>
+    <string name="lab_ai_analyze_enable_summary">允许使用多模态模型分析画廊图片</string>
+    <string name="lab_ai_analyze_service">分析服务</string>
+    <string name="lab_ai_analyze_model">分析模型</string>
+    <string name="lab_ai_analyze_model_summary">用于图片分析的多模态模型（复用翻译API地址/Key）</string>
+    <string name="lab_ai_analyze_model_dialog_message">留空则回退使用翻译模型。本地视觉模型示例：qwen2.5-vl、llama3.2-vision、minicpm-v、llava</string>
+    <string name="lab_ai_analyze_test">测试分析服务</string>
+    <string name="lab_ai_analyze_test_summary">测试分析API是否正常工作</string>
+    <string name="lab_ai_analyze_testing">正在测试分析服务…</string>
+    <string name="lab_ai_analyze_test_ok">分析测试成功</string>
+    <string name="lab_ai_analyze_advanced">高级设置</string>
+    <string name="lab_ai_analyze_sample_step">采样步长</string>
+    <string name="lab_ai_analyze_sample_step_summary">每隔N页分析一页（1 = 全部分析）</string>
+    <string name="lab_ai_analyze_auto_on_finish">下载完成后自动分析</string>
+    <string name="lab_ai_analyze_auto_on_finish_summary">下载完成时自动分析画廊图片</string>
+
     <!-- 高级设置 -->
     <string name="lab_ai_translate_advanced">高级设置</string>
     <string name="lab_ai_translate_auto_detect">自动图像探测</string>
@@ -1951,6 +2113,8 @@ SSID: %1$s
     <string name="progressive_plan_expired">合并计划已过期（超过7天），请重新生成。</string>
     <string name="progressive_plan_confirm">确认全部合并</string>
     <string name="progressive_backup_checkbox">合并前备份压缩到外置存储</string>
+    <string name="progressive_delete_missing_checkbox">完成后执行删除不存在画廊列表中的画廊任务</string>
+    <string name="progressive_delete_missing_done">已删除 %1$d 个失效的画廊任务</string>
     <string name="progressive_backup_task_name">递进关系备份</string>
     <string name="progressive_backup_task_desc">正在备份 %1$d 条链涉及的全部画廊…</string>
     <string name="progressive_target_label">目标：</string>
@@ -1977,6 +2141,17 @@ SSID: %1$s
     <string name="remote_access_info_default">请先启动传输服务以使用远程管理功能</string>
     <string name="remote_open_in_browser">在浏览器中打开</string>
     <string name="remote_copy_url">复制访问地址</string>
+    <string name="web_server_cache">Web服务器缓存</string>
+    <string name="cache_view">查看缓存</string>
+    <string name="cache_clear">清空缓存</string>
+    <string name="cache_view_title">Web服务器缓存</string>
+    <string name="cache_empty">暂无缓存条目</string>
+    <string name="cache_view_failed">获取缓存列表失败</string>
+    <string name="cache_clear_confirm_title">清空Web服务器缓存</string>
+    <string name="cache_clear_confirm_message">确定要清空服务器端的全部响应缓存吗？清空后相关接口将在下次请求时重新生成缓存。</string>
+    <string name="cache_cleared">Web服务器缓存已清空（%1$d 条）</string>
+    <string name="cache_clear_failed">清空缓存失败</string>
+    <string name="cache_no_entries">当前没有可清空的缓存</string>
 
     <!-- Remote Settings -->
     <string name="remote_settings">远程设置</string>
@@ -2023,6 +2198,21 @@ SSID: %1$s
     <string name="push_data">推送</string>
     <string name="no_devices_found">未发现设备</string>
     <string name="no_connected_devices">暂无已连接设备</string>
+    <string name="connecting_to">正在连接 %1$s...</string>
+    <string name="already_connected">已连接到该设备</string>
+    <string name="connection_failed_format">连接 %1$s 失败: %2$s</string>
+    <string name="device_connected">设备已连接: %1$s</string>
+    <string name="scan_qr_connect">扫码连接</string>
+    <string name="show_qr_code">我的二维码</string>
+    <string name="my_qr_code_title">我的连接二维码</string>
+    <string name="my_qr_code_hint">让另一台设备扫描此二维码即可连接</string>
+    <string name="invalid_qr_content">二维码内容无效</string>
+    <string name="nfc_connect_hint">NFC：将两台设备背靠背贴合即可连接</string>
+    <string name="nfc_not_supported">此设备不支持 NFC</string>
+    <string name="nfc_disabled">请先开启 NFC</string>
+    <string name="nfc_connected">NFC 已连接，正在连接 %1$s...</string>
+    <string name="no_wifi_address">无法获取本地 IP 地址</string>
+    <string name="nfc_apdu_description">将本机模拟为连接信息 NFC 标签</string>
 
     <!-- Push -->
     <string name="receive_confirm">接收确认</string>

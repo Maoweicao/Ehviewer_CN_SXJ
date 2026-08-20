@@ -68,6 +68,7 @@ data class ProgressiveMergePlan @JvmOverloads constructor(
     var status: PlanStatus = PlanStatus.PENDING,
     var backupEnabled: Boolean = false,
     var backupFilePath: String? = null,
+    var deleteMissingDownloadTasks: Boolean = false,
     val totalChains: Int = 0,
     var completedChains: Int = 0,
     val chains: MutableList<ChainMergeEntry> = mutableListOf()
@@ -81,6 +82,7 @@ data class ProgressiveMergePlan @JvmOverloads constructor(
         put("updatedAt", updatedAt)
         put("status", status.name)
         put("backupEnabled", backupEnabled)
+        put("deleteMissingDownloadTasks", deleteMissingDownloadTasks)
         if (backupFilePath != null) put("backupFilePath", backupFilePath)
         put("totalChains", totalChains)
         put("completedChains", completedChains)
@@ -107,6 +109,7 @@ data class ProgressiveMergePlan @JvmOverloads constructor(
                 backupEnabled = json.optBoolean("backupEnabled", false),
                 backupFilePath = if (json.has("backupFilePath") && !json.isNull("backupFilePath"))
                     json.optString("backupFilePath") else null,
+                deleteMissingDownloadTasks = json.optBoolean("deleteMissingDownloadTasks", false),
                 totalChains = json.optInt("totalChains", 0),
                 completedChains = json.optInt("completedChains", 0),
                 chains = chains

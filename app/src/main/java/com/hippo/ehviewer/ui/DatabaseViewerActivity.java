@@ -16,76 +16,83 @@
 
 package com.hippo.ehviewer.ui;
 
+import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
-import android.widget.ExpandableListView;
-import android.widget.LinearLayout;
+import android.view.View;
 import android.widget.TextView;
-import androidx.annotation.StyleRes;
+
+import androidx.annotation.Nullable;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
 import com.hippo.ehviewer.R;
-import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.database.DatabaseManager;
+import com.hippo.ehviewer.task.ExportDatabaseFileTask;
+import com.hippo.lib.yorozuya.ViewUtils;
+
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 数据库查看Activity
- * 显示应用内所有数据库的版本、表、列和数据
+ * 展示应用内所有数据库文件（名称+版本），支持进入查看表、导出分享单个数据库
  */
-public class DatabaseViewerActivity extends EhActivity {
-    private ExpandableListView mExpandableListView;
+public class DatabaseViewerActivity extends ToolbarActivity
+        implements DatabaseListAdapter.OnDatabaseActionListener {
+
     private DatabaseManager mDatabaseManager;
-    private DatabaseExpandableAdapter mAdapter;
+    private DatabaseListAdapter mAdapter;
+    private List<DatabaseManager.DatabaseInfo> mDatabases = new ArrayList<>();
+    private TextView mTip;
 
     @Override
-    protected int getThemeResId(int theme) {
-        switch (theme) {
-            case Settings.THEME_LIGHT:
-            default:
-                return R.style.AppTheme_Toolbar;
-            case Settings.THEME_DARK:
-                return R.style.AppTheme_Toolbar_Dark;
-            case Settings.THEME_BLACK:
-                return R.style.AppTheme_Toolbar_Black;
-        }
-    }
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_database_viewer);
+        setNavigationIcon(R.drawable.v_arrow_left_dark_x24);
+        setTitle(R.string.settings_advanced_database_viewer);
 
-        mExpandableListView = findViewById(R.id.expandable_list_view);
+        RecyclerView recyclerView = (RecyclerView) ViewUtils.$$(this, R.id.recycler_view);
+        mTip = (TextView) ViewUtils.$$(this, R.id.tip);
+
+        mAdapter = new DatabaseListAdapter(mDatabases, this);
+        recyclerView.setLayoutManager(new LinearLayoutManager(this, RecyclerView.VERTICAL, false));
+        recyclerView.setAdapter(mAdapter);
+
         mDatabaseManager = new DatabaseManager(this);
-
         loadDatabases();
     }
 
     private void loadDatabases() {
         new Thread(() -> {
-            List<DatabaseManager.DatabaseInfo> databases = mDatabaseManager.getAllDatabases();
+            List<DatabaseManager.DatabaseInfo> databases = mDatabaseManager.getDatabaseList();
             runOnUiThread(() -> {
-                List<String> groupList = new ArrayList<>();
-                List<List<Map<String, Object>>> childList = new ArrayList<>();
-
-                for (DatabaseManager.DatabaseInfo db : databases) {
-                    groupList.add("📦 " + db.name + " (v" + db.version + ")");
-
-                    List<Map<String, Object>> tableList = new ArrayList<>();
-                    for (DatabaseManager.TableInfo table : db.tables) {
-                        Map<String, Object> tableMap = new java.util.LinkedHashMap<>();
-                        tableMap.put("name", table.name);
-                        tableMap.put("rowCount", table.rowCount);
-                        tableMap.put("columns", table.columns);
-                        tableMap.put("data", table.data);
-                        tableList.add(tableMap);
-                    }
-                    childList.add(tableList);
-                }
-
-                mAdapter = new DatabaseExpandableAdapter(this, groupList, childList);
-                mExpandableListView.setAdapter(mAdapter);
+                mDatabases.clear();
+                mDatabases.addAll(databases);
+                mAdapter.notifyDataSetChanged();
+                updateTip();
             });
         }).start();
+    }
+
+    private void updateTip() {
+        if (mTip != null) {
+            mTip.setVisibility(mDatabases.isEmpty() ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    @Override
+    public void onOpenDatabase(DatabaseManager.DatabaseInfo db) {
+        Context context = this;
+        Intent intent = new Intent(context, DatabaseTablesActivity.class);
+        intent.putExtra(DatabaseTablesActivity.EXTRA_DB_NAME, db.name);
+        intent.putExtra(DatabaseTablesActivity.EXTRA_DB_VERSION, db.version);
+        context.startActivity(intent);
+    }
+
+    @Override
+    public void onShareDatabase(DatabaseManager.DatabaseInfo db) {
+        DatabaseExportHelper.submitAndShare(this, new ExportDatabaseFileTask(this, db.name));
     }
 }

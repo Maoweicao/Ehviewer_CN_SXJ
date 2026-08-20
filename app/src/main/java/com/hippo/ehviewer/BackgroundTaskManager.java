@@ -15,20 +15,31 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 
+import android.net.Uri;
 import android.os.Process;
 
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.EhDB;
+import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask;
 import com.hippo.ehviewer.ui.MainActivity;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadLogger;
+import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.task.BackgroundTask;
 import com.hippo.ehviewer.task.BackgroundTaskRunner;
 import com.hippo.ehviewer.task.MergeDuplicateGalleryTask;
+import com.hippo.ehviewer.task.TaskRegistry;
 import com.hippo.ehviewer.service.BackgroundTaskService;
 import com.hippo.ehviewer.ui.task.BackgroundTaskInfo;
 import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager;
+import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.lib.yorozuya.thread.PriorityThreadFactory;
 
+import java.io.File;
+import java.lang.reflect.Constructor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -231,6 +242,9 @@ public class BackgroundTaskManager {
         
         // 初始化通知通道
         initNotificationChannel();
+        
+        // 启动互斥死锁定期检查
+        startDeadlockCheck();
     }
     
     private void initNotificationChannel() {
@@ -482,7 +496,14 @@ public class BackgroundTaskManager {
 
             @Override
             public void onError(@NonNull Throwable error) {
-                mTaskStatusManager.markTaskError(taskId, error.getMessage());
+                // 统一记录最终异常：写入 logcat 与任务日志文件，方便后期维护
+                String errorMessage = error.getMessage();
+                if (errorMessage == null || errorMessage.isEmpty()) {
+                    errorMessage = error.toString();
+                }
+                Log.e(TAG, "Background task error: " + taskId + " (" + taskName + ")", error);
+                mTaskStatusManager.appendTaskLog(taskId, "任务失败: " + errorMessage);
+                mTaskStatusManager.markTaskError(taskId, errorMessage);
             }
         });
 
@@ -494,7 +515,23 @@ public class BackgroundTaskManager {
                 if (error == null) {
                     mTaskStatusManager.markTaskCompleted(taskId);
                 } else {
-                    mTaskStatusManager.markTaskError(taskId, error.getMessage());
+                    // 任务被取消（优雅取消或中断）时标记为已取消而非失败
+                    BackgroundTaskInfo info = mTaskStatusManager.getTaskInfo(taskId);
+                    boolean cancelled = error instanceof java.util.concurrent.CancellationException
+                            || error instanceof InterruptedException
+                            || (info != null && info.isCancelled());
+                    if (cancelled) {
+                        mTaskStatusManager.markTaskCancelled(taskId);
+                    } else {
+                        // 统一记录最终异常：写入 logcat 与任务日志文件，方便后期维护
+                        String errorMessage = error.getMessage();
+                        if (errorMessage == null || errorMessage.isEmpty()) {
+                            errorMessage = error.toString();
+                        }
+                        Log.e(TAG, "Background task failed: " + taskId + " (" + taskName + ")", error);
+                        mTaskStatusManager.appendTaskLog(taskId, "任务失败: " + errorMessage);
+                        mTaskStatusManager.markTaskError(taskId, errorMessage);
+                    }
                 }
             } finally {
                 endForegroundTask(taskName);
@@ -508,6 +545,8 @@ public class BackgroundTaskManager {
         if (registeredTaskId == null) {
             return new TaskHandle(taskId, createNoOpFuture());
         }
+        // 写回任务实例引用，供暂停/恢复/取消调用其真实 suspend 方法
+        mTaskStatusManager.setTask(registeredTaskId, task);
         mTaskStatusManager.markTaskQueued(registeredTaskId, null);
         try {
             if (cpuBound) {
@@ -823,6 +862,105 @@ public class BackgroundTaskManager {
     public void removeTask(@NonNull String taskId) {
         mTaskStatusManager.removeTask(taskId);
     }
+
+    /**
+     * 指定任务是否支持暂停（供 UI / Web API 显示控制能力）
+     */
+    public boolean isTaskPausable(@NonNull String taskId) {
+        BackgroundTaskInfo info = mTaskStatusManager.getTaskInfo(taskId);
+        return info != null && info.isPausable();
+    }
+
+    /**
+     * 按类名创建后台任务并提交执行（供 Web API「创建任务」使用）。
+     * <p>无参数任务（TaskRegistry 中 requiresParams=false）通过反射调用 {@code (Context)} 构造器创建；
+     * 带参数任务支持约定格式：{@code gids:[long...]}（压缩/删除/范围下载）、{@code uri}（导入下载列表）、
+     * {@code filePath}（导入数据库/旧版数据）。
+     *
+     * @return 提交结果；类名未知、参数缺失或实例化失败时返回 null
+     */
+    @Nullable
+    public TaskHandle createTaskByClassName(@NonNull String className, @Nullable JSONObject params) {
+        BackgroundTask task = instantiateTaskByClassName(className, params);
+        if (task == null) {
+            return null;
+        }
+        return submitBackgroundTask(task);
+    }
+
+    @Nullable
+    private BackgroundTask instantiateTaskByClassName(@NonNull String className, @Nullable JSONObject params) {
+        try {
+            TaskRegistry.TaskMetadata meta = TaskRegistry.INSTANCE.getMetadata(className);
+            boolean requiresParams = meta != null && meta.getRequiresParams();
+            if (requiresParams) {
+                return params == null ? null : instantiateParamTask(className, params);
+            }
+            // 无参数任务：反射调用 (Context) 构造器
+            Class<?> taskClass = Class.forName(className);
+            Constructor<?> ctor = taskClass.getDeclaredConstructor(Context.class);
+            ctor.setAccessible(true);
+            return (BackgroundTask) ctor.newInstance(mContext);
+        } catch (Throwable e) {
+            Log.e(TAG, "Failed to instantiate background task: " + className, e);
+            return null;
+        }
+    }
+
+    @Nullable
+    private BackgroundTask instantiateParamTask(@NonNull String className, @NonNull JSONObject params) {
+        // gids 数组：压缩 / 删除 / 范围下载
+        JSONArray gidsArray = params.getJSONArray("gids");
+        if (gidsArray != null && !gidsArray.isEmpty()) {
+            LongList gidList = new LongList();
+            for (int i = 0; i < gidsArray.size(); i++) {
+                gidList.add(gidsArray.getLongValue(i));
+            }
+            if ("com.hippo.ehviewer.task.impl.StartRangeDownloadTask".equals(className)) {
+                return new com.hippo.ehviewer.task.impl.StartRangeDownloadTask(mContext, gidList);
+            }
+            if ("com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask".equals(className)) {
+                DownloadManager dm = EhApplication.getDownloadManager(mContext);
+                boolean deleteFiles = Settings.isDeleteFilesOnRemoteDelete();
+                if (params.containsKey("deleteFiles")) {
+                    deleteFiles = params.getBooleanValue("deleteFiles");
+                }
+                return new com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask(mContext, dm, gidList, deleteFiles, null);
+            }
+            if ("com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask".equals(className)) {
+                List<DownloadInfo> infos = new ArrayList<>();
+                for (int i = 0; i < gidList.size(); i++) {
+                    DownloadInfo info = EhDB.getDownloadInfo(gidList.get(i));
+                    if (info != null) {
+                        infos.add(info);
+                    }
+                }
+                if (infos.isEmpty()) {
+                    return null;
+                }
+                return new com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask(mContext, infos);
+            }
+        }
+        // uri：导入下载列表
+        String uri = params.getString("uri");
+        if (uri != null && !uri.isEmpty()) {
+            if ("com.hippo.ehviewer.task.ImportDownloadItemsTask".equals(className)) {
+                return new com.hippo.ehviewer.task.ImportDownloadItemsTask(mContext, Uri.parse(uri));
+            }
+        }
+        // filePath：导入数据库 / 旧版数据
+        String filePath = params.getString("filePath");
+        if (filePath != null && !filePath.isEmpty()) {
+            File file = new File(filePath);
+            if ("com.hippo.ehviewer.task.impl.ImportDataTask".equals(className)) {
+                return new com.hippo.ehviewer.task.impl.ImportDataTask(mContext, file);
+            }
+            if ("com.hippo.ehviewer.task.impl.ImportLegacyDataTask".equals(className)) {
+                return new com.hippo.ehviewer.task.impl.ImportLegacyDataTask(mContext, file);
+            }
+        }
+        return null;
+    }
     
     /**
      * 提交扫描下载文件任务
@@ -900,8 +1038,14 @@ public class BackgroundTaskManager {
             } catch (Exception e) {
                 Log.e(TAG, "Error in scan download task", e);
                 
+                // 统一记录最终异常：写入任务日志文件，方便后期维护
+                String errorMessage = e.getMessage();
+                if (errorMessage == null || errorMessage.isEmpty()) {
+                    errorMessage = e.toString();
+                }
+                mTaskStatusManager.appendTaskLog(taskId, "任务失败: " + errorMessage);
                 // 标记任务出错
-                mTaskStatusManager.markTaskError(taskId, e.getMessage());
+                mTaskStatusManager.markTaskError(taskId, errorMessage);
                 
                 endForegroundTask("scan_download");
                 runOnUiThread(() -> {
@@ -951,8 +1095,15 @@ public class BackgroundTaskManager {
                 // 标记任务完成
                 mTaskStatusManager.markTaskCompleted(candidateTaskId);
             } catch (Exception e) {
+                // 统一记录最终异常：写入 logcat 与任务日志文件，方便后期维护
+                String errorMessage = e.getMessage();
+                if (errorMessage == null || errorMessage.isEmpty()) {
+                    errorMessage = e.toString();
+                }
+                Log.e(TAG, "Background task failed: " + candidateTaskId + " (" + taskName + ")", e);
+                mTaskStatusManager.appendTaskLog(candidateTaskId, "任务失败: " + errorMessage);
                 // 标记任务出错
-                mTaskStatusManager.markTaskError(candidateTaskId, e.getMessage());
+                mTaskStatusManager.markTaskError(candidateTaskId, errorMessage);
                 throw e;
             } finally {
                 endForegroundTask(taskName);
@@ -977,7 +1128,7 @@ public class BackgroundTaskManager {
         }
         return futureTask;
     }
-    
+
     /**
      * 提交恢复下载项任务
      * @return Future用于等待任务完成或取消任务
@@ -992,11 +1143,47 @@ public class BackgroundTaskManager {
                 true
         );
     }
-    
+
+    // 互斥死锁定期检查
+    private final Handler mDeadlockCheckHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mDeadlockCheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            checkMutexDeadlock();
+            int interval = Settings.getMutexDeadlockCheckInterval() * 1000;
+            mDeadlockCheckHandler.postDelayed(this, interval);
+        }
+    };
+
+    /**
+     * 启动互斥死锁定期检查
+     */
+    private void startDeadlockCheck() {
+        int interval = Settings.getMutexDeadlockCheckInterval() * 1000;
+        mDeadlockCheckHandler.postDelayed(mDeadlockCheckRunnable, interval);
+    }
+
+    /**
+     * 停止互斥死锁定期检查
+     */
+    private void stopDeadlockCheck() {
+        mDeadlockCheckHandler.removeCallbacks(mDeadlockCheckRunnable);
+    }
+
+    /**
+     * 检查互斥死锁
+     */
+    private void checkMutexDeadlock() {
+        if (mTaskStatusManager.detectAndResolveDeadlock()) {
+            promoteNextUniqueTask();
+        }
+    }
+
     /**
      * 关闭所有线程池
      */
     public void shutdown() {
+        stopDeadlockCheck();
         mCpuExecutor.shutdown();
         mDbExecutor.shutdown();
         mIoExecutor.shutdown();

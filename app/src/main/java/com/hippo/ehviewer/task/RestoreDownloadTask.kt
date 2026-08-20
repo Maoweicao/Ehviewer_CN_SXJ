@@ -145,9 +145,10 @@ class RestoreDownloadTask(
             notifyCompleted()
             Result.success(Unit)
         } catch (e: CancellationException) {
+            Log.d(TAG, "Restore cancelled")
             appendTaskLog("任务已取消")
             notifyCancelled()
-            Result.success(Unit)
+            Result.failure(e)
         } catch (e: Throwable) {
             Log.e(TAG, "Restore failed", e)
             appendTaskLog("任务失败: ${e.message}")

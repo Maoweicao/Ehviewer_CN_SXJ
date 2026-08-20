@@ -23,6 +23,9 @@ public class PtokenIndexChecker {
         void onNoRelation();
     }
 
+    /** 分批查询条数，避免一次将整张 PTOKENS_INDEX 表载入内存导致 OOM */
+    private static final int BATCH_SIZE = 500;
+
     /**
      * 检查一组 ptoken 是否是某个已下载画廊的子集
      *
@@ -36,39 +39,49 @@ public class PtokenIndexChecker {
         }
 
         Set<String> newPtokenSet = new HashSet<>(newPtokens);
-        List<PtokensIndex> allIndex = EhDB.getAllPtokensIndex();
-
-        if (allIndex.isEmpty()) {
-            callback.onNoRelation();
-            return;
-        }
 
         long bestGid = -1;
         int bestOverlap = 0;
+        boolean hasAny = false;
 
-        for (PtokensIndex idx : allIndex) {
-            if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
+        // 分批迭代索引表，控制峰值内存占用
+        long total = EhDB.getPtokensIndexCount();
+        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            hasAny = true;
 
-            Set<String> existingPtokens = new HashSet<>(
-                    Arrays.asList(idx.getPtokens().split(",")));
+            for (PtokensIndex idx : batch) {
+                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
 
-            int overlap = 0;
-            for (String pt : newPtokenSet) {
-                if (existingPtokens.contains(pt)) {
-                    overlap++;
+                Set<String> existingPtokens = new HashSet<>(
+                        Arrays.asList(idx.getPtokens().split(",")));
+
+                int overlap = 0;
+                for (String pt : newPtokenSet) {
+                    if (existingPtokens.contains(pt)) {
+                        overlap++;
+                    }
+                }
+
+                if (overlap == newPtokenSet.size()) {
+                    // 完全子集
+                    callback.onDetectedAsSubset(idx.getGid(), overlap, newPtokenSet.size());
+                    return;
+                }
+
+                if (overlap > bestOverlap) {
+                    bestOverlap = overlap;
+                    bestGid = idx.getGid();
                 }
             }
+        }
 
-            if (overlap == newPtokenSet.size()) {
-                // 完全子集
-                callback.onDetectedAsSubset(idx.getGid(), overlap, newPtokenSet.size());
-                return;
-            }
-
-            if (overlap > bestOverlap) {
-                bestOverlap = overlap;
-                bestGid = idx.getGid();
-            }
+        if (!hasAny) {
+            callback.onNoRelation();
+            return;
         }
 
         // 如果重叠率超过 80%，也视为疑似递进关系
@@ -88,17 +101,25 @@ public class PtokenIndexChecker {
         if (newPtokens == null || newPtokens.isEmpty()) return -1;
 
         Set<String> newPtokenSet = new HashSet<>(newPtokens);
-        List<PtokensIndex> allIndex = EhDB.getAllPtokensIndex();
 
-        for (PtokensIndex idx : allIndex) {
-            if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
-            if (idx.getPages() < newPtokens.size()) continue; // 跳过页数更少的画廊
+        // 分批迭代索引表，控制峰值内存占用
+        long total = EhDB.getPtokensIndexCount();
+        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
 
-            Set<String> existingPtokens = new HashSet<>(
-                    Arrays.asList(idx.getPtokens().split(",")));
+            for (PtokensIndex idx : batch) {
+                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
+                if (idx.getPages() < newPtokens.size()) continue; // 跳过页数更少的画廊
 
-            if (existingPtokens.containsAll(newPtokenSet)) {
-                return idx.getGid();
+                Set<String> existingPtokens = new HashSet<>(
+                        Arrays.asList(idx.getPtokens().split(",")));
+
+                if (existingPtokens.containsAll(newPtokenSet)) {
+                    return idx.getGid();
+                }
             }
         }
 

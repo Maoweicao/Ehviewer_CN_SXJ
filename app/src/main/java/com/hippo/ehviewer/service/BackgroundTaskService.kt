@@ -22,8 +22,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -53,11 +55,32 @@ class BackgroundTaskService : Service() {
 
         @JvmStatic
         fun start(context: Context, taskName: String?, activeCount: Int): Boolean {
+            // startForegroundService 必须在主线程调用，且系统要求在超时窗口内
+            // 调用 startForeground()。若从后台线程调用，服务创建与 startForeground()
+            // 会与主线程繁忙产生竞争，导致 ForegroundServiceDidNotStartInTimeException。
+            // 因此统一投递到主线程执行，确保 startForegroundService 与 onStartCommand
+            // 中的 startForeground 在同一主线程消息队列中紧邻执行。
             return try {
                 val intent = Intent(context, BackgroundTaskService::class.java).apply {
                     putExtra(EXTRA_ACTIVE_TASK_COUNT, activeCount)
                     putExtra(EXTRA_TASK_NAME, taskName)
                 }
+                if (Looper.myLooper() == Looper.getMainLooper()) {
+                    doStart(context, intent)
+                } else {
+                    SimpleHandler.getInstance().post { doStart(context, intent) }
+                    true
+                }
+            } catch (e: Exception) {
+                // ForegroundServiceStartNotAllowedException (Android 12+),
+                // SecurityException (Android 14 dataSync restrictions), etc.
+                Log.e(TAG, "Failed to start foreground service", e)
+                false
+            }
+        }
+
+        private fun doStart(context: Context, intent: Intent): Boolean {
+            return try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
@@ -66,8 +89,6 @@ class BackgroundTaskService : Service() {
                 }
                 true
             } catch (e: Exception) {
-                // ForegroundServiceStartNotAllowedException (Android 12+),
-                // SecurityException (Android 14 dataSync restrictions), etc.
                 Log.e(TAG, "Failed to start foreground service", e)
                 false
             }
@@ -87,24 +108,23 @@ class BackgroundTaskService : Service() {
     override fun onCreate() {
         super.onCreate()
 
-        // Ensure notification channel exists (same channel as BackgroundTaskManager)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                getString(R.string.background_tasks_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.background_tasks_channel_description)
-                setShowBadge(false)
+        // 必须在系统超时窗口内调用 startForeground()。
+        // 先确保通知渠道存在（Android 8+ 必须），再立即 startForeground，
+        // 避免渠道创建或通知构建异常导致 startForeground 未被调用而崩溃。
+        try {
+            ensureNotificationChannel()
+            startForegroundCompat(0, null)
+            Log.d(TAG, "startForeground called in onCreate")
+        } catch (e: Throwable) {
+            // startForeground 失败时立即停止服务，避免系统抛出
+            // ForegroundServiceDidNotStartInTimeException 导致崩溃
+            Log.e(TAG, "Failed to startForeground in onCreate, stopping service", e)
+            try {
+                stopSelf()
+            } catch (_: Throwable) {
             }
-            nm.createNotificationChannel(channel)
+            return
         }
-
-        // Call startForeground immediately in onCreate to avoid
-        // ForegroundServiceDidNotStartInTimeException
-        startForeground(NOTIFICATION_ID, buildNotification(0, null))
-        Log.d(TAG, "startForeground called in onCreate")
 
         // Initialize WakeLock
         try {
@@ -121,6 +141,37 @@ class BackgroundTaskService : Service() {
         }
     }
 
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.background_tasks_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = getString(R.string.background_tasks_channel_description)
+                setShowBadge(false)
+            }
+            nm.createNotificationChannel(channel)
+        }
+    }
+
+    /**
+     * 在 Android 14+（API 34）使用带前台服务类型的三参数版本，
+     * 兼容旧版本两参数版本。避免类型未声明时抛异常。
+     */
+    private fun startForegroundCompat(activeCount: Int, taskName: String?) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(activeCount, taskName),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, buildNotification(activeCount, taskName))
+        }
+    }
+
     @SuppressLint("WakelockTimeout")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // Re-call startForeground to satisfy the system requirement after
@@ -128,7 +179,16 @@ class BackgroundTaskService : Service() {
         // Without this, Android throws ForegroundServiceDidNotStartInTimeException.
         val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_TASK_COUNT, 0) ?: 0
         val taskName = intent?.getStringExtra(EXTRA_TASK_NAME)
-        startForeground(NOTIFICATION_ID, buildNotification(activeCount, taskName))
+        try {
+            startForegroundCompat(activeCount, taskName)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Failed to startForeground in onStartCommand, stopping service", e)
+            try {
+                stopSelf()
+            } catch (_: Throwable) {
+            }
+            return START_NOT_STICKY
+        }
 
         // Acquire WakeLock to prevent CPU sleep
         acquireWakeLock()

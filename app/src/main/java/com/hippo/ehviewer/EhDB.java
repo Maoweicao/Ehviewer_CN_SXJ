@@ -25,6 +25,7 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.text.TextUtils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -34,8 +35,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.client.data.GalleryInfo;
-import com.hippo.ehviewer.client.data.ListUrlBuilder;
-import com.hippo.ehviewer.dao.BlackList;
+import com.hippo.ehviewer.client.data.ListUrlBuilder;import com.hippo.ehviewer.dao.BlackList;
 import com.hippo.ehviewer.dao.BlackListDao;
 import com.hippo.ehviewer.dao.DaoMaster;
 import com.hippo.ehviewer.dao.DaoSession;
@@ -48,6 +48,8 @@ import com.hippo.ehviewer.dao.DownloadsDao;
 import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.dao.DownloadHistoryDao;
 import com.hippo.ehviewer.dao.Filter;
+import com.hippo.ehviewer.dao.GalleryAiInfo;
+import com.hippo.ehviewer.dao.GalleryAiInfoDao;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.dao.GalleryTagsDao;
 import com.hippo.ehviewer.dao.GalleryVersionMap;
@@ -283,6 +285,13 @@ public class EhDB {
                             "\"FILE_PATH\" TEXT,\"COMPLETED_AT\" INTEGER NOT NULL ,\"LAST_DOWNLOADED_AT\" INTEGER NOT NULL ," +
                             "\"DOWNLOAD_COUNT\" INTEGER NOT NULL ,\"DELETION_TYPE\" INTEGER NOT NULL ," +
                             "\"MERGED_TARGET_GID\" INTEGER NOT NULL ,\"DELETED_AT\" INTEGER NOT NULL );");
+                }
+
+                if (oldVersion < 13) {
+                    android.util.Log.i("EhDB", "Creating GALLERY_AI_INFO table");
+                    db.execSQL("CREATE TABLE IF NOT EXISTS \"GALLERY_AI_INFO\" (" +
+                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ,\"SUMMARY\" TEXT,\"TAGS\" TEXT," +
+                            "\"DESCRIPTIONS\" TEXT,\"AESTHETIC_SCORE\" REAL NOT NULL ,\"UPDATED_AT\" INTEGER NOT NULL );");
                 }
                 
                 android.util.Log.i("EhDB", "Database upgrade completed successfully");
@@ -782,6 +791,57 @@ public class EhDB {
         }
     }
 
+    // -------- GalleryAiInfo (AI 图片分析，用于下载列表按描述搜索) --------
+
+    public static synchronized void putGalleryAiInfo(GalleryAiInfo info) {
+        try {
+            sDaoSession.getGalleryAiInfoDao().insertOrReplace(info);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+    }
+
+    @Nullable
+    public static synchronized GalleryAiInfo queryGalleryAiInfo(long gid) {
+        try {
+            return sDaoSession.getGalleryAiInfoDao().load(gid);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+            return null;
+        }
+    }
+
+    /**
+     * 按关键词搜索所有 AI 分析信息（summary / tags / descriptions 模糊匹配）
+     */
+    @NonNull
+    public static synchronized List<GalleryAiInfo> searchGalleryAiInfosByKeyword(String keyword) {
+        List<GalleryAiInfo> result = new ArrayList<>();
+        if (TextUtils.isEmpty(keyword)) {
+            return result;
+        }
+        try {
+            String key = keyword.trim();
+            String like = "%" + key + "%";
+            result = sDaoSession.getGalleryAiInfoDao().queryBuilder()
+                    .whereOr(GalleryAiInfoDao.Properties.Summary.like(like),
+                            GalleryAiInfoDao.Properties.Tags.like(like),
+                            GalleryAiInfoDao.Properties.Descriptions.like(like))
+                    .list();
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+        return result;
+    }
+
+    public static synchronized void deleteGalleryAiInfo(long gid) {
+        try {
+            sDaoSession.getGalleryAiInfoDao().deleteByKey(gid);
+        } catch (Exception e) {
+            Analytics.recordException(e);
+        }
+    }
+
     public static synchronized void moveDownloadInfo(List<DownloadInfo> infos, int fromPosition, int toPosition){
         if (fromPosition == toPosition) {
             return;
@@ -862,6 +922,74 @@ public class EhDB {
         history.setMergedTargetGid(mergedTargetGid);
         history.setDeletedAt(System.currentTimeMillis());
         sDaoSession.getDownloadHistoryDao().update(history);
+    }
+
+    /**
+     * 将画廊标记为重复/递进关系而被跳过的记录。
+     * 与 markDownloadHistoryDeleted 不同，此方法会在历史记录不存在时自动创建一条，
+     * 以便旧任务从未下载完成也能在下载历史中标记为重复画廊。
+     */
+    public static synchronized void recordDownloadAsDuplicate(DownloadInfo info, int deletionType, long mergedTargetGid) {
+        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
+        DownloadHistory history = dao.load(info.gid);
+        long now = System.currentTimeMillis();
+        if (history == null) {
+            history = new DownloadHistory();
+            history.setGid(info.gid);
+            history.setCompletedAt(now);
+            history.setDownloadCount(0);
+        }
+        history.setToken(info.token);
+        history.setTitle(info.title);
+        history.setTitleJpn(info.titleJpn);
+        history.setFilePath(getDownloadDirname(info.gid));
+        history.setLastDownloadedAt(now);
+        history.setDownloadCount(history.getDownloadCount() + 1);
+        history.setDeletionType(deletionType);
+        history.setMergedTargetGid(mergedTargetGid);
+        history.setDeletedAt(now);
+        dao.insertOrReplace(history);
+    }
+
+    /**
+     * 删除画廊时记录到下载历史（总是创建/更新一条记录，deletionType=DELETION_NORMAL）。
+     * 与 markDownloadHistoryDeleted 不同，此方法在历史记录不存在时会自动创建，
+     * 适用于删除时无论下载是否完成都记录删除事实。
+     */
+    public static synchronized void recordDownloadDeleted(DownloadInfo info, long mergedTargetGid) {
+        recordDownloadAsDuplicate(info, DownloadHistory.DELETION_NORMAL, mergedTargetGid);
+    }
+
+    /**
+     * 扫描下载目录时，为磁盘上仍存在的画廊补建下载历史记录。
+     * 仅在 DOWNLOAD_HISTORY 中不存在该 gid 时创建，避免覆盖已有历史；
+     * 已删除/合并的画廊无法从磁盘恢复，因此这里总是记为 DELETION_NONE。
+     *
+     * @param gid      画廊 GID
+     * @param token    画廊 token
+     * @param title    画廊标题（旧格式 .ehviewer 可读到，VERSION2 无则为 null）
+     * @param dirname  画廊所在下载目录名
+     */
+    public static synchronized void recordDownloadHistoryFromScan(long gid, @Nullable String token,
+            @Nullable String title, @Nullable String dirname) {
+        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
+        if (dao.load(gid) != null) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        DownloadHistory history = new DownloadHistory();
+        history.setGid(gid);
+        history.setToken(token);
+        history.setTitle(title);
+        history.setTitleJpn(null);
+        history.setFilePath(dirname);
+        history.setCompletedAt(now);
+        history.setLastDownloadedAt(now);
+        history.setDownloadCount(1);
+        history.setDeletionType(DownloadHistory.DELETION_NONE);
+        history.setMergedTargetGid(0);
+        history.setDeletedAt(0);
+        dao.insert(history);
     }
 
     @Nullable
@@ -1029,6 +1157,28 @@ public class EhDB {
     public static synchronized List<PtokensIndex> getAllPtokensIndex() {
         PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
         return dao.loadAll();
+    }
+
+    /**
+     * 获取 ptoken 索引表的总行数。
+     * 避免为了判断是否为空而使用 {@link #getAllPtokensIndex()} 全量载入内存。
+     */
+    public static synchronized long getPtokensIndexCount() {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        return dao.count();
+    }
+
+    /**
+     * 分批获取 ptoken 索引，避免一次把整张表载入内存导致 OOM。
+     *
+     * @param offset 起始偏移
+     * @param limit  本批最大条数
+     * @return 该批次的索引条目（可能少于 limit）
+     */
+    public static synchronized List<PtokensIndex> getPtokensIndexBatch(int offset, int limit) {
+        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
+        return dao.queryBuilder().orderAsc(PtokensIndexDao.Properties.Gid)
+                .offset(offset).limit(limit).list();
     }
 
     public static synchronized void putPtokensIndex(long gid, String ptokens, int pages) {

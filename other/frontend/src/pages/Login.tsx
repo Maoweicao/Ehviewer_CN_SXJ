@@ -50,7 +50,6 @@ export default function Login({ onLoginSuccess }: LoginProps) {
         }}
       >
         <div style={{ fontSize: 64, marginBottom: 16 }}>📱</div>
-        <h2 style={{ marginBottom: 8, color: 'var(--text, #333)' }}>EhViewer Remote</h2>
         <p style={{ color: 'var(--text-light, #666)', marginBottom: 24, fontSize: 14 }}>
           请输入密码或Token登录
         </p>

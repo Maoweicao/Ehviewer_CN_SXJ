@@ -1,5 +1,6 @@
 package com.hippo.ehviewer.task
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -12,6 +13,8 @@ import com.hippo.ehviewer.util.UiThreadHelper
  * 用于从 Java 代码执行 Kotlin 的 suspend 函数
  */
 object TaskExecutor {
+
+    private const val TAG = "TaskExecutor"
     
     /**
      * 在后台线程执行任务
@@ -22,11 +25,18 @@ object TaskExecutor {
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val result = task.execute()
+                if (result.isFailure) {
+                    // 任务返回失败：统一记录异常日志，避免静默吞掉
+                    val e = result.exceptionOrNull()
+                    Log.e(TAG, "Task failed: ${task.getTaskId()} (${task.getTaskName()})", e)
+                }
                 // 确保成功回调在主线程执行
                 withContext(Dispatchers.Main) {
                     // 任务成功完成后的UI更新可以在这里处理
                 }
             } catch (e: Exception) {
+                // 统一记录异常日志，避免静默吞掉
+                Log.e(TAG, "Task execute threw: ${task.getTaskId()} (${task.getTaskName()})", e)
                 // 确保错误回调在主线程执行
                 withContext(Dispatchers.Main) {
                     // 错误处理和UI更新可以在这里处理

@@ -18,7 +18,6 @@ package com.hippo.ehviewer.transfer.core;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -84,6 +83,7 @@ public class TaskManager {
         saveToPrefs();
         notifyTaskAdded(task);
         TransferLogger.getInstance().d(TAG, "Task added: " + task.taskId + " (" + task.type + "/" + task.subType + ")");
+        TransferLogger.getInstance().i(TAG, "任务已创建: taskId=" + task.taskId + ", type=" + task.type + ", subType=" + task.subType);
     }
 
     /**
@@ -97,6 +97,7 @@ public class TaskManager {
      * Update task status
      */
     public void updateTaskStatus(String taskId, String status) {
+        TransferLogger.getInstance().d(TAG, "更新任务状态: taskId=" + taskId + ", status=" + status);
         UnifiedTask task = tasks.get(taskId);
         if (task != null) {
             task.status = status;
@@ -106,6 +107,9 @@ public class TaskManager {
             }
             saveToPrefs();
             notifyTaskUpdated(task);
+            TransferLogger.getInstance().i(TAG, "任务状态变更: taskId=" + taskId + " -> " + status);
+        } else {
+            TransferLogger.getInstance().w(TAG, "更新任务状态失败，任务不存在: " + taskId);
         }
     }
 
@@ -113,6 +117,7 @@ public class TaskManager {
      * Update task progress
      */
     public void updateTaskProgress(String taskId, double progress, int completed) {
+        TransferLogger.getInstance().d(TAG, "更新任务进度: taskId=" + taskId + ", progress=" + progress + ", completed=" + completed);
         UnifiedTask task = tasks.get(taskId);
         if (task != null) {
             task.progress = progress;
@@ -127,6 +132,7 @@ public class TaskManager {
      * Update task fields
      */
     public void updateTask(UnifiedTask task) {
+        TransferLogger.getInstance().d(TAG, "更新任务: taskId=" + task.taskId);
         task.updatedTime = System.currentTimeMillis();
         tasks.put(task.taskId, task);
         saveToPrefs();
@@ -143,6 +149,40 @@ public class TaskManager {
             notifyTaskRemoved(task);
             TransferLogger.getInstance().d(TAG, "Task removed: " + taskId);
         }
+    }
+
+    /**
+     * 暂停任务：设置暂停标志，执行循环会在检查点阻塞等待恢复。
+     * 返回是否成功置为暂停状态。
+     */
+    public boolean pauseTask(String taskId) {
+        UnifiedTask task = tasks.get(taskId);
+        if (task == null || !task.canPause()) {
+            return false;
+        }
+        task.paused = true;
+        task.updatedTime = System.currentTimeMillis();
+        saveToPrefs();
+        notifyTaskUpdated(task);
+        TransferLogger.getInstance().i(TAG, "任务已暂停: taskId=" + taskId);
+        return true;
+    }
+
+    /**
+     * 恢复任务：清除暂停标志。
+     * 返回是否成功恢复。
+     */
+    public boolean resumeTask(String taskId) {
+        UnifiedTask task = tasks.get(taskId);
+        if (task == null || !task.canResume()) {
+            return false;
+        }
+        task.paused = false;
+        task.updatedTime = System.currentTimeMillis();
+        saveToPrefs();
+        notifyTaskUpdated(task);
+        TransferLogger.getInstance().i(TAG, "任务已恢复: taskId=" + taskId);
+        return true;
     }
 
     /**
@@ -222,7 +262,7 @@ public class TaskManager {
             }
             prefs.edit().putString(KEY_TASKS, arr.toJSONString()).apply();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to save tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to save tasks", e);
         }
     }
 
@@ -241,7 +281,7 @@ public class TaskManager {
                 tasks.put(task.taskId, task);
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to load tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to load tasks", e);
             tasks.clear();
         }
     }

@@ -33,9 +33,11 @@ import com.hippo.ehviewer.task.ProgressiveMergePlan;
 import com.hippo.ehviewer.task.ProgressiveMergeTask;
 import com.hippo.ehviewer.task.ProgressivePlanManager;
 import com.hippo.ehviewer.task.ProgressiveScanTask;
+import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.GalleryActivity;
 import com.hippo.ehviewer.ui.ToolbarActivity;
 import com.hippo.ehviewer.ui.fragment.lab.ProgressiveChainAdapter;
+import com.hippo.unifile.UniFile;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -59,6 +61,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
     private LinearLayout stepButtons;
     private LinearLayout backupPanel;
     private CheckBox cbBackup;
+    private CheckBox cbDeleteMissing;
 
     private ProgressiveChainAdapter adapter;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -90,6 +93,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         stepButtons = findViewById(R.id.step_buttons);
         backupPanel = findViewById(R.id.backup_panel);
         cbBackup = findViewById(R.id.cb_backup);
+        cbDeleteMissing = findViewById(R.id.cb_delete_missing);
         recyclerView = findViewById(R.id.recycler_view);
         emptyText = findViewById(R.id.empty_text);
 
@@ -251,6 +255,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
             showStepThree();
             statusText.setText(getString(R.string.progressive_plan_generated, "ProgressiveScan", plan.getChains().size()));
             cbBackup.setChecked(plan.getBackupEnabled());
+            cbDeleteMissing.setChecked(plan.getDeleteMissingDownloadTasks());
         }
     }
 
@@ -281,6 +286,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         ProgressiveMergePlan plan = new ProgressiveMergePlan(planId);
         plan.setStatus(PlanStatus.PENDING);
         plan.setBackupEnabled(cbBackup.isChecked());
+        plan.setDeleteMissingDownloadTasks(cbDeleteMissing.isChecked());
         plan.setBackupFilePath(null);
         plan.setCompletedChains(0);
 
@@ -329,9 +335,13 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         }
 
         boolean willBackup = cbBackup.isChecked();
+        boolean willDeleteMissing = cbDeleteMissing.isChecked();
         String msg = getString(R.string.progressive_merge_all_confirm, currentPlan.getChains().size());
         if (willBackup) {
             msg += "\n\n" + getString(R.string.progressive_backup_checkbox);
+        }
+        if (willDeleteMissing) {
+            msg += "\n\n" + getString(R.string.progressive_delete_missing_checkbox);
         }
 
         new AlertDialog.Builder(this)
@@ -339,6 +349,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
                 .setMessage(msg)
                 .setPositiveButton(android.R.string.ok, (d, w) -> {
                     currentPlan.setBackupEnabled(willBackup);
+                    currentPlan.setDeleteMissingDownloadTasks(willDeleteMissing);
                     ProgressivePlanManager.saveMergePlan(currentPlan);
                     if (willBackup) {
                         startBackupThenMerge();
@@ -423,7 +434,9 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         merging = false;
         progressBar.setVisibility(View.GONE);
 
+        boolean deleteMissing = false;
         if (currentPlan != null) {
+            deleteMissing = currentPlan.getDeleteMissingDownloadTasks();
             boolean hasFailures = false;
             for (ChainMergeEntry entry : currentPlan.getChains()) {
                 if (entry.getStatus() == ChainMergeStatus.FAILED) {
@@ -440,7 +453,38 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         enableAllButtons(false);
         btnScan.setText(R.string.progressive_scan_refresh);
         currentPlan = null;
+
+        if (deleteMissing) {
+            deleteMissingGalleryTasks();
+        }
         startScan();
+    }
+
+    /**
+     * 合并完成后删除下载列表中已不存在的画廊任务。
+     * 递进合并会删除源文件夹，但其下载记录可能仍残留在下载列表中，
+     * 该任务会清理这些失效的记录。
+     */
+    private void deleteMissingGalleryTasks() {
+        final com.hippo.ehviewer.download.DownloadManager dm =
+                com.hippo.ehviewer.EhApplication.getDownloadManager(this);
+        List<DownloadInfo> all = dm.getAllDownloadInfoList();
+        if (all == null || all.isEmpty()) return;
+
+        // 拷贝快照，避免在迭代过程中修改底层 LinkedList 触发 ConcurrentModificationException
+        List<DownloadInfo> snapshot = new ArrayList<>(all);
+        int deleted = 0;
+        for (DownloadInfo info : snapshot) {
+            UniFile dir = SpiderDen.getExistingGalleryDownloadDir(info);
+            if (dir == null || !dir.exists()) {
+                dm.deleteDownload(info.gid);
+                deleted++;
+            }
+        }
+        if (deleted > 0) {
+            Toast.makeText(this, getString(R.string.progressive_delete_missing_done, deleted), Toast.LENGTH_LONG).show();
+            Log.i(TAG, "deleteMissingGalleryTasks: deleted " + deleted + " stale download tasks");
+        }
     }
 
     private void startScan() {
@@ -514,6 +558,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         btnGeneratePlan.setEnabled(false);
         btnConfirmMerge.setEnabled(false);
         cbBackup.setEnabled(false);
+        cbDeleteMissing.setEnabled(false);
     }
 
     private void enableAllButtons(boolean hasResults) {
@@ -528,6 +573,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
             }
         }
         cbBackup.setEnabled(true);
+        cbDeleteMissing.setEnabled(true);
     }
 
     private void disableButtons() {

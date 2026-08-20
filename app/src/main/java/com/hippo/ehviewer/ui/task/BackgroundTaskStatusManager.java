@@ -7,6 +7,7 @@ import android.content.Context;
 
 import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.task.BackgroundTask;
+import com.hippo.ehviewer.task.BackgroundTaskController;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -211,6 +212,52 @@ public class BackgroundTaskStatusManager {
         return mUniqueWaitQueue.size();
     }
 
+    /**
+     * 检测并解决互斥任务死锁。
+     * 如果等待队列中的任务都在等待同一个未执行的任务，则强制启动队列头部的任务。
+     *
+     * @return true 表示检测到死锁并需要启动队列头部任务
+     */
+    public synchronized boolean detectAndResolveDeadlock() {
+        if (mUniqueWaitQueue.isEmpty()) {
+            return false;
+        }
+
+        // 收集等待队列中所有任务的互斥组
+        java.util.Map<String, java.util.List<PendingUniqueTask>> groupMap = new java.util.HashMap<>();
+        for (PendingUniqueTask pending : mUniqueWaitQueue) {
+            String group = pending.getTask().getMutexGroup();
+            if (group != null) {
+                groupMap.computeIfAbsent(group, k -> new java.util.ArrayList<>()).add(pending);
+            }
+        }
+
+        // 检查每个互斥组是否有死锁
+        for (java.util.Map.Entry<String, java.util.List<PendingUniqueTask>> entry : groupMap.entrySet()) {
+            String group = entry.getKey();
+            java.util.List<PendingUniqueTask> waitingTasks = entry.getValue();
+
+            // 检查是否有任务正在执行该互斥组
+            boolean hasRunningTask = false;
+            for (BackgroundTaskInfo info : mActiveTasks.values()) {
+                if (!info.isQueued() && info.getMutexGroup() != null
+                    && info.getMutexGroup().equals(group) && info.getFuture() != null) {
+                    hasRunningTask = true;
+                    break;
+                }
+            }
+
+            // 如果没有任务正在执行，但有多个任务在等待，则存在死锁
+            if (!hasRunningTask && waitingTasks.size() > 1) {
+                android.util.Log.w(TAG, "Detected mutex deadlock in group: " + group
+                        + ", forcing queue head to run");
+                return true; // 返回 true 表示检测到死锁
+            }
+        }
+
+        return false;
+    }
+
     private void notifyTaskAdded(String taskId) {
         for (TaskChangeListener l : mChangeListeners) {
             l.onTaskAdded(taskId);
@@ -242,7 +289,14 @@ public class BackgroundTaskStatusManager {
         thread.setPriority(Thread.MIN_PRIORITY);
         return thread;
     });
+    // 任务控制执行器：用于调用任务的 pause/resume/cancel suspend 方法，避免阻塞调用方线程
+    private final ExecutorService mControlExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread thread = new Thread(r, "BackgroundTaskStatusManager-Control");
+        thread.setPriority(Thread.NORM_PRIORITY);
+        return thread;
+    });
     private final Object mPersistLock = new Object();
+    private boolean mPersistDirty = false;
 
     private BackgroundTaskStatusManager(Context context) {
         File filesDir = context.getFilesDir();
@@ -323,11 +377,14 @@ public class BackgroundTaskStatusManager {
     /**
      * 查找与指定 mutexGroup 冲突的活跃任务（同组且 unique 且非 DOWNLOAD）。
      * mutexGroup 为 null 时始终返回 null（不参与互斥）。
+     * 注意：已排队的任务（isQueued=true）不算作正在运行的冲突。
      */
     @Nullable
     public BackgroundTaskInfo getActiveConflictTask(@Nullable String mutexGroup) {
         if (mutexGroup == null) return null;
         for (BackgroundTaskInfo info : mActiveTasks.values()) {
+            // 已排队的任务不算正在运行的冲突
+            if (info.isQueued()) continue;
             if (info.isUniqueTask() && info.getTaskType() != BackgroundTask.TaskType.DOWNLOAD) {
                 String otherGroup = info.getMutexGroup();
                 if (mutexGroup.equals(otherGroup)) {
@@ -341,6 +398,8 @@ public class BackgroundTaskStatusManager {
     @Nullable
     public BackgroundTaskInfo getActiveUniqueNonDownloadTask() {
         for (BackgroundTaskInfo info : mActiveTasks.values()) {
+            // 已排队的任务不算正在运行
+            if (info.isQueued()) continue;
             if (info.isUniqueTask() && info.getTaskType() != BackgroundTask.TaskType.DOWNLOAD) {
                 return info;
             }
@@ -469,17 +528,28 @@ public class BackgroundTaskStatusManager {
     }
     
     /**
-     * 暂停指定任务
+     * 暂停指定任务。
+     * <p>仅当任务持有了 BackgroundTask 实例且 {@link BackgroundTask#isPausable()} 为 true 时才真正暂停；
+     * 会调用任务自身的 {@code pause()} 方法，使任务内部进入暂停状态，而非仅修改 UI 标志。
      */
     public boolean pauseTask(@NonNull String taskId) {
         BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
-        if (taskInfo == null || taskInfo.isCompleted() || taskInfo.isCancelled()) {
+        if (taskInfo == null || taskInfo.isCompleted() || taskInfo.isCancelled() || taskInfo.isPaused()) {
             return false;
         }
-        taskInfo.setQueued(false);
-        taskInfo.setPaused(true);
-        savePersistedTasksAsync();
-        notifyTaskStateChanged(taskId);
+        final BackgroundTask task = taskInfo.getTask();
+        if (task == null || !task.isPausable()) {
+            return false;
+        }
+        mControlExecutor.execute(() -> {
+            if (!BackgroundTaskController.runPause(task)) {
+                return;
+            }
+            taskInfo.setQueued(false);
+            taskInfo.setPaused(true);
+            savePersistedTasksAsync();
+            notifyTaskStateChanged(taskId);
+        });
         return true;
     }
 
@@ -506,22 +576,30 @@ public class BackgroundTaskStatusManager {
     }
 
     /**
-     * 恢复指定任务
+     * 恢复指定任务。
+     * <p>调用任务自身的 {@code resume()} 方法，使任务内部恢复执行；随后清除暂停标志。
      */
     public boolean resumeTask(@NonNull String taskId) {
         BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
         if (taskInfo == null || !taskInfo.isPaused()) {
             return false;
         }
-        taskInfo.setPaused(false);
-        savePersistedTasksAsync();
+        final BackgroundTask task = taskInfo.getTask();
+        mControlExecutor.execute(() -> {
+            boolean ok = task == null || BackgroundTaskController.runResume(task);
+            if (ok) {
+                taskInfo.setPaused(false);
+                savePersistedTasksAsync();
+                notifyTaskStateChanged(taskId);
+            }
+        });
         return true;
     }
 
     /**
      * 取消指定任务。
      * <p>若任务仍在等待队列中（isQueued=true 且无 Future），会直接从队列和活跃表中移除；<br>
-     * 若任务正在运行，会尝试中断 Future；<br>
+     * 若任务正在运行，会先调用任务自身的 {@code cancel()} 优雅取消，再中断 Future 兜底；<br>
      * 若 Future 已 done，按"已结束"对待，把任务直接移到已完成列表以保证 UI 一致性。
      */
     public boolean cancelTask(@NonNull String taskId) {
@@ -537,27 +615,41 @@ public class BackgroundTaskStatusManager {
             }
             return removed;
         }
-        boolean cancelled = taskInfo.cancel();
-        Future<?> future = taskInfo.getFuture();
-        if (cancelled) {
-            mActiveTasks.remove(taskId);
-            taskInfo.setCancelled(true);
-            mCompletedTasks.put(taskId, taskInfo);
-            evictCompletedIfOverLimit();
-            savePersistedTasksAsync();
-            notifyTaskStateChanged(taskId);
-            notifyUniqueSlotFreed();
-        } else if (future != null && future.isDone()) {
-            // Future 已完成但 cancel 返回 false：把任务从 active 移到 completed，避免持续显示为运行中
-            mActiveTasks.remove(taskId);
-            taskInfo.setCancelled(true);
-            mCompletedTasks.put(taskId, taskInfo);
-            evictCompletedIfOverLimit();
-            savePersistedTasksAsync();
-            notifyTaskStateChanged(taskId);
-            notifyUniqueSlotFreed();
+        final BackgroundTask task = taskInfo.getTask();
+        final Future<?> future = taskInfo.getFuture();
+        mControlExecutor.execute(() -> {
+            // 1. 先尝试任务的优雅取消（设置内部取消标志，执行循环会自动停止）
+            boolean gracefullyCancelled = false;
+            if (task != null) {
+                gracefullyCancelled = BackgroundTaskController.runCancel(task);
+            }
+            // 2. 中断 Future 兜底
+            boolean futureCancelled = false;
+            if (future != null && !future.isDone()) {
+                futureCancelled = future.cancel(true);
+            }
+            boolean cancelled = gracefullyCancelled || futureCancelled;
+            if (cancelled || (future != null && future.isDone())) {
+                mActiveTasks.remove(taskId);
+                taskInfo.setCancelled(true);
+                mCompletedTasks.put(taskId, taskInfo);
+                evictCompletedIfOverLimit();
+                savePersistedTasksAsync();
+                notifyTaskStateChanged(taskId);
+                notifyUniqueSlotFreed();
+            }
+        });
+        return true;
+    }
+
+    /**
+     * 为指定任务写入 BackgroundTask 实例引用，供暂停/恢复/取消调用其真实方法。
+     */
+    public void setTask(@NonNull String taskId, @NonNull BackgroundTask task) {
+        BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
+        if (taskInfo != null) {
+            taskInfo.setTask(task);
         }
-        return cancelled;
     }
 
     /**
@@ -602,6 +694,34 @@ public class BackgroundTaskStatusManager {
     @NonNull
     public List<BackgroundTaskInfo> getCompletedTasks() {
         return new ArrayList<>(mCompletedTasks.values());
+    }
+
+    /**
+     * 获取正在执行的任务列表（未排队的活跃任务）
+     */
+    @NonNull
+    public List<BackgroundTaskInfo> getRunningTasks() {
+        List<BackgroundTaskInfo> running = new ArrayList<>();
+        for (BackgroundTaskInfo info : mActiveTasks.values()) {
+            if (!info.isQueued()) {
+                running.add(info);
+            }
+        }
+        return running;
+    }
+
+    /**
+     * 获取等待中的任务列表（排队中的活跃任务）
+     */
+    @NonNull
+    public List<BackgroundTaskInfo> getWaitingTasks() {
+        List<BackgroundTaskInfo> waiting = new ArrayList<>();
+        for (BackgroundTaskInfo info : mActiveTasks.values()) {
+            if (info.isQueued()) {
+                waiting.add(info);
+            }
+        }
+        return waiting;
     }
     
     /**
@@ -659,6 +779,31 @@ public class BackgroundTaskStatusManager {
         notifyTaskRemoved(taskId);
     }
 
+    /**
+     * 移除所有 taskId 以指定前缀开头的任务（用于清理跨会话遗留的占位任务）。
+     */
+    public void removeTasksWithPrefix(@NonNull String prefix) {
+        boolean removed = false;
+        Iterator<String> activeIt = mActiveTasks.keySet().iterator();
+        while (activeIt.hasNext()) {
+            if (activeIt.next().startsWith(prefix)) {
+                activeIt.remove();
+                removed = true;
+            }
+        }
+        Iterator<String> completedIt = mCompletedTasks.keySet().iterator();
+        while (completedIt.hasNext()) {
+            if (completedIt.next().startsWith(prefix)) {
+                completedIt.remove();
+                removed = true;
+            }
+        }
+        if (removed) {
+            savePersistedTasksAsync();
+            notifyTaskRemoved(prefix);
+        }
+    }
+
     private File createTaskLogFile(@NonNull String taskId) {
         File file = new File(mLogDir, taskId + ".log");
         try {
@@ -671,8 +816,34 @@ public class BackgroundTaskStatusManager {
         }
     }
 
+    /**
+     * 异步持久化任务状态。高频调用（如每个文件的进度更新）会合并为一次磁盘写入：
+     * 只要上一次持久化尚未完成，新的变更只置脏标志，由磁盘线程顺延合并处理。
+     */
     private void savePersistedTasksAsync() {
-        mDiskExecutor.submit(this::savePersistedTasks);
+        synchronized (mPersistLock) {
+            if (mPersistDirty) {
+                return;
+            }
+            mPersistDirty = true;
+        }
+        mDiskExecutor.submit(this::drainPersistedTasks);
+    }
+
+    /**
+     * 磁盘线程的持久化循环：反复写入直到脏标志被消费干净，
+     * 避免每个进度/日志回调都触发一次全量 JSON 序列化。
+     */
+    private void drainPersistedTasks() {
+        while (true) {
+            synchronized (mPersistLock) {
+                if (!mPersistDirty) {
+                    return;
+                }
+                mPersistDirty = false;
+            }
+            savePersistedTasks();
+        }
     }
 
     private void savePersistedTasks() {

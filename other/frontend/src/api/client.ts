@@ -68,6 +68,56 @@ export interface AsyncTaskResponse {
   total?: number
 }
 
+export interface DeleteTaskAccepted {
+  success: boolean
+  accepted: boolean
+  taskId: string
+  status: string
+  taskClassName?: string
+}
+
+export type BackgroundTaskState = 'PENDING' | 'RUNNING' | 'PAUSED' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+
+export interface BackgroundTaskInfo {
+  taskId: string
+  taskName: string
+  taskDescription?: string
+  taskType: string
+  taskClassName: string
+  startTime: number
+  currentProgress: number
+  totalProgress: number
+  progressPercentage: number
+  progressDetail?: string
+  state: BackgroundTaskState
+  isPaused: boolean
+  isCompleted: boolean
+  isCancelled: boolean
+  isPausable: boolean
+  isQueued: boolean
+  canStart: boolean
+  runningTimeMs: number
+  estimatedRemainingMs?: number
+  errorMessage?: string
+  logCount?: number
+  lastLog?: string
+}
+
+export interface BackgroundTasksResponse {
+  active: BackgroundTaskInfo[]
+  completed: BackgroundTaskInfo[]
+  total: number
+}
+
+export interface BackgroundTaskType {
+  taskClassName: string
+  taskType: string
+  requiresParams: boolean
+  paramType: string
+  displayName: string
+  description?: string
+}
+
 export interface TransferTaskStatus {
   taskId: string
   type: string
@@ -272,6 +322,32 @@ export interface SystemStats {
   none: number;
 }
 
+// ==================== Web服务器缓存 Types ====================
+
+export interface SystemCacheEntry {
+  key: string;
+  size: number;
+  sizeFormatted: string;
+  createdAt: number;
+  ttlMs: number;
+  expiresAt: number;
+  remainingMs: number;
+}
+
+export interface SystemCacheResponse {
+  success: boolean;
+  total: number;
+  totalBytes: number;
+  totalBytesFormatted: string;
+  entries: SystemCacheEntry[];
+}
+
+export interface ClearCacheResponse {
+  success: boolean;
+  cleared: number;
+  message: string;
+}
+
 export interface PushTask {
   id: string;
   type: string;
@@ -357,6 +433,7 @@ export interface CompressOutputFile {
 export interface CompressTask {
   taskId: string;
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  paused?: boolean;
   totalGalleries: number;
   completedGalleries: number;
   progress: number;
@@ -779,17 +856,17 @@ class EhViewerAPI {
   }
 
   async deleteGallery(gid: number): Promise<void> {
-    const task = await this.request<AsyncTaskResponse>(`/api/v1/galleries/${gid}`, { method: 'DELETE' });
-    await this.waitForTask(task.taskId)
+    const task = await this.request<DeleteTaskAccepted>(`/api/v1/galleries/${gid}`, { method: 'DELETE' });
+    await this.waitForBackgroundTask(task.taskId)
   }
 
-  async batchDeleteGalleries(gids: number[]): Promise<{ deleted: number; failed: number }> {
-    const task = await this.request<AsyncTaskResponse>('/api/v1/galleries/batch', {
+  async batchDeleteGalleries(gids: number[], deleteFiles?: boolean): Promise<{ deleted: number; failed: number }> {
+    const task = await this.request<DeleteTaskAccepted>('/api/v1/galleries/batch', {
       method: 'DELETE',
-      body: JSON.stringify({ gids }),
+      body: JSON.stringify(deleteFiles === undefined ? { gids } : { gids, deleteFiles }),
     });
-    const result = await this.waitForTask(task.taskId)
-    return { deleted: result.completed - (result.failed || 0), failed: result.failed || 0 }
+    await this.waitForBackgroundTask(task.taskId)
+    return { deleted: gids.length, failed: 0 }
   }
 
   getThumbnailUrl(gid: number): string {
@@ -892,6 +969,19 @@ class EhViewerAPI {
     throw new Error('任务处理超时，请稍后在任务中心查看状态')
   }
 
+  async waitForBackgroundTask(taskId: string, maxWait = 10 * 60 * 1000): Promise<BackgroundTaskInfo> {
+    const started = Date.now()
+    while (Date.now() - started < maxWait) {
+      const task = await this.getBackgroundTask(taskId)
+      if (task.state === 'COMPLETED') return task
+      if (task.state === 'FAILED' || task.state === 'CANCELLED') {
+        throw new Error(task.errorMessage || `任务${task.state}`)
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000))
+    }
+    throw new Error('任务处理超时，请稍后在任务中心查看状态')
+  }
+
   async batchDeleteFiles(folder: string, filenames: string[]): Promise<{ deleted: number; failed: number }> {
     return this.request(`/api/v1/folders/${encodeURIComponent(folder)}/files/batch`, {
       method: 'DELETE',
@@ -905,6 +995,16 @@ class EhViewerAPI {
 
   async getSystemStats(): Promise<SystemStats> {
     return this.request('/api/v1/system/stats');
+  }
+
+  async getSystemCache(): Promise<SystemCacheResponse> {
+    return this.request('/api/v1/system/cache');
+  }
+
+  async clearSystemCache(): Promise<ClearCacheResponse> {
+    return this.request('/api/v1/system/cache/clear', {
+      method: 'POST',
+    });
   }
 
   async getPushTasks(): Promise<{ tasks: PushTask[] }> {
@@ -1051,6 +1151,63 @@ class EhViewerAPI {
     return this.request(`/api/v1/tasks/${taskId}`, { method: 'DELETE' });
   }
 
+  async pauseTransferTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' });
+  }
+
+  async resumeTransferTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+  }
+
+  async stopTransferTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/tasks/${encodeURIComponent(taskId)}/stop`, { method: 'POST' });
+  }
+
+  // ==================== Background Tasks ====================
+
+  async getBackgroundTasks(status = 'all'): Promise<BackgroundTasksResponse> {
+    return this.request(`/api/v1/background-tasks?status=${status}`);
+  }
+
+  async getBackgroundTask(taskId: string): Promise<BackgroundTaskInfo> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}`);
+  }
+
+  async getBackgroundTaskLogs(taskId: string): Promise<{ taskId: string; taskName: string; logs: string[]; total: number }> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}/logs`);
+  }
+
+  async getBackgroundTaskTypes(): Promise<{ taskTypes: BackgroundTaskType[]; total: number }> {
+    return this.request('/api/v1/background-tasks/task-types');
+  }
+
+  async createBackgroundTask(className: string, params?: Record<string, unknown>): Promise<{ success: boolean; accepted: boolean; taskId: string; status: string }> {
+    return this.request('/api/v1/background-tasks', {
+      method: 'POST',
+      body: JSON.stringify({ className, params }),
+    });
+  }
+
+  async startBackgroundTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}/start`, { method: 'POST' });
+  }
+
+  async pauseBackgroundTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}/pause`, { method: 'POST' });
+  }
+
+  async resumeBackgroundTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}/resume`, { method: 'POST' });
+  }
+
+  async stopBackgroundTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}/stop`, { method: 'POST' });
+  }
+
+  async deleteBackgroundTask(taskId: string): Promise<void> {
+    return this.request(`/api/v1/background-tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' });
+  }
+
   // ==================== Integrity Check ====================
 
   async getFileHash(folder: string, filename: string, algorithm = 'md5'): Promise<FileHashInfo> {
@@ -1135,9 +1292,9 @@ class EhViewerAPI {
   }
 
   async deleteDownload(gid: number): Promise<{ success: boolean; message: string; gid: number }> {
-    const task = await this.request<AsyncTaskResponse>(`/api/v1/downloads/${gid}`, { method: 'DELETE' })
-    await this.waitForTask(task.taskId)
-    return { success: true, message: 'Download deleted', gid }
+    const task = await this.request<DeleteTaskAccepted>(`/api/v1/downloads/${gid}`, { method: 'DELETE' })
+    await this.waitForBackgroundTask(task.taskId)
+    return { success: true, message: '已删除下载任务', gid }
   }
 
   async batchStartDownloads(gids: number[]): Promise<{ success: boolean; message: string; count: number }> {
@@ -1154,12 +1311,12 @@ class EhViewerAPI {
     })
   }
 
-  async batchDeleteDownloads(gids: number[]): Promise<{ success: boolean; message: string; count: number }> {
-    const task = await this.request<AsyncTaskResponse>('/api/v1/downloads/batch', {
+  async batchDeleteDownloads(gids: number[], deleteFiles?: boolean): Promise<{ success: boolean; message: string; count: number }> {
+    const task = await this.request<DeleteTaskAccepted>('/api/v1/downloads/batch', {
       method: 'DELETE',
-      body: JSON.stringify({ gids }),
+      body: JSON.stringify(deleteFiles === undefined ? { gids } : { gids, deleteFiles }),
     })
-    await this.waitForTask(task.taskId)
+    await this.waitForBackgroundTask(task.taskId)
     return { success: true, message: 'Batch delete completed', count: gids.length }
   }
 

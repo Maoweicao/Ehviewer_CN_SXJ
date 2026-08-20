@@ -819,6 +819,17 @@ public class Settings {
         putBoolean(KEY_KEEP_SCREEN_ON, value);
     }
 
+    private static final String KEY_DOWNLOAD_KEEP_SCREEN_ON = "download_keep_screen_on";
+    private static final boolean DEFAULT_DOWNLOAD_KEEP_SCREEN_ON = false;
+
+    public static boolean getDownloadKeepScreenOn() {
+        return getBoolean(KEY_DOWNLOAD_KEEP_SCREEN_ON, DEFAULT_DOWNLOAD_KEEP_SCREEN_ON);
+    }
+
+    public static void putDownloadKeepScreenOn(boolean value) {
+        putBoolean(KEY_DOWNLOAD_KEEP_SCREEN_ON, value);
+    }
+
     private static final String KEY_SHOW_CLOCK = "gallery_show_clock";
     private static final boolean DEFAULT_SHOW_CLOCK = true;
 
@@ -1268,6 +1279,19 @@ public class Settings {
 
     public static void putBackgroundConcurrentTasks(int value) {
         putIntToStr(KEY_BACKGROUND_CONCURRENT_TASKS, MathUtils.clamp(value, 1, 32));
+    }
+
+    // 互斥任务死锁检测间隔（秒），默认 30 秒
+    private static final String KEY_MUTEX_DEADLOCK_CHECK_INTERVAL = "mutex_deadlock_check_interval";
+    private static final int DEFAULT_MUTEX_DEADLOCK_CHECK_INTERVAL = 30;
+
+    public static int getMutexDeadlockCheckInterval() {
+        int value = getIntFromStr(KEY_MUTEX_DEADLOCK_CHECK_INTERVAL, DEFAULT_MUTEX_DEADLOCK_CHECK_INTERVAL);
+        return MathUtils.clamp(value, 5, 300); // 5秒到300秒之间
+    }
+
+    public static void putMutexDeadlockCheckInterval(int value) {
+        putIntToStr(KEY_MUTEX_DEADLOCK_CHECK_INTERVAL, MathUtils.clamp(value, 5, 300));
     }
 
     // 性能监测
@@ -1890,6 +1914,21 @@ public class Settings {
         putIntToStr(KEY_VPN_AWARE_MODE, value);
     }
 
+    // Merge duplicate gallery scan mode constants
+    public static final int MERGE_SCAN_MODE_SHELL = 0;
+    public static final int MERGE_SCAN_MODE_NATIVE = 1;
+
+    private static final String KEY_MERGE_SCAN_MODE = "merge_scan_mode";
+    private static final int DEFAULT_MERGE_SCAN_MODE = MERGE_SCAN_MODE_SHELL;
+
+    public static int getMergeScanMode() {
+        return getIntFromStr(KEY_MERGE_SCAN_MODE, DEFAULT_MERGE_SCAN_MODE);
+    }
+
+    public static void putMergeScanMode(int value) {
+        putIntToStr(KEY_MERGE_SCAN_MODE, value);
+    }
+
     private static final String KEY_DOWNLOAD_DELAY = "download_delay";
     private static final int DEFAULT_DOWNLOAD_DELAY = 0;
 
@@ -2082,6 +2121,16 @@ public class Settings {
 
     public static void setDownloadAlwaysComplete(boolean value) {
         putBoolean(KEY_DOWNLOAD_ALWAYS_COMPLETE, value);
+    }
+
+    public static final String KEY_LOOP_DOWNLOAD_UNTIL_COMPLETE = "loop_download_until_complete";
+
+    public static boolean getLoopDownloadUntilComplete() {
+        return getBoolean(KEY_LOOP_DOWNLOAD_UNTIL_COMPLETE, true);
+    }
+
+    public static void setLoopDownloadUntilComplete(boolean value) {
+        putBoolean(KEY_LOOP_DOWNLOAD_UNTIL_COMPLETE, value);
     }
 
     public static final String KEY_DOWNLOAD_PREFETCH_PAGES_ENABLED = "download_prefetch_pages_enabled";
@@ -2564,6 +2613,63 @@ public class Settings {
 
     public static void putAiOcrAiModel(String value) {
         putString(KEY_AI_OCR_AI_MODEL, value);
+    }
+
+    // ========== AI图片分析相关 ==========
+
+    public static final String KEY_AI_ANALYZE_ENABLED = "ai_analyze_enabled";
+    private static final boolean DEFAULT_AI_ANALYZE_ENABLED = false;
+
+    public static boolean getAiAnalyzeEnabled() {
+        return getBoolean(KEY_AI_ANALYZE_ENABLED, DEFAULT_AI_ANALYZE_ENABLED);
+    }
+
+    public static void putAiAnalyzeEnabled(boolean value) {
+        putBoolean(KEY_AI_ANALYZE_ENABLED, value);
+    }
+
+    public static final String KEY_AI_ANALYZE_MODEL = "ai_analyze_model";
+    private static final String DEFAULT_AI_ANALYZE_MODEL = "";
+
+    public static String getAiAnalyzeModel() {
+        return getString(KEY_AI_ANALYZE_MODEL, DEFAULT_AI_ANALYZE_MODEL);
+    }
+
+    public static void putAiAnalyzeModel(String value) {
+        putString(KEY_AI_ANALYZE_MODEL, value);
+    }
+
+    public static final String KEY_AI_ANALYZE_SAMPLE_STEP = "ai_analyze_sample_step";
+    private static final int DEFAULT_AI_ANALYZE_SAMPLE_STEP = 1;
+
+    public static int getAiAnalyzeSampleStep() {
+        return getIntFromStr(KEY_AI_ANALYZE_SAMPLE_STEP, DEFAULT_AI_ANALYZE_SAMPLE_STEP);
+    }
+
+    public static void putAiAnalyzeSampleStep(int value) {
+        putIntToStr(KEY_AI_ANALYZE_SAMPLE_STEP, value);
+    }
+
+    public static final String KEY_AI_ANALYZE_MAX_DIMENSION = "ai_analyze_max_dimension";
+    private static final int DEFAULT_AI_ANALYZE_MAX_DIMENSION = 1024;
+
+    public static int getAiAnalyzeMaxDimension() {
+        return getIntFromStr(KEY_AI_ANALYZE_MAX_DIMENSION, DEFAULT_AI_ANALYZE_MAX_DIMENSION);
+    }
+
+    public static void putAiAnalyzeMaxDimension(int value) {
+        putIntToStr(KEY_AI_ANALYZE_MAX_DIMENSION, value);
+    }
+
+    public static final String KEY_AI_ANALYZE_AUTO_ON_FINISH = "ai_analyze_auto_on_finish";
+    private static final boolean DEFAULT_AI_ANALYZE_AUTO_ON_FINISH = false;
+
+    public static boolean getAiAnalyzeAutoOnFinish() {
+        return getBoolean(KEY_AI_ANALYZE_AUTO_ON_FINISH, DEFAULT_AI_ANALYZE_AUTO_ON_FINISH);
+    }
+
+    public static void putAiAnalyzeAutoOnFinish(boolean value) {
+        putBoolean(KEY_AI_ANALYZE_AUTO_ON_FINISH, value);
     }
 
     // ========== 高级设置 ==========

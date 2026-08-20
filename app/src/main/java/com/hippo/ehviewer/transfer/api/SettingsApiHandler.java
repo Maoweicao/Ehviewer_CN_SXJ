@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -25,6 +24,7 @@ import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.data.ReceiveSettings;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import fi.iki.elonen.NanoHTTPD;
 
@@ -41,7 +41,7 @@ public class SettingsApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         // /api/v1/settings/receive - 获取接收设置
         if (uri.equals("/api/v1/settings/receive")) {
@@ -58,7 +58,7 @@ public class SettingsApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePut(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("PUT", uri);
+        logRequest("PUT", uri, session);
 
         // /api/v1/settings/receive - 更新接收设置
         if (uri.equals("/api/v1/settings/receive")) {
@@ -82,7 +82,7 @@ public class SettingsApiHandler extends BaseApiHandler {
             String cacheKey = "settings:receive";
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for receive settings");
+                TransferLogger.getInstance().d(TAG, "Cache hit for receive settings");
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -104,7 +104,7 @@ public class SettingsApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(responseJson);
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get receive settings", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get receive settings", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -139,13 +139,14 @@ public class SettingsApiHandler extends BaseApiHandler {
             // Invalidate settings cache
             ResponseCache.getInstance().invalidateSettings();
 
+            TransferLogger.getInstance().i(TAG, "更新接收设置成功: " + json.toJSONString());
             JSONObject response = new JSONObject();
             response.put("success", true);
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to update receive settings", e);
+            TransferLogger.getInstance().e(TAG, "Failed to update receive settings", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -155,6 +156,7 @@ public class SettingsApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleGetPageUploadSettings(NanoHTTPD.IHTTPSession session) {
         try {
+            TransferLogger.getInstance().d(TAG, "获取页面上传设置: enabled=" + Settings.isRemotePageUploadEnabled());
             JSONObject response = new JSONObject();
             response.put("enabled", Settings.isRemotePageUploadEnabled());
             response.put("defaultAlgorithm", "md5");
@@ -162,7 +164,7 @@ public class SettingsApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get page-upload settings", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get page-upload settings", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -179,6 +181,7 @@ public class SettingsApiHandler extends BaseApiHandler {
                 Settings.putRemotePageUploadEnabled(json.getBoolean("enabled"));
             }
 
+            TransferLogger.getInstance().i(TAG, "更新页面上传开关: enabled=" + Settings.isRemotePageUploadEnabled());
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("message", "Settings updated");
@@ -187,7 +190,7 @@ public class SettingsApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to update page-upload settings", e);
+            TransferLogger.getInstance().e(TAG, "Failed to update page-upload settings", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

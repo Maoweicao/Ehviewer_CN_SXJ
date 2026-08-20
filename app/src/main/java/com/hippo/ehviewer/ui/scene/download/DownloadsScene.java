@@ -103,6 +103,7 @@ import com.hippo.ehviewer.client.EhTagDatabase;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
+import com.hippo.ehviewer.download.DownloadDeleteHelper;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask;
@@ -194,6 +195,10 @@ public class DownloadsScene extends ToolbarScene
     private static final String KEY_FILTER_DUPLICATE_ONLY = "filter_duplicate_only";
     private static final String KEY_FILTER_RATING_FROM = "filter_rating_from";
     private static final String KEY_FILTER_RATING_TO = "filter_rating_to";
+    private static final String KEY_SEARCH_ACTIVE = "search_active";
+    private static final String KEY_SEARCH_OPTION = "search_option";
+    private static final String KEY_SEARCH_CATEGORY_IDS = "search_category_ids";
+    private static final String KEY_SEARCH_SORT_ID = "search_sort_id";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
@@ -259,6 +264,10 @@ public class DownloadsScene extends ToolbarScene
 
     private ProgressView mProgressView;
 
+    // 全屏加载遮罩（筛选/搜索提交后显示）
+    @Nullable
+    private View mFilterLoadingOverlay;
+
     private AlertDialog mSearchDialog;
     private SearchBar mSearchBar;
     @Nullable
@@ -299,6 +308,15 @@ public class DownloadsScene extends ToolbarScene
     private float mFilterRatingFrom = 0f;
     private float mFilterRatingTo = 5f;
     private boolean mPendingRestoreFilter = false;
+
+    /*---------------
+     Search state (survives rotation and list refreshes, cancelled when a normal/advanced filter is executed)
+     ---------------*/
+    private boolean mSearchActive = false;
+    private int mSearchOption = 0;
+    @Nullable
+    private Set<Integer> mSearchCategoryIds;
+    private int mSearchSortId = R.id.sort_by_default;
 
     private int mInitPosition = -1;
 
@@ -501,10 +519,17 @@ public class DownloadsScene extends ToolbarScene
         mFilterRatingFrom = savedInstanceState.getFloat(KEY_FILTER_RATING_FROM, 0f);
         mFilterRatingTo = savedInstanceState.getFloat(KEY_FILTER_RATING_TO, 5f);
 
+        mSearchActive = savedInstanceState.getBoolean(KEY_SEARCH_ACTIVE, false);
+        mSearchOption = savedInstanceState.getInt(KEY_SEARCH_OPTION, 0);
+        ArrayList<Integer> searchCatIds = savedInstanceState.getIntegerArrayList(KEY_SEARCH_CATEGORY_IDS);
+        mSearchCategoryIds = searchCatIds != null && !searchCatIds.isEmpty() ? new HashSet<>(searchCatIds) : null;
+        mSearchSortId = savedInstanceState.getInt(KEY_SEARCH_SORT_ID, R.id.sort_by_default);
+
         updateForLabel();
         // Defer applying filters until the view is created to avoid touching null views
         mPendingRestoreFilter = mAdvancedFilterActive
-                || (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default);
+                || (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default)
+                || (mSearchActive && searchKey != null && !searchKey.isEmpty());
     }
 
     @Override
@@ -546,13 +571,76 @@ public class DownloadsScene extends ToolbarScene
         outState.putBoolean(KEY_FILTER_DUPLICATE_ONLY, mFilterDuplicateOnly);
         outState.putFloat(KEY_FILTER_RATING_FROM, mFilterRatingFrom);
         outState.putFloat(KEY_FILTER_RATING_TO, mFilterRatingTo);
+
+        outState.putBoolean(KEY_SEARCH_ACTIVE, mSearchActive);
+        outState.putInt(KEY_SEARCH_OPTION, mSearchOption);
+        if (mSearchCategoryIds != null) {
+            outState.putIntegerArrayList(KEY_SEARCH_CATEGORY_IDS, new ArrayList<>(mSearchCategoryIds));
+        }
+        outState.putInt(KEY_SEARCH_SORT_ID, mSearchSortId);
     }
 
     private void applyPendingFilter() {
         if (mAdvancedFilterActive) {
             applyAdvancedFilter();
         } else if (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default) {
-            gotoFilterAndSort(mLastFilterSortId);
+            if (isQuickFilterId(mLastFilterSortId)) {
+                gotoQuickFilter(mLastFilterSortId);
+            } else {
+                gotoFilterAndSort(mLastFilterSortId);
+            }
+        } else if (mSearchActive && searchKey != null && !searchKey.isEmpty()) {
+            applyPendingSearch(true);
+        }
+    }
+
+    private boolean isQuickFilterId(int id) {
+        switch (id) {
+            case R.id.quick_filter_big_low_rating:
+            case R.id.quick_filter_duplicates:
+            case R.id.quick_filter_low_space_efficiency:
+            case R.id.quick_filter_low_rating:
+            case R.id.quick_filter_huge_file:
+            case R.id.quick_filter_old_unfavorited:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private void applyPendingSearch(boolean showProgress) {
+        if (showProgress) {
+            mProgressView.setVisibility(View.VISIBLE);
+            if (mRecyclerView != null) {
+                mRecyclerView.setVisibility(View.GONE);
+            }
+        }
+
+        updateForLabel();
+
+        DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
+        executor.setDownloadSearchingListener(this);
+        cancelCurrentExecutor();
+        executor.executeAdvancedSearch(searchKey, mSearchOption, mSearchCategoryIds, mSearchSortId);
+        mCurrentExecutor = executor;
+        searching = true;
+    }
+
+    private void clearSearchState() {
+        mSearchActive = false;
+        searchKey = null;
+        mSearchOption = 0;
+        mSearchCategoryIds = null;
+        mSearchSortId = R.id.sort_by_default;
+    }
+
+    private void refreshListKeepState() {
+        if (mSearchActive && searchKey != null && !searchKey.isEmpty()) {
+            applyPendingSearch(false);
+        } else {
+            updateForLabel();
+            filterByCategory();
+            updateView();
         }
     }
 
@@ -644,6 +732,7 @@ public class DownloadsScene extends ToolbarScene
         }
 
         mProgressView = (ProgressView) ViewUtils.$$(view, R.id.download_progress_view);
+        mFilterLoadingOverlay = ViewUtils.$$(view, R.id.filter_loading_overlay);
         View content = ViewUtils.$$(view, R.id.content);
         mRecyclerView = (MyEasyRecyclerView) ViewUtils.$$(content, R.id.recycler_view);
         FastScroller fastScroller = (FastScroller) ViewUtils.$$(content, R.id.fast_scroller);
@@ -676,6 +765,9 @@ public class DownloadsScene extends ToolbarScene
 
         mOriginalAdapter = new DownloadAdapter(this, this);
         mOriginalAdapter.setHasStableIds(true);
+        if (mDownloadManager != null) {
+            mOriginalAdapter.setWaitList(mDownloadManager.getWaitList());
+        }
         mAdapter = mDragDropManager.createWrappedAdapter(mOriginalAdapter); // 包装适配器以支持拖拽
         mDragDropManager.setCheckCanDropEnabled(false);
         mRecyclerView.setAdapter(mAdapter);
@@ -866,6 +958,8 @@ public class DownloadsScene extends ToolbarScene
         super.onViewCreated(view, savedInstanceState);
         updateTitle();
         setNavigationIcon(R.drawable.v_arrow_left_dark_x24);
+        // 视图重建（横竖屏切换等）后补查一次阅读进度等状态显示
+        queryUnreadSpiderInfo();
         if (mPendingRestoreFilter) {
             mPendingRestoreFilter = false;
             applyPendingFilter();
@@ -897,6 +991,7 @@ public class DownloadsScene extends ToolbarScene
         mAdapter = null;
         mOriginalAdapter = null;
         mLayoutManager = null;
+        mFilterLoadingOverlay = null;
         EventBus.getDefault().unregister(this);
     }
 
@@ -995,6 +1090,8 @@ public class DownloadsScene extends ToolbarScene
             case R.id.sort_by_name_desc:
             case R.id.sort_by_file_size_asc:
             case R.id.sort_by_file_size_desc:
+            case R.id.sort_by_state_queue_asc:
+            case R.id.sort_by_state_queue_desc:
             case R.id.all_kind:
             case R.id.misc:
             case R.id.doujinshi:
@@ -1008,6 +1105,14 @@ public class DownloadsScene extends ToolbarScene
             case R.id.western:
             case R.id.unknown:
                 gotoFilterAndSort(id);
+                return true;
+            case R.id.quick_filter_big_low_rating:
+            case R.id.quick_filter_duplicates:
+            case R.id.quick_filter_low_space_efficiency:
+            case R.id.quick_filter_low_rating:
+            case R.id.quick_filter_huge_file:
+            case R.id.quick_filter_old_unfavorited:
+                gotoQuickFilter(id);
                 return true;
             case R.id.import_local_archive:
                 importLocalArchive();
@@ -1106,6 +1211,10 @@ public class DownloadsScene extends ToolbarScene
         sortIds.add(R.id.sort_by_file_size_asc);
         sortNames.add(context.getString(R.string.sort_by_file_size_desc));
         sortIds.add(R.id.sort_by_file_size_desc);
+        sortNames.add(context.getString(R.string.sort_by_state_queue_asc));
+        sortIds.add(R.id.sort_by_state_queue_asc);
+        sortNames.add(context.getString(R.string.sort_by_state_queue_desc));
+        sortIds.add(R.id.sort_by_state_queue_desc);
         final CheckboxAdapter sortAdapter = new CheckboxAdapter(sortNames, sortIds);
         sortAdapter.setMutuallyExclusive(true);
         sortRecyclerView.setAdapter(sortAdapter);
@@ -1150,11 +1259,15 @@ public class DownloadsScene extends ToolbarScene
             Set<Integer> categories = categoryTable.getSelectedCategories();
             int sortId = selectedSortId[0];
 
-        if (mSearchDialog != null) {
-        if (mSearchDialog != null) {
-            mSearchDialog.dismiss();
-        }
-        }
+            // Stash the search state so it survives rotation and list refreshes
+            mSearchActive = !searchKey.isEmpty();
+            mSearchOption = searchOption;
+            mSearchCategoryIds = categories;
+            mSearchSortId = sortId;
+
+            if (mSearchDialog != null) {
+                mSearchDialog.dismiss();
+            }
             mSearchMode = false;
 
             mProgressView.setVisibility(View.VISIBLE);
@@ -1234,6 +1347,10 @@ public class DownloadsScene extends ToolbarScene
         sortIds.add(R.id.sort_by_file_size_asc);
         sortNames.add(context.getString(R.string.sort_by_file_size_desc));
         sortIds.add(R.id.sort_by_file_size_desc);
+        sortNames.add(context.getString(R.string.sort_by_state_queue_asc));
+        sortIds.add(R.id.sort_by_state_queue_asc);
+        sortNames.add(context.getString(R.string.sort_by_state_queue_desc));
+        sortIds.add(R.id.sort_by_state_queue_desc);
         final CheckboxAdapter sortAdapter = new CheckboxAdapter(sortNames, sortIds);
         sortAdapter.setMutuallyExclusive(true);
         sortRecyclerView.setAdapter(sortAdapter);
@@ -1399,7 +1516,10 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private void applyAdvancedFilter() {
+        // Running a filter cancels any active search, so the filter applies to the full list
+        clearSearchState();
         mProgressView.setVisibility(View.VISIBLE);
+        showFilterLoading();
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.GONE);
         }
@@ -1504,6 +1624,26 @@ public class DownloadsScene extends ToolbarScene
             } else {
                 mViewTransition.showView(0);
             }
+        }
+    }
+
+    /**
+     * 显示全屏加载遮罩（“正在加载筛选”）。
+     */
+    private void showFilterLoading() {
+        View overlay = mFilterLoadingOverlay;
+        if (overlay != null) {
+            overlay.setVisibility(View.VISIBLE);
+        }
+    }
+
+    /**
+     * 隐藏全屏加载遮罩。
+     */
+    private void hideFilterLoading() {
+        View overlay = mFilterLoadingOverlay;
+        if (overlay != null) {
+            overlay.setVisibility(View.GONE);
         }
     }
 
@@ -1725,11 +1865,7 @@ public class DownloadsScene extends ToolbarScene
                             }
                             break;
                         case 3: // Delete
-                            new AlertDialog.Builder(getDialogContext())
-                                    .setTitle(R.string.download_remove_dialog_title)
-                                    .setMessage(getString(R.string.download_remove_dialog_message, di.title))
-                                    .setPositiveButton(android.R.string.ok, (dialog1, which1) -> mDownloadManager.deleteDownload(di.gid))
-                                    .show();
+                            DownloadDeleteHelper.showDeleteDialog(getDialogContext(), di);
                             break;
                     }
                 }).show();
@@ -1914,11 +2050,22 @@ public class DownloadsScene extends ToolbarScene
         if (0 == position) {
             recyclerView.intoCustomChoiceMode();
         } else if (1 == position) {
+            if (!recyclerView.isInCustomChoice()) {
+                recyclerView.intoCustomChoiceMode();
+            }
             recyclerView.checkAll();
         } else {
             List<DownloadInfo> list = mList;
             if (list == null) {
                 return;
+            }
+
+            // If the FAB was expanded without entering selection mode, enter it first
+            // so batch actions (start/stop/delete/move/compress) behave consistently.
+            boolean batchAction = position == 2 || position == 3 || position == 4
+                    || position == 5 || position == 8;
+            if (batchAction && !recyclerView.isInCustomChoice()) {
+                recyclerView.intoCustomChoiceMode();
             }
 
             LongList gidList = null;
@@ -1933,14 +2080,20 @@ public class DownloadsScene extends ToolbarScene
             }
 
             SparseBooleanArray stateArray = recyclerView.getCheckedItemPositions();
-            for (int i = 0, n = stateArray.size(); i < n; i++) {
-                if (stateArray.valueAt(i)) {
-                    DownloadInfo info = list.get(positionInList(stateArray.keyAt(i)));
-                    if (collectDownloadInfo) {
-                        downloadInfoList.add(info);
-                    }
-                    if (collectGid) {
-                        gidList.add(info.gid);
+            if (stateArray != null) {
+                for (int i = 0, n = stateArray.size(); i < n; i++) {
+                    if (stateArray.valueAt(i)) {
+                        int listPosition = positionInList(stateArray.keyAt(i));
+                        if (listPosition < 0 || listPosition >= list.size()) {
+                            continue;
+                        }
+                        DownloadInfo info = list.get(listPosition);
+                        if (collectDownloadInfo) {
+                            downloadInfoList.add(info);
+                        }
+                        if (collectGid) {
+                            gidList.add(info.gid);
+                        }
                     }
                 }
             }
@@ -2085,8 +2238,7 @@ public class DownloadsScene extends ToolbarScene
             mOriginalAdapter.setWaitList(mDownloadManager.getWaitList());
         }
         if (mList != list) {
-            updateForLabel();
-            filterByCategory();
+            refreshListKeepState();
             if (mAdapter != null) {
                 mAdapter.notifyDataSetChanged();
             }
@@ -2110,8 +2262,7 @@ public class DownloadsScene extends ToolbarScene
         if (mList == null) {
             return;
         }
-        updateForLabel();
-        updateView();
+        refreshListKeepState();
 
         int index = mList.indexOf(newInfo);
         if (index >= 0 && mAdapter != null) {
@@ -2161,8 +2312,7 @@ public class DownloadsScene extends ToolbarScene
     @Override
     public void onChange() {
         mLabel = null;
-        updateForLabel();
-        updateView();
+        refreshListKeepState();
     }
 
     @Override
@@ -2172,15 +2322,13 @@ public class DownloadsScene extends ToolbarScene
         }
 
         mLabel = to;
-        updateForLabel();
-        updateView();
+        refreshListKeepState();
     }
 
     @Override
     public void onRemove(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, int position) {
         if (mList != list) {
-            updateForLabel();
-            filterByCategory();
+            refreshListKeepState();
             if (mAdapter != null) {
                 mAdapter.notifyDataSetChanged();
             }
@@ -2261,36 +2409,6 @@ public class DownloadsScene extends ToolbarScene
     }
 
 
-    private static void deleteFileAsync(UniFile... files) {
-        new AsyncTask<UniFile, Void, Void>() {
-            @Override
-            protected Void doInBackground(UniFile... params) {
-                for (UniFile file : params) {
-                    if (file != null) {
-                        file.delete();
-                    }
-                }
-                return null;
-            }
-        }.executeOnExecutor(IoThreadPoolExecutor.Companion.getInstance(), files);
-    }
-
-    private static void deleteGalleryFilesAsync(List<? extends GalleryInfo> galleryInfoList) {
-        new AsyncTask<List<? extends GalleryInfo>, Void, Void>() {
-            @Override
-            protected Void doInBackground(List<? extends GalleryInfo>... params) {
-                for (GalleryInfo info : params[0]) {
-                    UniFile file = getGalleryDownloadDir(info);
-                    EhDB.removeDownloadDirname(info.gid);
-                    if (file != null) {
-                        file.delete();
-                    }
-                }
-                return null;
-            }
-        }.executeOnExecutor(IoThreadPoolExecutor.Companion.getInstance(), galleryInfoList);
-    }
-
     @Override
     public void onClickTitle() {
         if (!mSearchMode) {
@@ -2334,7 +2452,15 @@ public class DownloadsScene extends ToolbarScene
             mSearchBar.setState(SearchBar.STATE_NORMAL);
         }
 
-        mSearchDialog.dismiss();
+        if (mSearchDialog != null) {
+            mSearchDialog.dismiss();
+        }
+
+        // Stash the search state so it survives rotation and list refreshes
+        mSearchActive = searchKey != null && !searchKey.isEmpty();
+        mSearchOption = AdvanceSearchTable.SNAME | AdvanceSearchTable.STAGS;
+        mSearchCategoryIds = null;
+        mSearchSortId = R.id.sort_by_default;
 
         updateForLabel();
 
@@ -2357,9 +2483,12 @@ public class DownloadsScene extends ToolbarScene
     private void gotoFilterAndSort(int id) {
         mLastFilterSortId = id;
         mAdvancedFilterActive = false;
+        // Running a normal filter cancels any active search, so the filter applies to the full list
+        clearSearchState();
         if (mProgressView != null) {
             mProgressView.setVisibility(View.VISIBLE);
         }
+        showFilterLoading();
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.GONE);
         }
@@ -2375,6 +2504,29 @@ public class DownloadsScene extends ToolbarScene
         mCurrentExecutor = executor;
     }
 
+    /**
+     * 执行快捷筛选预设。显示全屏“正在加载筛选”遮罩，结果通过 onDownloadSearchSuccess 回调刷新。
+     */
+    private void gotoQuickFilter(int quickFilterId) {
+        mLastFilterSortId = quickFilterId;
+        mAdvancedFilterActive = false;
+        // 快捷筛选取消当前搜索，作用于完整下载列表
+        clearSearchState();
+        showFilterLoading();
+        if (mRecyclerView != null) {
+            mRecyclerView.setVisibility(View.GONE);
+        }
+
+        updateForLabel();
+
+        DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
+        executor.setDownloadSearchingListener(this);
+        cancelCurrentExecutor();
+        executor.executeQuickFilter(quickFilterId);
+        mCurrentExecutor = executor;
+        searching = true;
+    }
+
     private void updateAdapter() {
         // 检查 Fragment 是否已附加，如果未附加则延迟创建适配器
         if (!isAdded()) {
@@ -2382,6 +2534,9 @@ public class DownloadsScene extends ToolbarScene
         }
         mOriginalAdapter = new DownloadAdapter(this, this);
         mOriginalAdapter.setHasStableIds(true);
+        if (mDownloadManager != null) {
+            mOriginalAdapter.setWaitList(mDownloadManager.getWaitList());
+        }
         // 避免重复创建包装适配器，直接使用原始适配器
         mAdapter = mOriginalAdapter;
         if (mRecyclerView != null) {
@@ -2440,6 +2595,7 @@ public class DownloadsScene extends ToolbarScene
         updatePaginationIndicator();
         updateView();
         mProgressView.setVisibility(View.GONE);
+        hideFilterLoading();
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
         }
@@ -2460,6 +2616,7 @@ public class DownloadsScene extends ToolbarScene
         updatePaginationIndicator();
         updateView();
         mProgressView.setVisibility(View.GONE);
+        hideFilterLoading();
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
         }
@@ -2479,6 +2636,7 @@ public class DownloadsScene extends ToolbarScene
         updatePaginationIndicator();
         updateView();
         mProgressView.setVisibility(View.GONE);
+        hideFilterLoading();
         if (mRecyclerView != null) {
             mRecyclerView.setVisibility(View.VISIBLE);
         }
@@ -2826,42 +2984,6 @@ public class DownloadsScene extends ToolbarScene
         }
     }
 
-    private class DeleteDialogHelper implements DialogInterface.OnClickListener {
-
-        private final GalleryInfo mGalleryInfo;
-        private final CheckBoxDialogBuilder mBuilder;
-
-        public DeleteDialogHelper(GalleryInfo galleryInfo, CheckBoxDialogBuilder builder) {
-            mGalleryInfo = galleryInfo;
-            mBuilder = builder;
-        }
-
-        @Override
-        public void onClick(DialogInterface dialog, int which) {
-            if (which != DialogInterface.BUTTON_POSITIVE) {
-                return;
-            }
-
-            // Delete
-            if (null != mDownloadManager) {
-                mDownloadManager.deleteDownload(mGalleryInfo.gid);
-            }
-
-            // Delete image files
-            boolean checked = mBuilder.isChecked();
-            Settings.putRemoveImageFiles(checked);
-            if (checked) {
-                UniFile file = getExistingGalleryDownloadDir(mGalleryInfo);
-                EhDB.removeDownloadDirname(mGalleryInfo.gid);
-                if (file != null) {
-                    deleteFileAsync(file);
-                } else {
-                    deleteGalleryFilesAsync(Collections.singletonList(mGalleryInfo));
-                }
-            }
-        }
-    }
-
     private class DeleteRangeDialogHelper implements DialogInterface.OnClickListener {
 
         private final List<DownloadInfo> mDownloadInfoList;
@@ -2886,17 +3008,10 @@ public class DownloadsScene extends ToolbarScene
                 mRecyclerView.outOfCustomChoiceMode();
             }
 
-            // Delete
-            if (null != mDownloadManager) {
-                mDownloadManager.deleteRangeDownload(mGidList);
-            }
-
-            // Delete image files
+            // Delete (with DOWNLOAD_HISTORY record) and handle local files
             boolean checked = mBuilder.isChecked();
             Settings.putRemoveImageFiles(checked);
-            if (checked) {
-                deleteGalleryFilesAsync(mDownloadInfoList);
-            }
+            DownloadDeleteHelper.performDeleteRange(getDialogContext(), mDownloadInfoList, checked);
         }
     }
 

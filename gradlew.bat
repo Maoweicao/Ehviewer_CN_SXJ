@@ -21,6 +21,9 @@
 @rem
 @rem  Gradle startup script for Windows
 @rem
+@rem  Fail-fast behavior: missing java, missing wrapper jar, or a failed build
+@rem  all return a clear error and a non-zero exit code immediately instead of
+@rem  leaving a hung JVM or garbled console output.
 @rem ##########################################################################
 
 @rem Set local scope for the variables with windows NT shell
@@ -36,7 +39,8 @@ set APP_HOME=%DIRNAME%
 for %%i in ("%APP_HOME%") do set APP_HOME=%%~fi
 
 @rem Add default JVM options here. You can also use JAVA_OPTS and GRADLE_OPTS to pass JVM options to this script.
-set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m"
+@rem Force UTF-8 so Gradle/javac messages render correctly in UTF-8 consoles (e.g. PowerShell/opencode).
+set DEFAULT_JVM_OPTS="-Xmx64m" "-Xms64m" "-Dfile.encoding=UTF-8" "-Dsun.jnu.encoding=UTF-8"
 
 @rem Find java.exe
 if defined JAVA_HOME goto findJavaFromJavaHome
@@ -45,11 +49,11 @@ set JAVA_EXE=java.exe
 %JAVA_EXE% -version >NUL 2>&1
 if %ERRORLEVEL% equ 0 goto execute
 
-echo. 1>&2
-echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH. 1>&2
-echo. 1>&2
-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
-echo location of your Java installation. 1>&2
+echo.
+echo ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
+echo.
+echo Please set the JAVA_HOME variable in your environment to match the
+echo location of your Java installation.
 
 goto fail
 
@@ -59,11 +63,11 @@ set JAVA_EXE=%JAVA_HOME%/bin/java.exe
 
 if exist "%JAVA_EXE%" goto execute
 
-echo. 1>&2
-echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME% 1>&2
-echo. 1>&2
-echo Please set the JAVA_HOME variable in your environment to match the 1>&2
-echo location of your Java installation. 1>&2
+echo.
+echo ERROR: JAVA_HOME is set to an invalid directory: %JAVA_HOME%
+echo.
+echo Please set the JAVA_HOME variable in your environment to match the
+echo location of your Java installation.
 
 goto fail
 
@@ -72,9 +76,23 @@ goto fail
 
 set CLASSPATH=
 
+@rem Fail fast: don't spawn a JVM if the wrapper jar is missing.
+if not exist "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" (
+    echo.
+    echo ERROR: Gradle wrapper jar not found at "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar"
+    echo.
+    echo Restore the wrapper files or re-run 'gradle wrapper' to fix this.
+    goto fail
+)
 
-@rem Execute Gradle
-"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %*
+@rem Execute Gradle. 2>&1 merges Gradle's stderr into stdout so that shells
+@rem that render stderr as an error (e.g. PowerShell 5.1) don't garble the output.
+"%JAVA_EXE%" %DEFAULT_JVM_OPTS% %JAVA_OPTS% %GRADLE_OPTS% "-Dorg.gradle.appname=%APP_BASE_NAME%" -classpath "%CLASSPATH%" -jar "%APP_HOME%\gradle\wrapper\gradle-wrapper.jar" %* 2>&1
+
+@rem Surface a clear error instead of a silent non-zero exit. echo does not clobber ERRORLEVEL.
+if not errorlevel 1 goto end
+echo.
+echo ERROR: Gradle build failed.
 
 :end
 @rem End local scope for the variables with windows NT shell

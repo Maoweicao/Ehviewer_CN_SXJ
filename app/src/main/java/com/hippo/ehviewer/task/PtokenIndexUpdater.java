@@ -69,20 +69,30 @@ public class PtokenIndexUpdater {
     /**
      * 检查新下载的画廊是否是其他已下载画廊的超集
      * 如果是，可以通过回调通知 UI 层
+     *
+     * 采用分批查询，避免一次将整张 PTOKENS_INDEX 表载入内存导致 OOM。
      */
     private static void checkAsSuperset(long newGid, List<String> newHashes) {
         Set<String> newPtokenSet = new HashSet<>(newHashes);
-        List<PtokensIndex> allIndex = EhDB.getAllPtokensIndex();
         List<Long> subsetGids = new ArrayList<>();
 
-        for (PtokensIndex idx : allIndex) {
-            if (idx.getGid() == newGid) continue;
-            if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
+        // 分批迭代索引表，控制峰值内存占用
+        final int BATCH_SIZE = 500;
+        long total = EhDB.getPtokensIndexCount();
+        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
+            if (batch.isEmpty()) {
+                break;
+            }
+            for (PtokensIndex idx : batch) {
+                if (idx.getGid() == newGid) continue;
+                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
 
-            Set<String> existingPtokens = new HashSet<>(
-                    Arrays.asList(idx.getPtokens().split(",")));
-            if (newPtokenSet.containsAll(existingPtokens)) {
-                subsetGids.add(idx.getGid());
+                Set<String> existingPtokens = new HashSet<>(
+                        Arrays.asList(idx.getPtokens().split(",")));
+                if (newPtokenSet.containsAll(existingPtokens)) {
+                    subsetGids.add(idx.getGid());
+                }
             }
         }
 

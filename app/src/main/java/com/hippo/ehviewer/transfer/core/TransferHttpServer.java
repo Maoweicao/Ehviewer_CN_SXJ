@@ -17,14 +17,12 @@
 package com.hippo.ehviewer.transfer.core;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.api.AuthApiHandler;
 import com.hippo.ehviewer.transfer.api.CompressApiHandler;
 import com.hippo.ehviewer.transfer.api.ConnectApiHandler;
 import com.hippo.ehviewer.transfer.api.DataApiHandler;
-import com.hippo.ehviewer.transfer.api.DebugApiHandler;
 import com.hippo.ehviewer.transfer.api.DownloadApiHandler;
 import com.hippo.ehviewer.transfer.api.FileApiHandler;
 import com.hippo.ehviewer.transfer.api.GalleryApiHandler;
@@ -40,10 +38,8 @@ import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -69,7 +65,6 @@ import fi.iki.elonen.NanoHTTPD;
  * - GET    /api/v1/labels/{label}/galleries  获取标签下的画廊
  * - GET    /api/v1/system/info            获取系统信息
  * - GET    /api/v1/system/stats           获取系统统计
- * - GET    /api/v1/debug                  调试页面
  * - POST   /api/v1/push/create            创建推送任务
  * - GET    /api/v1/push/tasks             获取待处理任务列表
  * - GET    /api/v1/push/tasks/{id}        获取任务状态
@@ -112,7 +107,6 @@ public class TransferHttpServer {
     private PageApiHandler pageApiHandler;
     private LabelApiHandler labelApiHandler;
     private SystemApiHandler systemApiHandler;
-    private DebugApiHandler debugApiHandler;
     private PushApiHandler pushApiHandler;
     private SettingsApiHandler settingsApiHandler;
     private FileApiHandler fileApiHandler;
@@ -143,7 +137,6 @@ public class TransferHttpServer {
         this.pageApiHandler = new PageApiHandler(context, authManager);
         this.labelApiHandler = new LabelApiHandler(context, authManager);
         this.systemApiHandler = new SystemApiHandler(context, authManager);
-        this.debugApiHandler = new DebugApiHandler(context, authManager);
         this.pushApiHandler = new PushApiHandler(context, authManager);
         this.settingsApiHandler = new SettingsApiHandler(context, authManager);
         this.fileApiHandler = new FileApiHandler(context, authManager);
@@ -157,22 +150,22 @@ public class TransferHttpServer {
 
     /** 启动HTTP服务器 */
     public void start() throws Exception {
-        Log.d(TAG, "Starting HTTP server on port " + port);
+        TransferLogger.getInstance().d(TAG, "Starting HTTP server on port " + port);
         httpServer = new HttpServerImpl(port);
         httpServer.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false);
         isRunning = true;
-        Log.d(TAG, "HTTP server started");
+        TransferLogger.getInstance().d(TAG, "HTTP server started");
     }
 
     /** 停止HTTP服务器 */
     public void stop() throws Exception {
-        Log.d(TAG, "Stopping HTTP server");
+        TransferLogger.getInstance().d(TAG, "Stopping HTTP server");
         if (httpServer != null) {
             httpServer.stop();
             httpServer = null;
         }
         isRunning = false;
-        Log.d(TAG, "HTTP server stopped");
+        TransferLogger.getInstance().d(TAG, "HTTP server stopped");
     }
 
     /** 检查服务器是否运行 */
@@ -200,17 +193,35 @@ public class TransferHttpServer {
             String methodName = method.name();
             String remoteIp = session.getRemoteIpAddress();
             
-            TransferLogger.getInstance().d(TAG, 
-                String.format("请求: %s %s [%s]", methodName, uri, remoteIp));
+            long startTime = System.currentTimeMillis();
+
+            TransferLogger logger = TransferLogger.getInstance();
+            logger.d(TAG, String.format("[请求] %s %s [来源: %s]", methodName, uri, remoteIp));
+
+            // 记录查询参数
+            try {
+                Map<String, String> parms = session.getParms();
+                if (parms != null && !parms.isEmpty()) {
+                    logger.d(TAG, "[查询参数] " + parms + " [URI: " + uri + "]");
+                }
+            } catch (Exception e) {
+                logger.w(TAG, "[serve] 读取查询参数失败: " + uri + " - " + e.getMessage());
+            }
 
             try {
                 // 支持QUERY方法（RFC 10008）
+                Response response;
                 if ("QUERY".equals(methodName)) {
-                    return handleRequest(session, uri, "QUERY");
+                    response = handleRequest(session, uri, "QUERY");
+                } else {
+                    response = handleRequest(session, uri, methodName);
                 }
-                
-                return handleRequest(session, uri, methodName);
-                
+
+                long cost = System.currentTimeMillis() - startTime;
+                String statusText = response == null ? "null" : response.getStatus().getDescription();
+                logger.i(TAG, String.format("[响应] %s %s -> %s (耗时: %d ms)", methodName, uri, statusText, cost));
+                return response;
+
             } catch (Exception e) {
                 TransferLogger.getInstance().e(TAG, "请求处理异常: " + uri, e);
                 return ResponseBuilder.internalError(e.getMessage());
@@ -302,9 +313,6 @@ public class TransferHttpServer {
             }
             
             // 调试API
-            if (uri.startsWith("/api/v1/debug")) {
-                return debugApiHandler.handleGet(session, uri);
-            }
             
             // 推送API
             if (uri.startsWith("/api/v1/push")) {
@@ -402,9 +410,19 @@ public class TransferHttpServer {
                 return connectApiHandler.handlePost(session, uri);
             }
 
+            // 系统API
+            if (uri.startsWith("/api/v1/system")) {
+                return systemApiHandler.handlePost(session, uri);
+            }
+
             // 接力下载API
             if (uri.startsWith("/api/v1/relay")) {
                 return relayApiHandler.handlePost(session, uri);
+            }
+
+            // 统一任务API（后台任务创建 / 开始 / 暂停 / 恢复 / 停止，传输任务控制）
+            if (uri.startsWith("/api/v1/tasks") || uri.startsWith("/api/v1/background-tasks")) {
+                return tasksApiHandler.handlePost(session, uri);
             }
 
             return ResponseBuilder.notFound("Endpoint");
@@ -491,23 +509,11 @@ public class TransferHttpServer {
                 // 确定MIME类型
                 String mimeType = getMimeType(path);
                 
-                // 读取内容
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                byte[] buffer = new byte[4096];
-                int len;
-                while ((len = stream.read(buffer)) > 0) {
-                    baos.write(buffer, 0, len);
-                }
-                stream.close();
-                
-                byte[] content = baos.toByteArray();
-                logger.d(TAG, "资源读取完成: " + content.length + " bytes");
-                
-                return NanoHTTPD.newFixedLengthResponse(
+                // 直接以 chunked 方式流式返回，避免将整段资源读入内存造成 OOM
+                return NanoHTTPD.newChunkedResponse(
                     Response.Status.OK,
                     mimeType,
-                    new java.io.ByteArrayInputStream(content),
-                    content.length
+                    stream
                 );
                 
             } catch (IOException e) {

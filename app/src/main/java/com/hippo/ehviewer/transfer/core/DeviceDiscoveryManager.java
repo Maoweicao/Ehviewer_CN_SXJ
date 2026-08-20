@@ -19,12 +19,12 @@ package com.hippo.ehviewer.transfer.core;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
-import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.data.DiscoveredDevice;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +42,9 @@ public class DeviceDiscoveryManager {
     private Context context;
     private NsdManager nsdManager;
     private Handler handler;
+
+    // mDNS发现依赖组播包，Android 12及以下（含部分Android 13）必须持有 MulticastLock 才能收到组播
+    private WifiManager.MulticastLock multicastLock;
 
     private List<DiscoveredDevice> devices = new CopyOnWriteArrayList<>();
     private List<DiscoveryListener> listeners = new ArrayList<>();
@@ -68,6 +71,7 @@ public class DeviceDiscoveryManager {
         this.nsdManager = context.getSystemService(NsdManager.class);
         this.handler = new Handler(Looper.getMainLooper());
         initListeners();
+        TransferLogger.getInstance().d(TAG, "DeviceDiscoveryManager 初始化完成");
     }
 
     /**
@@ -77,36 +81,43 @@ public class DeviceDiscoveryManager {
         discoveryListener = new NsdManager.DiscoveryListener() {
             @Override
             public void onStartDiscoveryFailed(String serviceType, int errorCode) {
-                Log.e(TAG, "Discovery start failed: " + errorCode);
+                TransferLogger.getInstance().e(TAG, "Discovery start failed: " + errorCode);
                 isDiscovering = false;
             }
 
             @Override
             public void onStopDiscoveryFailed(String serviceType, int errorCode) {
-                Log.e(TAG, "Stop discovery failed: " + errorCode);
+                TransferLogger.getInstance().e(TAG, "Stop discovery failed: " + errorCode);
             }
 
             @Override
             public void onServiceFound(NsdServiceInfo serviceInfo) {
-                Log.d(TAG, "Service found: " + serviceInfo.getServiceName());
+                TransferLogger.getInstance().d(TAG, "Service found: " + serviceInfo.getServiceName()
+                        + " type: " + serviceInfo.getServiceType());
+                // 过滤掉非本应用服务，避免解析无关的mDNS服务
+                if (serviceInfo.getServiceType() != null
+                        && !serviceInfo.getServiceType().startsWith("_ehviewer-transfer.")) {
+                    return;
+                }
                 resolveService(serviceInfo);
             }
 
             @Override
             public void onServiceLost(NsdServiceInfo serviceInfo) {
-                Log.d(TAG, "Service lost: " + serviceInfo.getServiceName());
+                TransferLogger.getInstance().d(TAG, "Service lost: " + serviceInfo.getServiceName());
+                TransferLogger.getInstance().i(TAG, "设备丢失: " + serviceInfo.getServiceName());
                 removeDevice(serviceInfo.getServiceName());
             }
 
             @Override
             public void onDiscoveryStarted(String serviceType) {
-                Log.d(TAG, "Discovery started");
+                TransferLogger.getInstance().d(TAG, "Discovery started");
                 isDiscovering = true;
             }
 
             @Override
             public void onDiscoveryStopped(String serviceType) {
-                Log.d(TAG, "Discovery stopped");
+                TransferLogger.getInstance().d(TAG, "Discovery stopped");
                 isDiscovering = false;
             }
         };
@@ -114,16 +125,18 @@ public class DeviceDiscoveryManager {
         resolveListener = new NsdManager.ResolveListener() {
             @Override
             public void onResolveFailed(NsdServiceInfo serviceInfo, int errorCode) {
-                Log.e(TAG, "Resolve failed: " + errorCode);
+                TransferLogger.getInstance().e(TAG, "Resolve failed: " + errorCode);
             }
 
             @Override
             public void onServiceResolved(NsdServiceInfo resolvedInfo) {
-                Log.d(TAG, "Service resolved: " + resolvedInfo.getServiceName());
+                TransferLogger.getInstance().d(TAG, "Service resolved: " + resolvedInfo.getServiceName());
                 DiscoveredDevice device = new DiscoveredDevice();
                 device.setName(resolvedInfo.getServiceName());
                 device.setHost(resolvedInfo.getHost().getHostAddress());
                 device.setPort(resolvedInfo.getPort());
+                TransferLogger.getInstance().i(TAG, "发现设备: name=" + device.getName()
+                        + ", host=" + device.getHost() + ", port=" + device.getPort());
                 addDevice(device);
             }
         };
@@ -134,15 +147,17 @@ public class DeviceDiscoveryManager {
      */
     public void startDiscovery() {
         if (isDiscovering) {
-            Log.d(TAG, "Already discovering");
+            TransferLogger.getInstance().d(TAG, "Already discovering");
             return;
         }
 
+        acquireMulticastLock();
+
         try {
             nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener);
-            Log.d(TAG, "Start discovery");
+            TransferLogger.getInstance().d(TAG, "Start discovery");
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start discovery", e);
+            TransferLogger.getInstance().e(TAG, "Failed to start discovery", e);
         }
     }
 
@@ -151,16 +166,18 @@ public class DeviceDiscoveryManager {
      */
     public void stopDiscovery() {
         if (!isDiscovering) {
+            releaseMulticastLock();
             return;
         }
 
         try {
             nsdManager.stopServiceDiscovery(discoveryListener);
-            Log.d(TAG, "Stop discovery");
+            TransferLogger.getInstance().d(TAG, "Stop discovery");
         } catch (Exception e) {
-            Log.e(TAG, "Failed to stop discovery", e);
+            TransferLogger.getInstance().e(TAG, "Failed to stop discovery", e);
         }
 
+        releaseMulticastLock();
         stopAutoRefresh();
     }
 
@@ -172,7 +189,7 @@ public class DeviceDiscoveryManager {
         this.autoRefresh = true;
         handler.removeCallbacks(refreshRunnable);
         handler.postDelayed(refreshRunnable, interval);
-        Log.d(TAG, "Auto refresh started, interval: " + interval + "ms");
+        TransferLogger.getInstance().d(TAG, "Auto refresh started, interval: " + interval + "ms");
     }
 
     /**
@@ -181,14 +198,14 @@ public class DeviceDiscoveryManager {
     public void stopAutoRefresh() {
         this.autoRefresh = false;
         handler.removeCallbacks(refreshRunnable);
-        Log.d(TAG, "Auto refresh stopped");
+        TransferLogger.getInstance().d(TAG, "Auto refresh stopped");
     }
 
     /**
      * 刷新设备列表
      */
     public void refreshDevices() {
-        Log.d(TAG, "Refreshing devices");
+        TransferLogger.getInstance().d(TAG, "Refreshing devices");
         devices.clear();
         notifyListeners();
 
@@ -197,14 +214,50 @@ public class DeviceDiscoveryManager {
             try {
                 nsdManager.stopServiceDiscovery(discoveryListener);
             } catch (Exception e) {
-                Log.w(TAG, "Failed to stop discovery before refresh", e);
+                TransferLogger.getInstance().w(TAG, "Failed to stop discovery before refresh", e);
             }
         }
 
         try {
             nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to refresh devices", e);
+            TransferLogger.getInstance().e(TAG, "Failed to refresh devices", e);
+        }
+    }
+
+    /**
+     * 获取/创建组播锁，mDNS发现需要接收组播包
+     */
+    private void acquireMulticastLock() {
+        try {
+            if (multicastLock == null) {
+                WifiManager wifiManager = (WifiManager) context.getApplicationContext()
+                        .getSystemService(Context.WIFI_SERVICE);
+                if (wifiManager != null) {
+                    multicastLock = wifiManager.createMulticastLock("EhViewer:TransferDiscovery");
+                    multicastLock.setReferenceCounted(false);
+                }
+            }
+            if (multicastLock != null && !multicastLock.isHeld()) {
+                multicastLock.acquire();
+                TransferLogger.getInstance().d(TAG, "MulticastLock acquired");
+            }
+        } catch (Exception e) {
+            TransferLogger.getInstance().w(TAG, "Failed to acquire MulticastLock", e);
+        }
+    }
+
+    /**
+     * 释放组播锁
+     */
+    private void releaseMulticastLock() {
+        try {
+            if (multicastLock != null && multicastLock.isHeld()) {
+                multicastLock.release();
+                TransferLogger.getInstance().d(TAG, "MulticastLock released");
+            }
+        } catch (Exception e) {
+            TransferLogger.getInstance().w(TAG, "Failed to release MulticastLock", e);
         }
     }
 
@@ -215,7 +268,7 @@ public class DeviceDiscoveryManager {
         try {
             nsdManager.resolveService(serviceInfo, resolveListener);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to resolve service", e);
+            TransferLogger.getInstance().e(TAG, "Failed to resolve service", e);
         }
     }
 

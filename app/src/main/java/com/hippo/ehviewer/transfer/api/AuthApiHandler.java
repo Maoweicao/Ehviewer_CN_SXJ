@@ -17,10 +17,10 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import org.json.JSONObject;
 
@@ -42,7 +42,7 @@ public class AuthApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
         
         // /api/v1/auth/status
         if (uri.equals("/api/v1/auth/status")) {
@@ -54,7 +54,7 @@ public class AuthApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
         
         // /api/v1/auth/login
         if (uri.equals("/api/v1/auth/login")) {
@@ -77,6 +77,7 @@ public class AuthApiHandler extends BaseApiHandler {
             String body = RequestParser.readBody(session);
             
             AuthMode authMode = authManager.getAuthMode();
+            TransferLogger.getInstance().i(TAG, "登录请求: mode=" + authMode);
             
             if (authMode == AuthMode.NONE) {
                 // 免认证模式，直接返回成功
@@ -96,10 +97,12 @@ public class AuthApiHandler extends BaseApiHandler {
                 String sessionToken = authManager.login(password);
                 
                 if (sessionToken != null) {
+                    TransferLogger.getInstance().i(TAG, "密码登录成功");
                     String json = "{\"success\":true,\"token\":\"" + sessionToken + 
                                  "\",\"expires\":86400,\"mode\":\"password\"}";
                     return ResponseBuilder.jsonSuccess(json);
                 } else {
+                    TransferLogger.getInstance().w(TAG, "密码登录失败: 密码无效");
                     return ResponseBuilder.jsonError(
                         NanoHTTPD.Response.Status.UNAUTHORIZED, "Invalid password");
                 }
@@ -117,10 +120,12 @@ public class AuthApiHandler extends BaseApiHandler {
                 String sessionToken = authManager.loginWithToken(clientToken);
                 
                 if (sessionToken != null) {
+                    TransferLogger.getInstance().i(TAG, "Token登录成功");
                     String json = "{\"success\":true,\"token\":\"" + sessionToken + 
                                  "\",\"expires\":86400,\"mode\":\"token\"}";
                     return ResponseBuilder.jsonSuccess(json);
                 } else {
+                    TransferLogger.getInstance().w(TAG, "Token登录失败: token无效");
                     return ResponseBuilder.jsonError(
                         NanoHTTPD.Response.Status.UNAUTHORIZED, "Invalid token");
                 }
@@ -129,7 +134,7 @@ public class AuthApiHandler extends BaseApiHandler {
             return ResponseBuilder.internalError("Unknown auth mode");
             
         } catch (Exception e) {
-            Log.e(TAG, "Error handling login", e);
+            TransferLogger.getInstance().e(TAG, "Error handling login", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -140,6 +145,7 @@ public class AuthApiHandler extends BaseApiHandler {
     private NanoHTTPD.Response handleLogout(NanoHTTPD.IHTTPSession session) {
         try {
             String token = RequestParser.extractAuthToken(session);
+            TransferLogger.getInstance().i(TAG, "登出请求: " + (token != null ? "token已提供" : "无token"));
             
             if (token != null) {
                 authManager.logout(token);
@@ -149,7 +155,7 @@ public class AuthApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(json);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error handling logout", e);
+            TransferLogger.getInstance().e(TAG, "Error handling logout", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -160,6 +166,7 @@ public class AuthApiHandler extends BaseApiHandler {
     private NanoHTTPD.Response handleAuthStatus(NanoHTTPD.IHTTPSession session) {
         try {
             AuthMode authMode = authManager.getAuthMode();
+            TransferLogger.getInstance().d(TAG, "查询认证状态: mode=" + authMode);
             
             StringBuilder sb = new StringBuilder();
             sb.append("{");
@@ -190,7 +197,7 @@ public class AuthApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(sb.toString());
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting auth status", e);
+            TransferLogger.getInstance().e(TAG, "Error getting auth status", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

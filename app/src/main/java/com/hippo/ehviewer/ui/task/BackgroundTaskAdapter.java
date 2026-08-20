@@ -30,10 +30,15 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     private static final int TYPE_COMPLETED_HEADER = 2;
     private static final int TYPE_COMPLETED_TASK = 3;
     private static final int TYPE_EMPTY = 4;
+    private static final int TYPE_RUNNING_HEADER = 5;
+    private static final int TYPE_RUNNING_TASK = 6;
+    private static final int TYPE_WAITING_HEADER = 7;
+    private static final int TYPE_WAITING_TASK = 8;
     
     private final Context mContext;
     private final LayoutInflater mInflater;
-    private List<BackgroundTaskInfo> mActiveTasks = new ArrayList<>();
+    private List<BackgroundTaskInfo> mRunningTasks = new ArrayList<>();
+    private List<BackgroundTaskInfo> mWaitingTasks = new ArrayList<>();
     private List<BackgroundTaskInfo> mCompletedTasks = new ArrayList<>();
     private OnItemClickListener mOnItemClickListener;
     
@@ -50,54 +55,71 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         mOnItemClickListener = listener;
     }
     
-    public void updateData(@NonNull List<BackgroundTaskInfo> activeTasks, 
-                          @NonNull List<BackgroundTaskInfo> completedTasks) {
-        mActiveTasks = new ArrayList<>(activeTasks);
+    public void updateData(@NonNull List<BackgroundTaskInfo> runningTasks, 
+                           @NonNull List<BackgroundTaskInfo> waitingTasks,
+                           @NonNull List<BackgroundTaskInfo> completedTasks) {
+        mRunningTasks = new ArrayList<>(runningTasks);
+        mWaitingTasks = new ArrayList<>(waitingTasks);
         mCompletedTasks = new ArrayList<>(completedTasks);
         notifyDataSetChanged();
     }
     
     @Override
     public int getItemViewType(int position) {
-        int activeCount = mActiveTasks.size();
+        int runningCount = mRunningTasks.size();
+        int waitingCount = mWaitingTasks.size();
         int completedCount = mCompletedTasks.size();
         
-        if (activeCount == 0 && completedCount == 0) {
+        if (runningCount == 0 && waitingCount == 0 && completedCount == 0) {
             return TYPE_EMPTY;
         }
         
-        if (activeCount > 0) {
-            if (position == 0) {
-                return TYPE_ACTIVE_HEADER;
-            } else if (position <= activeCount) {
-                return TYPE_ACTIVE_TASK;
-            } else if (position == activeCount + 1) {
-                return completedCount > 0 ? TYPE_COMPLETED_HEADER : TYPE_EMPTY;
-            } else {
-                return TYPE_COMPLETED_TASK;
-            }
-        } else {
-            if (position == 0) {
-                return TYPE_COMPLETED_HEADER;
-            } else {
-                return TYPE_COMPLETED_TASK;
-            }
+        int index = 0;
+        
+        // 运行中任务区域
+        if (runningCount > 0) {
+            if (position == index) return TYPE_RUNNING_HEADER;
+            index++;
+            if (position < index + runningCount) return TYPE_RUNNING_TASK;
+            index += runningCount;
         }
+        
+        // 等待中任务区域
+        if (waitingCount > 0) {
+            if (position == index) return TYPE_WAITING_HEADER;
+            index++;
+            if (position < index + waitingCount) return TYPE_WAITING_TASK;
+            index += waitingCount;
+        }
+        
+        // 已完成任务区域
+        if (completedCount > 0) {
+            if (position == index) return TYPE_COMPLETED_HEADER;
+            index++;
+            if (position < index + completedCount) return TYPE_COMPLETED_TASK;
+        }
+        
+        return TYPE_EMPTY;
     }
     
     @Override
     public int getItemCount() {
-        int activeCount = mActiveTasks.size();
+        int runningCount = mRunningTasks.size();
+        int waitingCount = mWaitingTasks.size();
         int completedCount = mCompletedTasks.size();
         
-        if (activeCount == 0 && completedCount == 0) {
+        if (runningCount == 0 && waitingCount == 0 && completedCount == 0) {
             return 1; // 空状态
         }
         
         int count = 0;
-        if (activeCount > 0) {
-            count += 1; // 活跃任务标题
-            count += activeCount; // 活跃任务项
+        if (runningCount > 0) {
+            count += 1; // 运行中任务标题
+            count += runningCount; // 运行中任务项
+        }
+        if (waitingCount > 0) {
+            count += 1; // 等待中任务标题
+            count += waitingCount; // 等待中任务项
         }
         if (completedCount > 0) {
             count += 1; // 已完成任务标题
@@ -111,10 +133,15 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         switch (viewType) {
-            case TYPE_ACTIVE_HEADER:
+            case TYPE_RUNNING_HEADER:
                 return new HeaderViewHolder(mInflater.inflate(R.layout.item_task_header, parent, false), 
-                    R.string.active_tasks);
-            case TYPE_ACTIVE_TASK:
+                    R.string.running_tasks);
+            case TYPE_RUNNING_TASK:
+                return new TaskViewHolder(mInflater.inflate(R.layout.item_background_task, parent, false));
+            case TYPE_WAITING_HEADER:
+                return new HeaderViewHolder(mInflater.inflate(R.layout.item_task_header, parent, false), 
+                    R.string.waiting_tasks);
+            case TYPE_WAITING_TASK:
                 return new TaskViewHolder(mInflater.inflate(R.layout.item_background_task, parent, false));
             case TYPE_COMPLETED_HEADER:
                 return new HeaderViewHolder(mInflater.inflate(R.layout.item_task_header, parent, false), 
@@ -132,7 +159,7 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         int viewType = getItemViewType(position);
         
-        if (viewType == TYPE_ACTIVE_TASK || viewType == TYPE_COMPLETED_TASK) {
+        if (viewType == TYPE_RUNNING_TASK || viewType == TYPE_WAITING_TASK || viewType == TYPE_COMPLETED_TASK) {
             TaskViewHolder taskHolder = (TaskViewHolder) holder;
             BackgroundTaskInfo taskInfo = getTaskInfoAtPosition(position);
             if (taskInfo != null) {
@@ -143,23 +170,37 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
     
     @Nullable
     private BackgroundTaskInfo getTaskInfoAtPosition(int position) {
-        int activeCount = mActiveTasks.size();
+        int runningCount = mRunningTasks.size();
+        int waitingCount = mWaitingTasks.size();
         
-        if (activeCount > 0) {
-            if (position > 0 && position <= activeCount) {
-                return mActiveTasks.get(position - 1);
-            } else if (position > activeCount + 1) {
-                int completedIndex = position - activeCount - 2;
-                if (completedIndex < mCompletedTasks.size()) {
-                    return mCompletedTasks.get(completedIndex);
-                }
+        int index = 0;
+        
+        // 运行中任务区域
+        if (runningCount > 0) {
+            if (position == index) return null; // header
+            index++;
+            if (position < index + runningCount) {
+                return mRunningTasks.get(position - index);
             }
-        } else {
-            if (position > 0) {
-                int completedIndex = position - 1;
-                if (completedIndex < mCompletedTasks.size()) {
-                    return mCompletedTasks.get(completedIndex);
-                }
+            index += runningCount;
+        }
+        
+        // 等待中任务区域
+        if (waitingCount > 0) {
+            if (position == index) return null; // header
+            index++;
+            if (position < index + waitingCount) {
+                return mWaitingTasks.get(position - index);
+            }
+            index += waitingCount;
+        }
+        
+        // 已完成任务区域
+        if (mCompletedTasks.size() > 0) {
+            if (position == index) return null; // header
+            index++;
+            if (position < index + mCompletedTasks.size()) {
+                return mCompletedTasks.get(position - index);
             }
         }
         
@@ -357,7 +398,7 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         
         private void refreshAdapter() {
             BackgroundTaskStatusManager manager = BackgroundTaskStatusManager.getInstance();
-            updateData(manager.getActiveTasks(), manager.getCompletedTasks());
+            updateData(manager.getRunningTasks(), manager.getWaitingTasks(), manager.getCompletedTasks());
         }
         
         @Override

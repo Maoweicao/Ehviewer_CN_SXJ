@@ -19,7 +19,8 @@ package com.hippo.ehviewer.transfer.core;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
-import android.util.Log;
+
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 /**
  * mDNS服务发现管理器
@@ -34,6 +35,7 @@ public class MdnsDiscoveryManager {
     private String serviceType;
     private int port;
     private String serviceName;
+    private NsdManager.RegistrationListener registrationListener;
 
     public MdnsDiscoveryManager(Context context, String serviceType, int port) {
         this.context = context;
@@ -48,7 +50,7 @@ public class MdnsDiscoveryManager {
     public void registerService(String serviceName, String serviceType, int port) {
         this.serviceName = serviceName;
 
-        Log.d(TAG, "Registering service: " + serviceName + " type: " + serviceType + " port: " + port);
+        TransferLogger.getInstance().d(TAG, "Registering service: " + serviceName + " type: " + serviceType + " port: " + port);
 
         NsdServiceInfo serviceInfo = new NsdServiceInfo();
         serviceInfo.setServiceName(serviceName);
@@ -56,27 +58,28 @@ public class MdnsDiscoveryManager {
         serviceInfo.setPort(port);
 
         if (nsdManager != null) {
-            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, new NsdManager.RegistrationListener() {
+            registrationListener = new NsdManager.RegistrationListener() {
                 @Override
                 public void onServiceRegistered(NsdServiceInfo NsdServiceInfo) {
-                    Log.d(TAG, "Service registered: " + NsdServiceInfo.getServiceName());
+                    TransferLogger.getInstance().d(TAG, "Service registered: " + NsdServiceInfo.getServiceName());
                 }
 
                 @Override
                 public void onRegistrationFailed(NsdServiceInfo serviceInfo, int errorCode) {
-                    Log.e(TAG, "Service registration failed. Error code: " + errorCode);
+                    TransferLogger.getInstance().e(TAG, "Service registration failed. Error code: " + errorCode);
                 }
 
                 @Override
                 public void onServiceUnregistered(NsdServiceInfo arg0) {
-                    Log.d(TAG, "Service unregistered");
+                    TransferLogger.getInstance().d(TAG, "Service unregistered");
                 }
 
                 @Override
                 public void onUnregistrationFailed(NsdServiceInfo serviceInfo, int errorCode) {
-                    Log.e(TAG, "Service unregistration failed. Error code: " + errorCode);
+                    TransferLogger.getInstance().e(TAG, "Service unregistration failed. Error code: " + errorCode);
                 }
-            });
+            };
+            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener);
         }
     }
 
@@ -84,15 +87,15 @@ public class MdnsDiscoveryManager {
      * 注销mDNS服务
      */
     public void unregisterService() {
-        Log.d(TAG, "Unregistering service: " + serviceName);
+        TransferLogger.getInstance().d(TAG, "Unregistering service: " + serviceName);
         
-        if (nsdManager != null && serviceName != null) {
+        if (nsdManager != null && registrationListener != null) {
             try {
-                // 注意: NsdManager 不直接提供取消注册方法，需要保存RegistrationListener
-                // 这里是简化实现
-                Log.d(TAG, "Service unregistration initiated");
+                nsdManager.unregisterService(registrationListener);
+                registrationListener = null;
+                TransferLogger.getInstance().d(TAG, "Service unregistered");
             } catch (Exception e) {
-                Log.e(TAG, "Failed to unregister service", e);
+                TransferLogger.getInstance().e(TAG, "Failed to unregister service", e);
             }
         }
     }
@@ -101,38 +104,38 @@ public class MdnsDiscoveryManager {
      * 发现服务
      */
     public void discoverServices() {
-        Log.d(TAG, "Discovering services of type: " + serviceType);
+        TransferLogger.getInstance().d(TAG, "Discovering services of type: " + serviceType);
 
         if (nsdManager != null) {
             nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, new NsdManager.DiscoveryListener() {
                 @Override
                 public void onStartDiscoveryFailed(String serviceType, int errorCode) {
-                    Log.e(TAG, "Discovery failed. Error code: " + errorCode);
+                    TransferLogger.getInstance().e(TAG, "Discovery failed. Error code: " + errorCode);
                 }
 
                 @Override
                 public void onStopDiscoveryFailed(String serviceType, int errorCode) {
-                    Log.e(TAG, "Stop discovery failed. Error code: " + errorCode);
+                    TransferLogger.getInstance().e(TAG, "Stop discovery failed. Error code: " + errorCode);
                 }
 
                 @Override
                 public void onServiceFound(NsdServiceInfo serviceInfo) {
-                    Log.d(TAG, "Service found: " + serviceInfo.getServiceName());
+                    TransferLogger.getInstance().d(TAG, "Service found: " + serviceInfo.getServiceName());
                 }
 
                 @Override
                 public void onServiceLost(NsdServiceInfo serviceInfo) {
-                    Log.d(TAG, "Service lost: " + serviceInfo.getServiceName());
+                    TransferLogger.getInstance().d(TAG, "Service lost: " + serviceInfo.getServiceName());
                 }
 
                 @Override
                 public void onDiscoveryStarted(String serviceType) {
-                    Log.d(TAG, "Discovery started for type: " + serviceType);
+                    TransferLogger.getInstance().d(TAG, "Discovery started for type: " + serviceType);
                 }
 
                 @Override
                 public void onDiscoveryStopped(String serviceType) {
-                    Log.d(TAG, "Discovery stopped for type: " + serviceType);
+                    TransferLogger.getInstance().d(TAG, "Discovery stopped for type: " + serviceType);
                 }
             });
         }

@@ -26,6 +26,9 @@
     <dimen name="dialog_padding_top_material">18dp</dimen>
     <dimen name="title_text_top_padding">6dp</dimen>
 
+    <!-- QR code -->
+    <dimen name="qr_code_size">512dp</dimen>
+
     <!-- Text size -->
     <dimen name="text_super_large">24sp</dimen>
     <dimen name="text_large">22sp</dimen>

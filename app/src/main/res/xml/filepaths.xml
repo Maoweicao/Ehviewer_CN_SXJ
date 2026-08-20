@@ -35,6 +35,10 @@
         name="external_file_path"
         path="EhViewer/temp/files" />
 
+    <external-path
+        name="data_export"
+        path="EhViewer/data" />
+
     <external-cache-path
         name="external_cache_path"
         path="EhViewer/temp/cache" />

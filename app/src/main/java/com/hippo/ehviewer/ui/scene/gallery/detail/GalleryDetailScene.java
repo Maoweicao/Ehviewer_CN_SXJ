@@ -86,6 +86,11 @@ import com.hippo.ehviewer.client.exception.NoHAtHClientException;
 import com.hippo.ehviewer.client.parser.RateGalleryParser;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.Filter;
+import com.hippo.ehviewer.download.DownloadDeleteHelper;
+import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.lab.analyze.AiAnalyzeManager;
+import com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis;
+import com.hippo.ehviewer.lab.analyze.model.AiPageAnalysis;
 import com.hippo.ehviewer.spider.SpiderQueen;
 import com.hippo.ehviewer.ui.CommonOperations;
 import com.hippo.ehviewer.ui.GalleryActivity;
@@ -141,6 +146,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
@@ -256,6 +262,25 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
     private LinearLayout mTags;
     @Nullable
     private TextView mNoTags;
+    // AI Analysis
+    @Nullable
+    private View mAiAnalysis;
+    @Nullable
+    private TextView mAiSummary;
+    @Nullable
+    private TextView mAiScore;
+    @Nullable
+    private TextView mAiComment;
+    @Nullable
+    private TextView mAiTags;
+    @Nullable
+    private TextView mAiPagesToggle;
+    @Nullable
+    private LinearLayout mAiPagesContainer;
+    @Nullable
+    private TextView mAiAnalyzeButton;
+    @Nullable
+    private AiGalleryAnalysis mAiAnalysisResult;
     // Comments
     @Nullable
     private LinearLayout mComments;
@@ -632,6 +657,24 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mTags = (LinearLayout) ViewUtils.$$(belowHeader, R.id.tags);
         mNoTags = (TextView) ViewUtils.$$(mTags, R.id.no_tags);
 
+        mAiAnalysis = ViewUtils.$$(belowHeader, R.id.ai_analysis);
+        mAiSummary = (TextView) ViewUtils.$$(belowHeader, R.id.ai_summary);
+        mAiScore = (TextView) ViewUtils.$$(belowHeader, R.id.ai_score);
+        mAiComment = (TextView) ViewUtils.$$(belowHeader, R.id.ai_comment);
+        mAiTags = (TextView) ViewUtils.$$(belowHeader, R.id.ai_tags);
+        mAiPagesToggle = (TextView) ViewUtils.$$(belowHeader, R.id.ai_pages_toggle);
+        mAiPagesContainer = (LinearLayout) ViewUtils.$$(belowHeader, R.id.ai_pages_container);
+        mAiAnalyzeButton = (TextView) ViewUtils.$$(belowHeader, R.id.ai_analyze_button);
+        if (mAiAnalysis != null) {
+            Ripple.addRipple(mAiAnalysis, isDarkTheme);
+        }
+        if (mAiAnalyzeButton != null) {
+            mAiAnalyzeButton.setOnClickListener(this);
+        }
+        if (mAiPagesToggle != null) {
+            mAiPagesToggle.setOnClickListener(this);
+        }
+
         mComments = (LinearLayout) ViewUtils.$$(belowHeader, R.id.comments);
         mCommentsText = (TextView) ViewUtils.$$(mComments, R.id.comments_text);
         if (!Settings.getShowGalleryComment()) {
@@ -744,6 +787,16 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
 
         mTags = null;
         mNoTags = null;
+
+        mAiAnalysis = null;
+        mAiSummary = null;
+        mAiScore = null;
+        mAiComment = null;
+        mAiTags = null;
+        mAiPagesToggle = null;
+        mAiPagesContainer = null;
+        mAiAnalyzeButton = null;
+        mAiAnalysisResult = null;
 
         mComments = null;
         mCommentsText = null;
@@ -1045,6 +1098,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         updateFavoriteDrawable();
         bindArchiverProgress(gd);
         bindTags(gd.tags);
+        bindAiAnalysis();
         bindComments(gd.comments.comments);
         bindPreviews(gd);
     }
@@ -1144,6 +1198,273 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 tag.setOnLongClickListener(this);
             }
         }
+    }
+
+    private void bindAiAnalysis() {
+        if (mAiAnalysis == null) {
+            return;
+        }
+        if (mGalleryDetail == null) {
+            mAiAnalysis.setVisibility(View.GONE);
+            return;
+        }
+        final long gid = mGalleryDetail.gid;
+        if (executorService == null) {
+            Context context = getEHContext();
+            if (context != null) {
+                executorService = EhApplication.getExecutorService(context);
+            }
+        }
+        if (executorService != null) {
+            executorService.submit(() -> {
+                final AiGalleryAnalysis analysis = AiAnalyzeManager.getInstance().getAnalysis(gid);
+                handler.post(() -> {
+                    if (mGalleryDetail == null || mGalleryDetail.gid != gid || mAiAnalysis == null) {
+                        return;
+                    }
+                    mAiAnalysisResult = analysis;
+                    applyAiAnalysis(analysis);
+                });
+            });
+        } else {
+            mAiAnalysisResult = AiAnalyzeManager.getInstance().getAnalysis(gid);
+            applyAiAnalysis(mAiAnalysisResult);
+        }
+    }
+
+    private void applyAiAnalysis(AiGalleryAnalysis analysis) {
+        if (mAiAnalysis == null) {
+            return;
+        }
+        if (analysis != null && (analysis.hasGalleryAnalysis() || analysis.hasPageAnalysis())) {
+            showAiAnalysis(analysis);
+        } else {
+            // 无分析结果：显示区块仅保留"开始分析"按钮
+            if (mAiSummary != null) {
+                mAiSummary.setVisibility(View.GONE);
+            }
+            if (mAiScore != null) {
+                mAiScore.setVisibility(View.GONE);
+            }
+            if (mAiComment != null) {
+                mAiComment.setVisibility(View.GONE);
+            }
+            if (mAiTags != null) {
+                mAiTags.setVisibility(View.GONE);
+            }
+            if (mAiPagesToggle != null) {
+                mAiPagesToggle.setVisibility(View.GONE);
+            }
+            if (mAiPagesContainer != null) {
+                mAiPagesContainer.removeAllViews();
+                mAiPagesContainer.setVisibility(View.GONE);
+            }
+            if (mAiAnalyzeButton != null) {
+                mAiAnalyzeButton.setVisibility(View.VISIBLE);
+            }
+            mAiAnalysis.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void showAiAnalysis(AiGalleryAnalysis analysis) {
+        if (mAiAnalysis == null) {
+            return;
+        }
+        mAiAnalysis.setVisibility(View.VISIBLE);
+        if (mAiAnalyzeButton != null) {
+            mAiAnalyzeButton.setVisibility(View.GONE);
+        }
+
+        if (analysis.hasGalleryAnalysis()) {
+            if (mAiSummary != null) {
+                mAiSummary.setVisibility(View.VISIBLE);
+                mAiSummary.setText(analysis.summary);
+            }
+            if (mAiScore != null) {
+                mAiScore.setVisibility(View.VISIBLE);
+                if (analysis.aestheticScore >= 0) {
+                    mAiScore.setText(getString(R.string.ai_analysis_score,
+                            String.format(Locale.US, "%.1f", analysis.aestheticScore)));
+                } else {
+                    mAiScore.setText(R.string.ai_analysis_score_na);
+                }
+            }
+            if (mAiComment != null) {
+                mAiComment.setVisibility(View.VISIBLE);
+                mAiComment.setText(analysis.aestheticComment);
+            }
+            if (mAiTags != null && analysis.tags != null && !analysis.tags.isEmpty()) {
+                mAiTags.setVisibility(View.VISIBLE);
+                mAiTags.setText(joinTags(analysis.tags));
+            } else if (mAiTags != null) {
+                mAiTags.setVisibility(View.GONE);
+            }
+        } else {
+            if (mAiSummary != null) {
+                mAiSummary.setVisibility(View.GONE);
+            }
+            if (mAiScore != null) {
+                mAiScore.setVisibility(View.GONE);
+            }
+            if (mAiComment != null) {
+                mAiComment.setVisibility(View.GONE);
+            }
+            if (mAiTags != null) {
+                mAiTags.setVisibility(View.GONE);
+            }
+        }
+
+        if (mAiPagesContainer != null) {
+            mAiPagesContainer.removeAllViews();
+        }
+        if (analysis.hasPageAnalysis()) {
+            if (mAiPagesToggle != null) {
+                mAiPagesToggle.setVisibility(View.VISIBLE);
+                mAiPagesToggle.setText(R.string.ai_analysis_page_details);
+            }
+        } else {
+            if (mAiPagesToggle != null) {
+                mAiPagesToggle.setVisibility(View.GONE);
+            }
+        }
+    }
+
+    private void toggleAiPages(AiGalleryAnalysis analysis) {
+        if (mAiPagesContainer == null || analysis == null) {
+            return;
+        }
+        boolean visible = mAiPagesContainer.getVisibility() == View.VISIBLE;
+        if (visible) {
+            mAiPagesContainer.setVisibility(View.GONE);
+            if (mAiPagesToggle != null) {
+                mAiPagesToggle.setText(R.string.ai_analysis_page_details);
+            }
+            return;
+        }
+
+        mAiPagesContainer.removeAllViews();
+        LayoutInflater inflater = getLayoutInflater2();
+        Context context = getEHContext();
+        if (inflater == null || context == null) {
+            return;
+        }
+        for (AiPageAnalysis page : analysis.pages) {
+            View item = inflater.inflate(R.layout.item_page_analysis, mAiPagesContainer, false);
+            TextView pageLabel = item.findViewById(R.id.page_label);
+            TextView pageDescription = item.findViewById(R.id.page_description);
+            TextView pageTags = item.findViewById(R.id.page_tags);
+            TextView pageScore = item.findViewById(R.id.page_score);
+            pageLabel.setText(getString(R.string.ai_analysis_page_label, page.pageIndex + 1));
+            if (page.description != null && !page.description.isEmpty()) {
+                pageDescription.setText(page.description);
+                pageDescription.setVisibility(View.VISIBLE);
+            } else {
+                pageDescription.setVisibility(View.GONE);
+            }
+            if (page.tags != null && !page.tags.isEmpty()) {
+                pageTags.setText(joinTags(page.tags));
+                pageTags.setVisibility(View.VISIBLE);
+            } else {
+                pageTags.setVisibility(View.GONE);
+            }
+            if (page.aestheticScore >= 0) {
+                pageScore.setText(getString(R.string.ai_analysis_score,
+                        String.format(Locale.US, "%.1f", page.aestheticScore)));
+                pageScore.setVisibility(View.VISIBLE);
+            } else {
+                pageScore.setVisibility(View.GONE);
+            }
+            mAiPagesContainer.addView(item);
+        }
+        mAiPagesContainer.setVisibility(View.VISIBLE);
+        if (mAiPagesToggle != null) {
+            mAiPagesToggle.setText(R.string.ai_analysis_page_details_collapse);
+        }
+    }
+
+    private String joinTags(List<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String tag : tags) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(tag);
+        }
+        return sb.toString();
+    }
+
+    private void startAiAnalysis() {
+        if (mGalleryDetail == null) {
+            return;
+        }
+        if (!Settings.getAiAnalyzeEnabled()) {
+            Toast.makeText(getEHContext(), R.string.ai_analysis_not_enabled, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        long gid = mGalleryDetail.gid;
+        DownloadInfo downloadInfo = null;
+        DownloadManager dm = EhApplication.getDownloadManager(getEHContext());
+        if (dm != null) {
+            downloadInfo = dm.getDownloadInfo(gid);
+        }
+
+        final DownloadInfo targetInfo = downloadInfo;
+        if (targetInfo == null) {
+            Toast.makeText(getEHContext(), R.string.ai_analysis_no_download, Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final Context context = getEHContext();
+        if (context == null) {
+            return;
+        }
+        android.app.ProgressDialog dialog = new android.app.ProgressDialog(context);
+        dialog.setProgressStyle(android.app.ProgressDialog.STYLE_HORIZONTAL);
+        dialog.setMessage(getString(R.string.ai_analysis_starting));
+        dialog.setCancelable(false);
+        dialog.setMax(100);
+        dialog.show();
+
+        AiAnalyzeManager.getInstance().analyzeGallery(targetInfo, new AiAnalyzeManager.AnalyzeCallback() {
+            @Override
+            public void onProgress(int current, int total, String detail) {
+                if (dialog != null && total > 0) {
+                    dialog.setProgress(current * 100 / total);
+                    dialog.setMessage(getString(R.string.ai_analysis_progress, current, total, detail));
+                }
+            }
+
+            @Override
+            public void onSuccess(AiGalleryAnalysis analysis) {
+                if (dialog != null) {
+                    dialog.dismiss();
+                }
+                if (handler != null) {
+                    handler.post(() -> {
+                        bindAiAnalysis();
+                        if (mAiAnalysis != null) {
+                            mAiAnalysis.setVisibility(View.VISIBLE);
+                        }
+                        Toast.makeText(context, R.string.ai_analysis_done, Toast.LENGTH_SHORT).show();
+                    });
+                }
+            }
+
+            @Override
+            public void onError(String error) {
+                if (dialog != null) {
+                    dialog.dismiss();
+                }
+                if (handler != null) {
+                    handler.post(() -> Toast.makeText(context,
+                            getString(R.string.ai_analysis_failed) + ": " + error, Toast.LENGTH_LONG).show());
+                }
+            }
+        });
     }
 
     private void bindComments(GalleryComment[] comments) {
@@ -1583,6 +1904,15 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             showSimilarGalleryList();
         } else if (mSearchCover == v) {
             showCoverGalleryList();
+        } else if (mAiAnalyzeButton == v) {
+            startAiAnalysis();
+        } else if (mAiPagesToggle == v) {
+            if (mGalleryDetail != null) {
+                if (mAiAnalysisResult == null) {
+                    mAiAnalysisResult = AiAnalyzeManager.getInstance().getAnalysis(mGalleryDetail.gid);
+                }
+                toggleAiPages(mAiAnalysisResult);
+            }
         } else if (mComments == v) {
             if (mGalleryDetail == null) {
                 return;
@@ -1743,11 +2073,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             if (EhApplication.getDownloadManager(mContext).getDownloadState(galleryInfo.gid) == DownloadInfo.STATE_INVALID) {
                 CommonOperations.startDownload(activity, galleryInfo, false);
             } else {
-                new AlertDialog.Builder(mContext)
-                        .setTitle(R.string.download_remove_dialog_title)
-                        .setMessage(getString(R.string.download_remove_dialog_message, galleryInfo.title))
-                        .setPositiveButton(android.R.string.ok, (dialog1, which1) -> EhApplication.getDownloadManager(mContext).deleteDownload(galleryInfo.gid))
-                        .show();
+                DownloadDeleteHelper.showDeleteDialog(mContext, galleryInfo);
             }
         }
     }

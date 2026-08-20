@@ -118,9 +118,6 @@ export default function Settings() {
           <List.Item clickable onClick={() => window.open('/docs', '_blank')}>
             API 文档
           </List.Item>
-          <List.Item clickable onClick={() => window.open('/api/v1/debug', '_blank')}>
-            API Debug
-          </List.Item>
         </List>
       </div>
     </div>

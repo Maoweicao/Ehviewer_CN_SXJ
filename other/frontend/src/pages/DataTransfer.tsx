@@ -9,8 +9,10 @@ import {
   SpinLoading,
   Empty,
   TextArea,
+  Popup,
 } from 'antd-mobile'
-import api, { type ExportFile, type ExportData, type ImportResult } from '../api/client'
+import api, { type ExportFile, type ExportData, type ImportResult, type SystemCacheResponse } from '../api/client'
+import FullScreenLoading from '../components/FullScreenLoading'
 
 export default function DataTransfer() {
   const navigate = useNavigate()
@@ -22,6 +24,11 @@ export default function DataTransfer() {
   const dbFileRef = useRef<HTMLInputElement>(null)
   const csvFileRef = useRef<HTMLInputElement>(null)
   const jsonFileRef = useRef<HTMLInputElement>(null)
+
+  // === Web服务器缓存 ===
+  const [cacheData, setCacheData] = useState<SystemCacheResponse | null>(null)
+  const [cacheLoading, setCacheLoading] = useState(false)
+  const [cachePopup, setCachePopup] = useState(false)
 
   useEffect(() => {
     loadExportFiles()
@@ -210,6 +217,51 @@ export default function DataTransfer() {
     }
   }
 
+  // ==================== Web服务器缓存 Handlers ====================
+
+  const handleViewCache = async () => {
+    setCachePopup(true)
+    setCacheLoading(true)
+    try {
+      const data = await api.getSystemCache()
+      setCacheData(data)
+    } catch {
+      setCacheData(null)
+      Toast.show({ content: '获取缓存列表失败', icon: 'fail' })
+    } finally {
+      setCacheLoading(false)
+    }
+  }
+
+  const handleClearCache = () => {
+    if (!cacheData || cacheData.total === 0) {
+      Toast.show({ content: '当前没有可清空的缓存' })
+      return
+    }
+    Dialog.confirm({
+      content: `确定要清空 Web 服务器缓存吗？（共 ${cacheData.total} 条）`,
+      onConfirm: async () => {
+        try {
+          const result = await api.clearSystemCache()
+          Toast.show({ content: result.message || `已清空 ${result.cleared} 条缓存`, icon: 'success' })
+          await handleViewCache()
+        } catch {
+          Toast.show({ content: '清空缓存失败', icon: 'fail' })
+        }
+      },
+    })
+  }
+
+  const formatRemaining = (ms: number): string => {
+    if (!ms || ms <= 0) return '0s'
+    const sec = Math.floor(ms / 1000)
+    if (sec < 60) return `${sec}s`
+    const min = Math.floor(sec / 60)
+    if (min < 60) return `${min}分`
+    const hour = Math.floor(min / 60)
+    return `${hour}小时`
+  }
+
   return (
     <div>
       <NavBar onBack={() => navigate(-1)}>数据导入导出</NavBar>
@@ -334,6 +386,80 @@ export default function DataTransfer() {
           </List>
         )}
 
+        {/* Web服务器缓存 */}
+        <List header="Web服务器缓存" style={{ marginTop: 16 }}>
+          <List.Item
+            extra={
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button size="mini" color="primary" onClick={handleViewCache}>查看缓存</Button>
+                <Button
+                  size="mini"
+                  color="danger"
+                  onClick={handleClearCache}
+                  disabled={!cacheData || cacheData.total === 0}
+                >
+                  清空缓存
+                </Button>
+              </div>
+            }
+          >
+            <div style={{ fontSize: 13 }}>
+              {cacheData
+                ? `${cacheData.total} 条 · ${cacheData.totalBytesFormatted || cacheData.totalBytes}`
+                : '点击查看服务器端响应缓存'}
+            </div>
+          </List.Item>
+        </List>
+
+        {/* 缓存列表弹窗 */}
+        <Popup
+          visible={cachePopup}
+          onMaskClick={() => setCachePopup(false)}
+          position="bottom"
+          bodyStyle={{
+            borderTopLeftRadius: 12,
+            borderTopRightRadius: 12,
+            maxHeight: '80vh',
+            overflowY: 'auto',
+          }}
+        >
+          <div className="cache-popup">
+            <div className="filter-header">
+              <strong>Web服务器缓存</strong>
+              <Button size="mini" onClick={() => setCachePopup(false)}>
+                关闭
+              </Button>
+            </div>
+            {cacheLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 24 }}>
+                <SpinLoading style={{ '--size': '28px' }} />
+              </div>
+            ) : cacheData && cacheData.entries.length > 0 ? (
+              <>
+                <div style={{ padding: '8px 12px', fontSize: 13, color: 'var(--text-light)' }}>
+                  共 {cacheData.total} 条缓存，总大小 {cacheData.totalBytesFormatted || cacheData.totalBytes}
+                </div>
+                <List>
+                  {cacheData.entries.map((entry) => (
+                    <List.Item
+                      key={entry.key}
+                      description={
+                        <span style={{ fontSize: 12 }}>
+                          {entry.sizeFormatted || entry.size} · 剩余 {formatRemaining(entry.remainingMs)}
+                        </span>
+                      }
+                    >
+                      <span style={{ fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>{entry.key}</span>
+                    </List.Item>
+                  ))}
+                </List>
+              </>
+            ) : (
+              <Empty description="暂无缓存条目" style={{ padding: '24px 0' }} />
+            )}
+          </div>
+        </Popup>
+
         {/* Existing Export Files */}
         <List header="已有导出文件" style={{ marginTop: 16 }}>
           {exportFiles.dbFiles.length === 0 && exportFiles.csvFiles.length === 0 ? (
@@ -395,9 +521,7 @@ export default function DataTransfer() {
         </List>
 
         {loading && (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
-            <SpinLoading style={{ '--size': '32px' }} />
-          </div>
+          <FullScreenLoading text="处理中..." />
         )}
       </div>
     </div>

@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.beerbelly.SimpleDiskCache;
@@ -32,6 +31,7 @@ import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.lib.image.Image;
 import com.hippo.streampipe.InputStreamPipe;
 import com.hippo.unifile.UniFile;
@@ -64,7 +64,7 @@ public class PageApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         // 移除查询参数进行匹配
         String path = uri.split("\\?")[0];
@@ -87,7 +87,7 @@ public class PageApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         String path = uri.split("\\?")[0];
 
@@ -109,15 +109,15 @@ public class PageApiHandler extends BaseApiHandler {
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             
             if (info == null) {
-                Log.w(TAG, "Gallery not found: gid=" + gid);
+                TransferLogger.getInstance().w(TAG, "Gallery not found: gid=" + gid);
                 return ResponseBuilder.notFound("Gallery");
             }
             
-            Log.d(TAG, "DownloadInfo: gid=" + gid + ", pages=" + info.pages + ", total=" + info.total);
+            TransferLogger.getInstance().d(TAG, "DownloadInfo: gid=" + gid + ", pages=" + info.pages + ", total=" + info.total);
             
             // 获取下载目录
             UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
-            Log.d(TAG, "DownloadDir: " + (downloadDir != null ? downloadDir.getUri() : "null"));
+            TransferLogger.getInstance().d(TAG, "DownloadDir: " + (downloadDir != null ? downloadDir.getUri() : "null"));
             
             int totalPages = info.pages;
             if (totalPages <= 0) {
@@ -128,19 +128,19 @@ public class PageApiHandler extends BaseApiHandler {
             if (totalPages <= 0 && downloadDir != null) {
                 try {
                     UniFile spiderInfoFile = downloadDir.findFile(SpiderQueen.SPIDER_INFO_FILENAME);
-                    Log.d(TAG, "SpiderInfo file: " + (spiderInfoFile != null ? "found" : "not found"));
+                    TransferLogger.getInstance().d(TAG, "SpiderInfo file: " + (spiderInfoFile != null ? "found" : "not found"));
                     if (spiderInfoFile != null) {
                         SpiderInfo spiderInfo = SpiderInfo.read(spiderInfoFile);
                         if (spiderInfo != null) {
-                            Log.d(TAG, "SpiderInfo: pages=" + spiderInfo.pages + ", gid=" + spiderInfo.gid);
+                            TransferLogger.getInstance().d(TAG, "SpiderInfo: pages=" + spiderInfo.pages + ", gid=" + spiderInfo.gid);
                             if (spiderInfo.pages > 0) {
                                 totalPages = spiderInfo.pages;
-                                Log.d(TAG, "Got page count from SpiderInfo: " + totalPages);
+                                TransferLogger.getInstance().d(TAG, "Got page count from SpiderInfo: " + totalPages);
                             }
                         }
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to read SpiderInfo", e);
+                    TransferLogger.getInstance().w(TAG, "Failed to read SpiderInfo", e);
                 }
             }
             
@@ -148,7 +148,7 @@ public class PageApiHandler extends BaseApiHandler {
             if (totalPages <= 0 && downloadDir != null && downloadDir.isDirectory()) {
                 try {
                     UniFile[] files = downloadDir.listFiles();
-                    Log.d(TAG, "Files in download dir: " + (files != null ? files.length : 0));
+                    TransferLogger.getInstance().d(TAG, "Files in download dir: " + (files != null ? files.length : 0));
                     if (files != null) {
                         int imageCount = 0;
                         for (UniFile file : files) {
@@ -163,21 +163,21 @@ public class PageApiHandler extends BaseApiHandler {
                         }
                         if (imageCount > 0) {
                             totalPages = imageCount;
-                            Log.d(TAG, "Got page count from file count: " + totalPages);
+                            TransferLogger.getInstance().d(TAG, "Got page count from file count: " + totalPages);
                         }
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to count files", e);
+                    TransferLogger.getInstance().w(TAG, "Failed to count files", e);
                 }
             }
             
-            Log.d(TAG, "Final page count: " + totalPages + " for gid=" + gid);
+            TransferLogger.getInstance().d(TAG, "Final page count: " + totalPages + " for gid=" + gid);
             
             // Check cache
             String cacheKey = ResponseCache.buildKey("pages", String.valueOf(gid));
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for page list: gid=" + gid);
+                TransferLogger.getInstance().d(TAG, "Cache hit for page list: gid=" + gid);
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -227,7 +227,7 @@ public class PageApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting page list", e);
+            TransferLogger.getInstance().e(TAG, "Error getting page list", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -251,7 +251,7 @@ public class PageApiHandler extends BaseApiHandler {
                 if (downloadDir != null && downloadDir.isDirectory()) {
                     UniFile imageFile = SpiderDen.findImageFile(downloadDir, pageIndex);
                     if (imageFile != null) {
-                        Log.d(TAG, "Serving from local file: gid=" + gid + ", page=" + page);
+                        TransferLogger.getInstance().d(TAG, "Serving from local file: gid=" + gid + ", page=" + page);
                         return serveLocalFile(imageFile, "local");
                     }
                 }
@@ -262,7 +262,7 @@ public class PageApiHandler extends BaseApiHandler {
             if (cache != null) {
                 String key = EhCacheKeyFactory.getImageKey(gid, pageIndex);
                 if (cache.contain(key)) {
-                    Log.d(TAG, "Serving from cache: gid=" + gid + ", page=" + page);
+                    TransferLogger.getInstance().d(TAG, "Serving from cache: gid=" + gid + ", page=" + page);
                     InputStreamPipe pipe = cache.getInputStreamPipe(key);
                     if (pipe != null) {
                         return serveFromCache(pipe, "cache");
@@ -272,7 +272,7 @@ public class PageApiHandler extends BaseApiHandler {
             
             // 3. 检查是否需要代理下载
             if ("proxy".equals(mode) || Settings.getSyncDownloadWhileReading()) {
-                Log.d(TAG, "Proxy downloading: gid=" + gid + ", page=" + page);
+                TransferLogger.getInstance().d(TAG, "Proxy downloading: gid=" + gid + ", page=" + page);
                 return proxyDownload(gid, pageIndex, info);
             }
             
@@ -280,7 +280,7 @@ public class PageApiHandler extends BaseApiHandler {
             return ResponseBuilder.notFound("Image");
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting page", e);
+            TransferLogger.getInstance().e(TAG, "Error getting page", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -308,7 +308,7 @@ public class PageApiHandler extends BaseApiHandler {
             return response;
             
         } catch (Exception e) {
-            Log.e(TAG, "Error serving local file", e);
+            TransferLogger.getInstance().e(TAG, "Error serving local file", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -333,7 +333,7 @@ public class PageApiHandler extends BaseApiHandler {
             return response;
             
         } catch (Exception e) {
-            Log.e(TAG, "Error serving from cache", e);
+            TransferLogger.getInstance().e(TAG, "Error serving from cache", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -427,7 +427,7 @@ public class PageApiHandler extends BaseApiHandler {
             }
             
         } catch (Exception e) {
-            Log.e(TAG, "Error in proxy download", e);
+            TransferLogger.getInstance().e(TAG, "Error in proxy download", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -448,7 +448,7 @@ public class PageApiHandler extends BaseApiHandler {
             return info;
             
         } catch (Exception e) {
-            Log.e(TAG, "Error creating temp download info", e);
+            TransferLogger.getInstance().e(TAG, "Error creating temp download info", e);
             return null;
         }
     }
@@ -556,7 +556,7 @@ public class PageApiHandler extends BaseApiHandler {
                 downloadManager.addDownload(galleryInfo, null, DownloadInfo.STATE_NONE);
                 info = downloadManager.getDownloadInfo(gid);
                 autoCreated = true;
-                Log.i(TAG, "Auto-created DownloadInfo for uploaded page: gid=" + gid);
+                TransferLogger.getInstance().i(TAG, "Auto-created DownloadInfo for uploaded page: gid=" + gid);
             }
 
             // 5. 获取下载目录
@@ -593,7 +593,7 @@ public class PageApiHandler extends BaseApiHandler {
                     // 哈希一致 → 跳过
                     tmpFile.delete();
                     skipped = true;
-                    Log.i(TAG, "Upload skipped (hash matches): gid=" + gid + ", page=" + page);
+                    TransferLogger.getInstance().i(TAG, "Upload skipped (hash matches): gid=" + gid + ", page=" + page);
                 }
             }
 
@@ -618,7 +618,7 @@ public class PageApiHandler extends BaseApiHandler {
                     }
                 } catch (Exception e) {
                     tmpFile.delete();
-                    Log.e(TAG, "Failed to write uploaded page", e);
+                    TransferLogger.getInstance().e(TAG, "Failed to write uploaded page", e);
                     return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
                             "Write failed: " + e.getMessage());
                 }
@@ -636,7 +636,7 @@ public class PageApiHandler extends BaseApiHandler {
                 // 触发画廊列表缓存失效（状态/页数可能改变）
                 ResponseCache.getInstance().invalidateGalleries();
 
-                Log.i(TAG, "Page uploaded: gid=" + gid + ", page=" + page
+                TransferLogger.getInstance().i(TAG, "Page uploaded: gid=" + gid + ", page=" + page
                         + ", file=" + filename + ", size=" + writtenSize
                         + ", existed=" + existed + ", overwritten=" + overwritten);
             }
@@ -678,7 +678,7 @@ public class PageApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Error handling page upload", e);
+            TransferLogger.getInstance().e(TAG, "Error handling page upload", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -790,7 +790,7 @@ public class PageApiHandler extends BaseApiHandler {
             }
             return sb.toString();
         } catch (Exception e) {
-            Log.w(TAG, "Failed to compute hash", e);
+            TransferLogger.getInstance().w(TAG, "Failed to compute hash", e);
             return null;
         }
     }

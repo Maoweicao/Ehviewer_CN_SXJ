@@ -31,6 +31,7 @@ import androidx.annotation.Nullable;
 import com.hippo.ehviewer.Analytics;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
+import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhUrl;
@@ -41,10 +42,16 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.dao.DownloadLabel;
+import com.hippo.ehviewer.lab.analyze.AiAnalyzeManager;
+import com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
+import com.hippo.ehviewer.task.BackgroundTask;
+import com.hippo.ehviewer.task.PreDownloadMergeTask;
+import com.hippo.ehviewer.task.PreDownloadMergeTask.Outcome;
 import com.hippo.ehviewer.task.PtokenIndexUpdater;
+import com.hippo.ehviewer.task.SimpleScanCache;
 import com.hippo.lib.image.Image;
 //import com.hippo.lib.image.Image1;
 import com.hippo.unifile.UniFile;
@@ -68,6 +75,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Semaphore;
 
 public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
@@ -93,6 +101,24 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     // Store download info wait to start
     private final LinkedList<DownloadInfo> mWaitList;
 
+    // 预下载合并任务 gid -> taskId，用于停止按钮取消合并
+    private final Map<Long, String> mPreMergeTaskIds = new HashMap<>();
+
+    // 预下载简单重复画廊扫描并发限制：同时最多运行 MAX_CONCURRENT_PRE_MERGE 个扫描任务，
+    // 其余进入 mPendingPreMerge 等待队列，槽位释放后自动接力，避免依次添加大量画廊时拖垮手机性能。
+    private static final int MAX_CONCURRENT_PRE_MERGE = 2;
+    private static final String PRE_MERGE_WAIT_TASK_PREFIX = "pre_merge_wait_";
+    private final Semaphore mPreMergeSemaphore = new Semaphore(MAX_CONCURRENT_PRE_MERGE);
+    private final LinkedList<DownloadInfo> mPendingPreMerge = new LinkedList<>();
+
+    // 预下载扫描阶段跟踪：扫描期内任务按其扫描完成先后进入下载队列，顺序可能与用户期望的
+    // 排序不一致。这里统计本批次进行中 + 排队的预下载任务数，等任务队列清零时走一遍
+    // 「停止全部 → 开始全部」重新安排下载队列顺序。
+    private final Object mPreMergeStateLock = new Object();
+    private int mActivePreMergeTasks = 0;
+    private boolean mPreMergePhaseActive = false;
+    private int mPreMergeBatchSize = 0;
+
     private final SpeedReminder mSpeedReminder;
 
     private final List<DownloadListener> mDownloadListeners;
@@ -104,6 +130,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private SpiderQueen mCurrentSpider;
 
     private final ConcurrentPool<NotifyTask> mNotifyTaskPool = new ConcurrentPool<>(5);
+
+    // 循环开始下载直至完成：自动重试轮数限制，防止极端情况下无限循环
+    private static final int MAX_LOOP_DOWNLOAD_ROUNDS = 5;
+    private int mLoopDownloadRetryCount = 0;
 
     public DownloadManager(Context context) {
         mContext = context;
@@ -171,6 +201,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         mSpeedReminder = new SpeedReminder();
         mDownloadListeners = new CopyOnWriteArrayList<>();
         mDownloadInfoListeners = new ArrayList<>();
+
+        // 清理上一次会话遗留的“预下载扫描排队”占位任务（进程被杀时未及移除）
+        try {
+            com.hippo.ehviewer.BackgroundTaskManager.getInstance().getTaskStatusManager()
+                    .removeTasksWithPrefix(PRE_MERGE_WAIT_TASK_PREFIX);
+        } catch (Throwable ignored) {
+        }
 
         // Restore interrupted downloads: re-add STATE_WAIT items to the wait list
         // Also reset any stuck STATE_DOWNLOAD items back to STATE_WAIT
@@ -531,13 +568,47 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         info.finished = info.pages;
         info.state = DownloadInfo.STATE_FINISH;
         EhDB.putDownloadInfo(info);
+        // 新画廊下载完成，简单重复画廊扫描缓存已失效
+        SimpleScanCache.invalidate();
 
         for (DownloadListener l : mDownloadListeners) {
             l.onFinish(info);
         }
 
+        maybeAutoAnalyzeGallery(info);
+
         mCurrentTask = null;
         ensureDownload();
+    }
+
+    /**
+     * 若开启了"下载完成后自动分析"，则后台启动 AI 图片分析。
+     */
+    private void maybeAutoAnalyzeGallery(DownloadInfo info) {
+        if (info == null || !Settings.getAiAnalyzeEnabled() || !Settings.getAiAnalyzeAutoOnFinish()) {
+            return;
+        }
+        try {
+            Log.i(TAG, "Auto AI analyze on download finish for gid=" + info.gid);
+            AiAnalyzeManager.getInstance().analyzeGallery(info,
+                    new AiAnalyzeManager.AnalyzeCallback() {
+                        @Override
+                        public void onProgress(int current, int total, String detail) {
+                        }
+
+                        @Override
+                        public void onSuccess(AiGalleryAnalysis analysis) {
+                            Log.i(TAG, "Auto AI analyze done for gid=" + info.gid);
+                        }
+
+                        @Override
+                        public void onError(String error) {
+                            Log.w(TAG, "Auto AI analyze failed for gid=" + info.gid + ": " + error);
+                        }
+                    });
+        } catch (Throwable e) {
+            Log.w(TAG, "maybeAutoAnalyzeGallery failed", e);
+        }
     }
 
     /**
@@ -570,6 +641,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     void startDownload(GalleryInfo galleryInfo, @Nullable String label) {
+        // 手动发起下载：清空「停止全部 → 开始全部」自动循环的重试计数，
+        // 让手动会话获得全新的自动重试额度（自动循环耗尽后用户手动恢复不再被卡死）。
+        resetLoopDownloadRetryCount();
         if (mCurrentTask != null && mCurrentTask.gid == galleryInfo.gid) {
             // It is current task
             return;
@@ -649,6 +723,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     void startRangeDownload(LongList gidList) {
+        // 手动批量发起下载：清空「停止全部 → 开始全部」自动循环的重试计数
+        resetLoopDownloadRetryCount();
         boolean update = false;
         boolean advancedSortEnabled = Settings.getAdvancedDownloadSortEnabled();
 
@@ -852,6 +928,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     /**
+     * 重置循环开始下载的自动重试轮数。
+     * 用户手动开始新一批下载时调用，为新的会话重新分配完整额度。
+     */
+    public void resetLoopDownloadRetryCount() {
+        mLoopDownloadRetryCount = 0;
+    }
+
+    /**
      * Check if there are any active downloads (downloading or waiting)
      */
     public boolean hasActiveDownload() {
@@ -1041,21 +1125,492 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
         // Add to wait list if state is WAIT
         if (state == DownloadInfo.STATE_WAIT) {
-            mWaitList.add(info);
-            if (Settings.getAdvancedDownloadSortEnabled()) {
-                applyAdvancedSort(mWaitList);
+            // 手动发起下载（列表/详情批量添加）：清空「停止全部 → 开始全部」自动循环的重试计数
+            resetLoopDownloadRetryCount();
+            if (shouldPreMergeDownload(info)) {
+                // 预下载合并：延迟加入下载队列，先扫描并合并已存在的重复画廊
+                info.phase = DownloadInfo.PHASE_MERGE;
+                info.total = 100;
+                info.finished = 0;
+                info.speed = -1;
+                startPreMergeDownload(info);
+            } else {
+                mWaitList.add(info);
+                if (Settings.getAdvancedDownloadSortEnabled()) {
+                    applyAdvancedSort(mWaitList);
+                }
+                // 递进关系去重：合并开关开启时移除同作者同标题的旧版本任务
+                dedupeProgressiveWaitTasks();
+                if (containDownloadInfo(info.gid)) {
+                    SimpleHandler.getInstance().post(this::ensureDownload);
+                }
             }
-            SimpleHandler.getInstance().post(this::ensureDownload);
         }
 
-        // Notify
-        for (DownloadInfoListener l : mDownloadInfoListeners) {
-            l.onAdd(info, list, list.size() - 1);
+        // Notify (如果任务因递进关系去重被移除，则只刷新列表)
+        if (containDownloadInfo(info.gid)) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onAdd(info, list, list.size() - 1);
+            }
+        } else {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdateAll();
+            }
         }
     }
 
     public void addDownload(GalleryInfo galleryInfo, @Nullable String label) {
         addDownload(galleryInfo, label, DownloadInfo.STATE_NONE);
+    }
+
+    /**
+     * 是否需要预下载合并：开关开启且非导入压缩包。
+     */
+    private boolean shouldPreMergeDownload(DownloadInfo info) {
+        if (!Settings.getMergeOnDownload()) {
+            return false;
+        }
+        if (Settings.getUseSystemDownloadManager()) {
+            // 系统下载服务写入的文件命名/路径不同，预合并会与之冲突，跳过
+            return false;
+        }
+        return info.archiveUri == null;
+    }
+
+    /**
+     * 提交预下载合并任务并轮询进度，合并完成后再真正加入下载队列。
+     */
+    /**
+     * 提交预下载合并任务并轮询进度，合并完成后再真正加入下载队列。
+     * 受信号量限制：同时最多运行 {@link #MAX_CONCURRENT_PRE_MERGE} 个预下载扫描任务，
+     * 超出的任务进入 {@link #mPendingPreMerge} 等待队列，槽位释放后自动接力。
+     */
+    private void startPreMergeDownload(DownloadInfo info) {
+        // 记录预下载扫描阶段的活跃任务数：本批次所有扫描任务清零时用于重新安排下载队列
+        synchronized (mPreMergeStateLock) {
+            mActivePreMergeTasks++;
+            mPreMergeBatchSize++;
+            mPreMergePhaseActive = true;
+        }
+        synchronized (mPendingPreMerge) {
+            if (mPreMergeSemaphore.tryAcquire()) {
+                try {
+                    doStartPreMergeDownload(info);
+                } catch (Throwable t) {
+                    // 提交预下载扫描任务失败：归还槽位并按正常方式进入下载队列，
+                    // 同时确保活跃任务计数被递减，避免预下载阶段永不结束。
+                    Log.e(TAG, "提交预下载扫描任务失败，按正常方式进入下载队列 gid=" + info.gid, t);
+                    mPreMergeSemaphore.release();
+                    final long gid = info.gid;
+                    SimpleHandler.getInstance().post(
+                            () -> finishPreMerge(gid, PreDownloadMergeTask.Outcome.PROCEED, null));
+                }
+            } else {
+                // 无空闲扫描槽位，先进入等待队列，等前序扫描完成后由 releasePreMergeSlot 接力
+                mPendingPreMerge.add(info);
+                updatePreMergeWaitingState(info);
+                registerPreMergeQueuedTask(info);
+            }
+        }
+    }
+
+    /**
+     * 等待队列中的画廊在下载列表中显示“等待扫描槽位”，避免用户误以为卡死。
+     */
+    private void updatePreMergeWaitingState(DownloadInfo info) {
+        info.phase = DownloadInfo.PHASE_MERGE;
+        info.total = 100;
+        info.finished = 0;
+        info.speed = -1;
+        info.mergeDetail = mContext.getString(R.string.pre_download_merge_waiting);
+        List<DownloadInfo> list = getInfoListForLabel(info.label);
+        if (list != null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdate(info, list, mWaitList);
+            }
+        }
+    }
+
+    /**
+     * 为等待队列中的画廊在后台任务列表注册一个占位任务（排队中），
+     * 让用户在后台任务列表也能看到它的等待状态；扫描真正开始时移除占位。
+     */
+    private void registerPreMergeQueuedTask(DownloadInfo info) {
+        try {
+            String placeholderId = PRE_MERGE_WAIT_TASK_PREFIX + info.gid;
+            String taskName = mContext.getString(R.string.pre_download_merge_task_name);
+            String taskDesc = mContext.getString(R.string.pre_download_merge_waiting);
+            String taskId = com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                    .getTaskStatusManager().addTask(
+                            placeholderId, taskName, taskDesc, null,
+                            BackgroundTask.TaskType.MERGE, false);
+            if (taskId != null) {
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                        .getTaskStatusManager().markTaskQueued(taskId, taskDesc);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "registerPreMergeQueuedTask failed for gid=" + info.gid, t);
+        }
+    }
+
+    /**
+     * 移除等待画廊的占位任务（扫描真正开始时调用）。
+     */
+    private void unregisterPreMergeQueuedTask(long gid) {
+        try {
+            String placeholderId = PRE_MERGE_WAIT_TASK_PREFIX + gid;
+            com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                    .getTaskStatusManager().removeTask(placeholderId);
+        } catch (Throwable t) {
+            Log.w(TAG, "unregisterPreMergeQueuedTask failed for gid=" + gid, t);
+        }
+    }
+
+    /**
+     * 真正创建并提交预下载合并任务。
+     */
+    private void doStartPreMergeDownload(DownloadInfo info) {
+        final long gid = info.gid;
+        PreDownloadMergeTask task = new PreDownloadMergeTask(mContext, gid,
+                new PreDownloadMergeTask.Callback() {
+                    @Override
+                    public void onProgress(int percent, String detail) {
+                        DownloadInfo cur = mAllInfoMap.get(gid);
+                        if (cur == null) {
+                            return;
+                        }
+                        cur.phase = DownloadInfo.PHASE_MERGE;
+                        cur.total = 100;
+                        cur.finished = percent;
+                        cur.speed = -1;
+                        cur.mergeDetail = detail;
+                        List<DownloadInfo> list = getInfoListForLabel(cur.label);
+                        if (list != null) {
+                            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                                l.onUpdate(cur, list, mWaitList);
+                            }
+                        }
+                    }
+
+                    @Override
+                    public void onFinished(PreDownloadMergeTask.Outcome outcome,
+                                           List<Long> removedSourceGids) {
+                        finishPreMerge(gid, outcome, removedSourceGids);
+                        // 释放扫描槽位并接力等待队列中的下一个画廊
+                        releasePreMergeSlot();
+                    }
+                });
+        mPreMergeTaskIds.put(gid, task.getTaskId());
+        com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+    }
+
+    /**
+     * 释放一个预下载扫描槽位，并从等待队列中取出下一个画廊开始扫描。
+     * 队列为空时才真正归还信号量许可。
+     */
+    private void releasePreMergeSlot() {
+        DownloadInfo next;
+        synchronized (mPendingPreMerge) {
+            next = mPendingPreMerge.poll();
+        }
+        if (next != null) {
+            if (containDownloadInfo(next.gid)) {
+                unregisterPreMergeQueuedTask(next.gid);
+                doStartPreMergeDownload(next);
+                return;
+            }
+            // 等待期间该画廊已被删除，跳过并继续取下一个。
+            // 该画廊没有走 finishPreMerge 收尾，需要手动递减活跃任务数，
+            // 否则本批次预下载扫描队列永远不会清零、重排也不会触发。
+            unregisterPreMergeQueuedTask(next.gid);
+            if (onPreMergeTaskFinished()) {
+                rearrangeQueueAfterPreMerge();
+            }
+            releasePreMergeSlot();
+        } else {
+            mPreMergeSemaphore.release();
+        }
+    }
+
+    /**
+     * 取消某个画廊的预下载合并任务。取消后该画廊按正常方式进入下载队列。
+     */
+    public void cancelPreMergeDownload(long gid) {
+        boolean removedFromQueue = false;
+        synchronized (mPendingPreMerge) {
+            Iterator<DownloadInfo> it = mPendingPreMerge.iterator();
+            while (it.hasNext()) {
+                if (it.next().gid == gid) {
+                    it.remove();
+                    removedFromQueue = true;
+                    break;
+                }
+            }
+        }
+        if (removedFromQueue) {
+            // 未开始扫描即被取消：移除占位任务并按正常方式进入下载队列
+            unregisterPreMergeQueuedTask(gid);
+            finishPreMerge(gid, PreDownloadMergeTask.Outcome.PROCEED, null);
+            return;
+        }
+        String taskId = mPreMergeTaskIds.get(gid);
+        if (taskId != null) {
+            com.hippo.ehviewer.BackgroundTaskManager.getInstance().cancelTask(taskId);
+        }
+    }
+
+    /**
+     * 预下载合并结束后的收尾：取消新下载 / 移除被合并的源画廊 / 进入下载队列。
+     */
+    private void finishPreMerge(long gid, PreDownloadMergeTask.Outcome outcome,
+                                List<Long> removedSourceGids) {
+        mPreMergeTaskIds.remove(gid);
+        try {
+            DownloadInfo info = mAllInfoMap.get(gid);
+            if (info == null) {
+                return;
+            }
+
+            if (outcome == PreDownloadMergeTask.Outcome.CANCELLED_NEWER) {
+                // 已存在更新更完整的版本，取消本次下载（合并历史已由任务写入）
+                removePendingAfterPreMerge(gid);
+                return;
+            }
+
+            // 移除已被并入的源画廊（其目录/DB 记录已由任务清理，历史已标注）
+            if (removedSourceGids != null) {
+                for (long sourceGid : removedSourceGids) {
+                    removePendingAfterPreMerge(sourceGid);
+                }
+            }
+
+            info.phase = DownloadInfo.PHASE_IDLE;
+            info.mergeDetail = null;
+            // 合并阶段的进度(100%)与真实下载页数无关，重置为待开始状态，避免进度条从虚假的 100% 掉回低值
+            info.speed = 0;
+            info.finished = 0;
+            info.downloaded = 0;
+            info.total = 0;
+            info.state = DownloadInfo.STATE_WAIT;
+            if (!mWaitList.contains(info)) {
+                mWaitList.add(info);
+                if (Settings.getAdvancedDownloadSortEnabled()) {
+                    applyAdvancedSort(mWaitList);
+                }
+            }
+            EhDB.putDownloadInfo(info);
+            dedupeProgressiveWaitTasks();
+
+            List<DownloadInfo> list = getInfoListForLabel(info.label);
+            if (list != null) {
+                for (DownloadInfoListener l : mDownloadInfoListeners) {
+                    l.onUpdate(info, list, mWaitList);
+                }
+            }
+            ensureDownload();
+        } finally {
+            // 预下载扫描任务收尾：无论成功/失败/取消都递减活跃任务数。
+            // 当本批次所有扫描任务清零时，走一遍「停止全部 → 开始全部」重新安排下载队列。
+            if (onPreMergeTaskFinished()) {
+                rearrangeQueueAfterPreMerge();
+            }
+        }
+    }
+
+    /**
+     * 一个预下载扫描任务结束（成功/失败/取消/被删除后跳过）时调用：
+     * 递减活跃任务数，并在本批次扫描任务全部清零时判定是否需要重排下载队列。
+     *
+     * @return true 表示本批次预下载扫描已全部结束，需要重新安排下载队列
+     */
+    private boolean onPreMergeTaskFinished() {
+        boolean rearrangeQueue = false;
+        synchronized (mPreMergeStateLock) {
+            if (mActivePreMergeTasks > 0) {
+                mActivePreMergeTasks--;
+            }
+            if (mActivePreMergeTasks == 0 && mPreMergePhaseActive) {
+                mPreMergePhaseActive = false;
+                // 单个画廊的扫描结束无需重排；只有批量（≥2）才需要恢复期望的队列顺序
+                rearrangeQueue = mPreMergeBatchSize >= 2;
+                mPreMergeBatchSize = 0;
+            }
+        }
+        return rearrangeQueue;
+    }
+
+    /**
+     * 预下载扫描阶段任务队列清零后调用：
+     * 走一遍「停止全部 → 开始全部」，让下载队列按排序规则重新安排顺序。
+     * 扫描期内已过扫盘的任务是按其扫描完成先后进入队列的，顺序可能与用户期望不符，
+     * 全部扫盘结束后重排一次即可恢复正确的下载优先级。
+     */
+    private void rearrangeQueueAfterPreMerge() {
+        SimpleHandler.getInstance().post(() -> {
+            synchronized (mPreMergeStateLock) {
+                if (mPreMergePhaseActive || mActivePreMergeTasks > 0) {
+                    // 新一轮预下载扫描已经开始，跳过本次重排
+                    return;
+                }
+            }
+            // 需要重新安排的队列项太少时跳过，避免无谓地中断正在下载的任务
+            int reorderCount = 0;
+            for (DownloadInfo info : mAllInfoList) {
+                int state = info.state;
+                if (state == DownloadInfo.STATE_WAIT || state == DownloadInfo.STATE_NONE ||
+                        state == DownloadInfo.STATE_FAILED || state == DownloadInfo.STATE_DOWNLOAD) {
+                    reorderCount++;
+                }
+            }
+            if (reorderCount < 2) {
+                return;
+            }
+            Log.i(TAG, "预下载扫描队列已清零，执行 停止全部 → 开始全部 重新安排下载队列顺序");
+            try {
+                stopAllDownload();
+                startAllDownload();
+            } catch (Throwable t) {
+                Log.e(TAG, "预下载扫描结束后重新安排下载队列失败", t);
+            }
+        });
+    }
+
+    /**
+     * 预下载合并后移除一个下载项（不写普通删除历史，合并历史已由任务记录）。
+     */
+    private void removePendingAfterPreMerge(long gid) {
+        stopDownloadInternal(gid);
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) {
+            return;
+        }
+        EhDB.removeDownloadInfo(gid);
+        mAllInfoList.remove(info);
+        mAllInfoMap.remove(gid);
+        LinkedList<DownloadInfo> list = getInfoListForLabel(info.label);
+        int removedIndex = -1;
+        if (list != null) {
+            removedIndex = list.indexOf(info);
+            if (removedIndex >= 0) {
+                list.remove(info);
+                updateLabelCount(info.label, -1);
+            }
+        }
+        if (removedIndex >= 0) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onRemove(info, list, removedIndex);
+            }
+        } else {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdateAll();
+            }
+        }
+        ensureDownload();
+    }
+
+    /**
+     * 递进关系去重：当「下载时合并相同画廊」开关开启时，
+     * 若等待队列中存在明显具有递进关系的任务（相同作者、相同标题、不同 gid，仅页数不同），
+     * 保留页数更多的任务，并将页数较少的旧任务移除、在下载历史中标记为重复画廊。
+     */
+    private void dedupeProgressiveWaitTasks() {
+        if (!Settings.getMergeOnDownload()) {
+            return;
+        }
+        if (mWaitList.size() < 2) {
+            return;
+        }
+
+        // 按 (uploader, suitableTitle) 分组
+        Map<String, List<DownloadInfo>> groups = new HashMap<>();
+        for (DownloadInfo info : mWaitList) {
+            String uploader = info.uploader;
+            String title = EhUtils.getSuitableTitle(info);
+            if (uploader == null || uploader.isEmpty() || title == null || title.isEmpty()) {
+                continue;
+            }
+            if (info.pages <= 0) {
+                // 页数未知时无法判断递进关系，跳过
+                continue;
+            }
+            String key = uploader + '\u0001' + title;
+            groups.computeIfAbsent(key, k -> new ArrayList<>()).add(info);
+        }
+
+        for (List<DownloadInfo> group : groups.values()) {
+            if (group.size() < 2) {
+                continue;
+            }
+            // 找到页数最多的任务作为保留项
+            DownloadInfo best = null;
+            int bestPages = -1;
+            for (DownloadInfo info : group) {
+                if (info.pages > bestPages) {
+                    bestPages = info.pages;
+                    best = info;
+                }
+            }
+            if (best == null) {
+                continue;
+            }
+            for (DownloadInfo info : group) {
+                if (info == best || info.gid == best.gid) {
+                    continue;
+                }
+                // 页数不同才算明显递进关系，页数相同视为可疑，不处理
+                if (info.pages == best.pages) {
+                    continue;
+                }
+                removeOldProgressiveTask(info, best.gid);
+            }
+        }
+    }
+
+    /**
+     * 移除旧的递进关系下载任务，并在下载历史中标记为重复画廊。
+     */
+    private void removeOldProgressiveTask(DownloadInfo info, long keptGid) {
+        long gid = info.gid;
+        // 从等待队列移除
+        for (Iterator<DownloadInfo> iterator = mWaitList.iterator(); iterator.hasNext(); ) {
+            if (iterator.next().gid == gid) {
+                iterator.remove();
+                break;
+            }
+        }
+
+        // 从标签列表移除
+        LinkedList<DownloadInfo> labelList = getInfoListForLabel(info.label);
+        int removedIndex = -1;
+        if (labelList != null) {
+            removedIndex = labelList.indexOf(info);
+            if (removedIndex >= 0) {
+                labelList.remove(info);
+                updateLabelCount(info.label, -1);
+            }
+        }
+
+        // 从全部列表与映射移除
+        mAllInfoList.remove(info);
+        mAllInfoMap.remove(gid);
+
+        // 从数据库移除
+        EhDB.removeDownloadInfo(gid);
+
+        // 下载历史标记为重复画廊（递进合并）
+        EhDB.recordDownloadAsDuplicate(info, DownloadHistory.DELETION_PROGRESSIVE_MERGED, keptGid);
+
+        Log.i(TAG, "递进关系去重：移除旧任务 gid=" + gid + "（保留 gid=" + keptGid + "）");
+
+        // 通知监听器
+        if (labelList != null && removedIndex >= 0) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onRemove(info, labelList, removedIndex);
+            }
+        }
+        for (DownloadInfoListener l : mDownloadInfoListeners) {
+            l.onUpdateAll();
+        }
     }
 
     public void addDownloadInfo(GalleryInfo galleryInfo, @Nullable String label) {
@@ -1954,6 +2509,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     }
                     // Update in DB
                     EhDB.putDownloadInfo(info);
+                    // 新画廊下载完成，简单重复画廊扫描缓存已失效
+                    SimpleScanCache.invalidate();
                     DownloadLogger.getInstance().logDownloadComplete(
                             String.valueOf(info.gid), EhUtils.getSuitableTitle(info), 0,
                             verifiedFinished, mTotal - verifiedFinished);
@@ -1968,6 +2525,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     for (DownloadListener l : mDownloadListeners) {
                         l.onFinish(info);
                     }
+
+                    maybeAutoAnalyzeGallery(info);
+
                     List<DownloadInfo> list = getInfoListForLabel(info.label);
                     if (list != null) {
                         for (DownloadInfoListener l : mDownloadInfoListeners) {
@@ -1976,8 +2536,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     }
                     // Start next download
                     ensureDownload();
-                    // Auto-retry: if enabled and idle but still have incomplete tasks, stop all and restart all
-                    if (Settings.getDownloadAlwaysComplete() && isIdle()) {
+                    // Loop start download until complete: if enabled and idle but still have
+                    // incomplete tasks, stop all and restart all, capped at a maximum number of rounds.
+                    if (Settings.getLoopDownloadUntilComplete() && isIdle()) {
                         boolean hasIncomplete = false;
                         for (DownloadInfo i : mAllInfoList) {
                             if (i.state == DownloadInfo.STATE_NONE || i.state == DownloadInfo.STATE_FAILED) {
@@ -1986,15 +2547,22 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                             }
                         }
                         if (hasIncomplete) {
-                            Log.i(TAG, "Always-complete enabled: incomplete tasks detected, scheduling retry");
-                            SimpleHandler.getInstance().postDelayed(() -> {
-                                if (!isIdle()) {
-                                    return;
-                                }
-                                Log.i(TAG, "Always-complete: executing stopAll → startAll cycle");
-                                stopAllDownload();
-                                startAllDownload();
-                            }, 3000);
+                            if (mLoopDownloadRetryCount >= MAX_LOOP_DOWNLOAD_ROUNDS) {
+                                Log.w(TAG, "Loop-download: reached max " + MAX_LOOP_DOWNLOAD_ROUNDS
+                                        + " auto-retry rounds, giving up on incomplete tasks");
+                            } else {
+                                mLoopDownloadRetryCount++;
+                                Log.i(TAG, "Loop-download enabled: incomplete tasks detected, scheduling retry round "
+                                        + mLoopDownloadRetryCount + "/" + MAX_LOOP_DOWNLOAD_ROUNDS);
+                                SimpleHandler.getInstance().postDelayed(() -> {
+                                    if (!isIdle()) {
+                                        return;
+                                    }
+                                    Log.i(TAG, "Loop-download: executing stopAll → startAll cycle");
+                                    stopAllDownload();
+                                    startAllDownload();
+                                }, 3000);
+                            }
                         }
                     }
                     break;

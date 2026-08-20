@@ -16,6 +16,11 @@
 
 package com.hippo.ehviewer.transfer.core;
 
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -24,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ResponseCache {
 
+    private static final String TAG = "ResponseCache";
     private static final long DEFAULT_TTL_MS = 5 * 60 * 60 * 1000; // 5 hours
 
     private static volatile ResponseCache instance;
@@ -49,14 +55,20 @@ public class ResponseCache {
      * @return Cached JSON string, or null if expired/missing
      */
     public String get(String key) {
+        TransferLogger.getInstance().d(TAG, "读取缓存: key=" + key);
         CacheEntry entry = cache.get(key);
-        if (entry == null) return null;
-
-        if (System.currentTimeMillis() - entry.createdAt > entry.ttlMs) {
-            cache.remove(key);
+        if (entry == null) {
+            TransferLogger.getInstance().d(TAG, "缓存未命中: key=" + key);
             return null;
         }
 
+        if (System.currentTimeMillis() - entry.createdAt > entry.ttlMs) {
+            cache.remove(key);
+            TransferLogger.getInstance().d(TAG, "缓存已过期并移除: key=" + key);
+            return null;
+        }
+
+        TransferLogger.getInstance().d(TAG, "缓存命中: key=" + key + ", 字节数=" + entry.json.length());
         return entry.json;
     }
 
@@ -77,6 +89,7 @@ public class ResponseCache {
      */
     public void put(String key, String json, long ttlMs) {
         cache.put(key, new CacheEntry(json, System.currentTimeMillis(), ttlMs));
+        TransferLogger.getInstance().d(TAG, "写入缓存: key=" + key + ", 字节数=" + json.length() + ", ttlMs=" + ttlMs);
     }
 
     /**
@@ -84,7 +97,12 @@ public class ResponseCache {
      * @param prefix Key prefix to match
      */
     public void invalidateByPrefix(String prefix) {
+        int before = cache.size();
         cache.entrySet().removeIf(entry -> entry.getKey().startsWith(prefix));
+        int removed = before - cache.size();
+        if (removed > 0) {
+            TransferLogger.getInstance().d(TAG, "按前缀失效缓存: prefix=" + prefix + ", 移除=" + removed + "条");
+        }
     }
 
     /**
@@ -93,6 +111,7 @@ public class ResponseCache {
      */
     public void invalidate(String key) {
         cache.remove(key);
+        TransferLogger.getInstance().d(TAG, "失效缓存: key=" + key);
     }
 
     /**
@@ -150,6 +169,7 @@ public class ResponseCache {
      */
     public void clear() {
         cache.clear();
+        TransferLogger.getInstance().d(TAG, "清空缓存");
     }
 
     /**
@@ -157,6 +177,45 @@ public class ResponseCache {
      */
     public int size() {
         return cache.size();
+    }
+
+    /**
+     * Get a snapshot of all cache entries.
+     * Expired entries are removed during iteration.
+     *
+     * @return List of cache entry snapshots
+     */
+    public List<CacheEntrySnapshot> getSnapshot() {
+        List<CacheEntrySnapshot> list = new ArrayList<>();
+        long now = System.currentTimeMillis();
+        cache.entrySet().removeIf(entry -> now - entry.getValue().createdAt > entry.getValue().ttlMs);
+        for (Map.Entry<String, CacheEntry> entry : cache.entrySet()) {
+            CacheEntry e = entry.getValue();
+            long remaining = Math.max(0, e.createdAt + e.ttlMs - now);
+            list.add(new CacheEntrySnapshot(entry.getKey(), e.json.length(), e.createdAt, e.ttlMs, e.createdAt + e.ttlMs, remaining));
+        }
+        return list;
+    }
+
+    /**
+     * Snapshot of a single cache entry.
+     */
+    public static class CacheEntrySnapshot {
+        public final String key;
+        public final int size;
+        public final long createdAt;
+        public final long ttlMs;
+        public final long expiresAt;
+        public final long remainingMs;
+
+        CacheEntrySnapshot(String key, int size, long createdAt, long ttlMs, long expiresAt, long remainingMs) {
+            this.key = key;
+            this.size = size;
+            this.createdAt = createdAt;
+            this.ttlMs = ttlMs;
+            this.expiresAt = expiresAt;
+            this.remainingMs = remainingMs;
+        }
     }
 
     /**

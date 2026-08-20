@@ -19,7 +19,6 @@ package com.hippo.ehviewer.transfer.core;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -29,6 +28,7 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.BookmarkInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.transfer.data.PushTask;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -78,6 +78,9 @@ public class DataPushManager {
      */
     public PushTask createPushTask(String targetHost, int targetPort, String type, String mode,
                                    List<Long> items, String sourceDevice, String sourceDeviceId) {
+        TransferLogger.getInstance().d(TAG, "创建推送任务: targetHost=" + targetHost + ", targetPort=" + targetPort
+                + ", type=" + type + ", mode=" + mode + ", items=" + (items == null ? 0 : items.size())
+                + ", sourceDevice=" + sourceDevice);
         PushTask task = new PushTask(type, mode, sourceDevice, sourceDeviceId);
         task.setItems(items);
 
@@ -103,14 +106,16 @@ public class DataPushManager {
                 } else {
                     task.setStatus(PushTask.STATUS_FAILED);
                     notifyFailed(task, "创建任务失败");
+                    TransferLogger.getInstance().e(TAG, "在目标设备上创建任务失败: taskId=" + task.getTaskId());
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Failed to create push task", e);
+                TransferLogger.getInstance().e(TAG, "Failed to create push task", e);
                 task.setStatus(PushTask.STATUS_FAILED);
                 notifyFailed(task, e.getMessage());
             }
         });
 
+        TransferLogger.getInstance().i(TAG, "推送任务已创建: taskId=" + task.getTaskId() + ", totalCount=" + totalCount);
         return task;
     }
 
@@ -118,6 +123,8 @@ public class DataPushManager {
      * 在目标设备上创建任务
      */
     private boolean createTaskOnTarget(String host, int port, PushTask task) throws IOException {
+        TransferLogger.getInstance().d(TAG, "在目标设备创建任务: host=" + host + ", port=" + port
+                + ", type=" + task.getType() + ", totalCount=" + task.getTotalCount());
         JSONObject body = new JSONObject();
         body.put("type", task.getType());
         body.put("mode", task.getMode());
@@ -147,7 +154,10 @@ public class DataPushManager {
                 String remoteTaskId = result.getString("taskId");
                 // 使用远程返回的taskId
                 task.setTaskId(remoteTaskId);
+                TransferLogger.getInstance().i(TAG, "目标设备任务创建成功: remoteTaskId=" + remoteTaskId);
                 return true;
+            } else {
+                TransferLogger.getInstance().w(TAG, "目标设备任务创建失败: HTTP " + response.code());
             }
         }
         return false;
@@ -157,6 +167,8 @@ public class DataPushManager {
      * 推送数据（支持断点续传和自动重试）
      */
     private void pushData(String host, int port, PushTask task) {
+        TransferLogger.getInstance().d(TAG, "开始推送数据: taskId=" + task.getTaskId()
+                + ", host=" + host + ", port=" + port + ", total=" + task.getTotalCount());
         task.setStatus(PushTask.STATUS_TRANSFERRING);
         notifyProgress(task);
 
@@ -164,6 +176,9 @@ public class DataPushManager {
         int total = task.getTotalCount();
 
         while (offset < total) {
+            // 暂停检查点：暂停时阻塞等待恢复
+            task.waitWhilePaused();
+
             boolean success = false;
             int retryCount = 0;
 
@@ -172,6 +187,7 @@ public class DataPushManager {
                     // 获取数据页
                     List<?> items = getDataPage(task.getType(), offset, PAGE_SIZE, task.getItems());
                     if (items == null || items.isEmpty()) {
+                        TransferLogger.getInstance().w(TAG, "数据页为空，终止传输: taskId=" + task.getTaskId() + ", offset=" + offset);
                         break;
                     }
 
@@ -198,13 +214,17 @@ public class DataPushManager {
 
                             // 更新进度
                             notifyProgress(task);
+                            TransferLogger.getInstance().i(TAG, "推送进度: taskId=" + task.getTaskId()
+                                    + ", offset=" + offset + "/" + total + ", 本页条数=" + items.size());
                         } else {
                             retryCount++;
+                            TransferLogger.getInstance().w(TAG, "推送数据失败: HTTP " + response.code()
+                                    + ", taskId=" + task.getTaskId() + ", retry=" + retryCount);
                             Thread.sleep(1000L * retryCount); // 递增延迟
                         }
                     }
                 } catch (Exception e) {
-                    Log.e(TAG, "Push data failed, retry " + retryCount, e);
+                    TransferLogger.getInstance().e(TAG, "Push data failed, retry " + retryCount, e);
                     retryCount++;
                     try {
                         Thread.sleep(1000L * retryCount);
@@ -218,6 +238,7 @@ public class DataPushManager {
             if (!success) {
                 task.setStatus(PushTask.STATUS_FAILED);
                 notifyFailed(task, "传输失败，已重试" + MAX_RETRY + "次");
+                TransferLogger.getInstance().e(TAG, "推送失败，已重试" + MAX_RETRY + "次: taskId=" + task.getTaskId());
                 return;
             }
         }
@@ -226,6 +247,7 @@ public class DataPushManager {
         task.setTransferredCount(total);
         notifyCompleted(task);
         activeTasks.remove(task.getTaskId());
+        TransferLogger.getInstance().i(TAG, "推送完成: taskId=" + task.getTaskId() + ", 共" + total + "条");
     }
 
     /**
@@ -374,6 +396,7 @@ public class DataPushManager {
      * 释放资源
      */
     public void release() {
+        TransferLogger.getInstance().d(TAG, "释放推送管理器资源");
         executor.shutdown();
         activeTasks.clear();
         listeners.clear();

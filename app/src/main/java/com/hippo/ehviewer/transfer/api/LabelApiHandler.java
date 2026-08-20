@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.dao.DownloadInfo;
@@ -25,6 +24,7 @@ import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -45,7 +45,7 @@ public class LabelApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
         
         // /api/v1/labels - 标签列表
         if (uri.equals("/api/v1/labels")) {
@@ -70,11 +70,12 @@ public class LabelApiHandler extends BaseApiHandler {
             String cacheKey = "labels:list";
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for labels list");
+                TransferLogger.getInstance().d(TAG, "Cache hit for labels list");
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
             List<DownloadLabel> labels = EhDB.getAllDownloadLabelList();
+            TransferLogger.getInstance().d(TAG, "获取标签列表: " + (labels != null ? labels.size() : 0) + " 个标签");
             
             StringBuilder sb = new StringBuilder();
             sb.append("{\"labels\":[");
@@ -113,7 +114,7 @@ public class LabelApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error listing labels", e);
+            TransferLogger.getInstance().e(TAG, "Error listing labels", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -125,12 +126,13 @@ public class LabelApiHandler extends BaseApiHandler {
         try {
             int page = RequestParser.getIntQueryParameter(session, "page", 1);
             int limit = RequestParser.getIntQueryParameter(session, "limit", 20);
+            TransferLogger.getInstance().d(TAG, "获取标签画廊: label=" + label + ", page=" + page + ", limit=" + limit);
             
             // Check cache
             String cacheKey = ResponseCache.buildKey("label_galleries", label, String.valueOf(page), String.valueOf(limit));
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for label galleries: " + label);
+                TransferLogger.getInstance().d(TAG, "Cache hit for label galleries: " + label);
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -178,11 +180,12 @@ public class LabelApiHandler extends BaseApiHandler {
             
             // Store in cache
             ResponseCache.getInstance().put(cacheKey, responseJson);
-            
+
+            TransferLogger.getInstance().i(TAG, "标签画廊: label=" + label + ", total=" + total + ", 返回 " + pageList.size() + " 个");
             return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error listing label galleries", e);
+            TransferLogger.getInstance().e(TAG, "Error listing label galleries", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

@@ -1,8 +1,6 @@
 package com.hippo.ehviewer.task.impl
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.DownloadedFileManager
 import com.hippo.ehviewer.DownloadedFileManagerScanListener
@@ -16,8 +14,6 @@ import kotlinx.coroutines.runBlocking
  * 扫描下载文件任务
  */
 class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
-    
-    private val mainHandler = Handler(Looper.getMainLooper())
     
     @Volatile
     private var isPausedFlag = false
@@ -45,6 +41,11 @@ class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
             updateProgress(0, context.getString(R.string.scan_download_files_counting))
             delay(500) // 给用户一些反馈时间
             
+            // 使用 CountDownLatch 等待异步扫描完成，保证 execute() 返回时扫描结果已确定，
+            // 异常才能正确上抛给运行任务的代码统一处理
+            val scanDone = java.util.concurrent.CountDownLatch(1)
+            val scanError = java.util.concurrent.atomic.AtomicReference<Exception?>(null)
+            
             // 创建进度监听器
             val scanListener = object : DownloadedFileManagerScanListener {
                 override fun onProgress(current: Int, total: Int) {
@@ -60,21 +61,35 @@ class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
                 }
                 
                 override fun onCompleted() {
-                    mainHandler.post {
-                        updateProgress(100, context.getString(R.string.scan_download_files_completed))
-                        notifyCompleted()
-                    }
+                    // 进度与完成通知统一由 execute() 在等待结束后处理，这里只需放行等待
+                    scanDone.countDown()
                 }
                 
                 override fun onError(e: Exception) {
-                    notifyError(e)
+                    scanError.set(e)
+                    scanDone.countDown()
                 }
             }
             
             // 执行扫描
             manager.scanDownloadDirectories(scanListener)
+
+            // 等待扫描完成。并发扫描会通过 onError 立即返回，
+            // 此处仅在回调异常未触发时兜底等待 60 秒后按失败处理，避免任务卡死。
+            val completed = scanDone.await(60, java.util.concurrent.TimeUnit.SECONDS)
+            if (!completed) {
+                val e = IllegalStateException("扫描超时，请稍后重试")
+                notifyError(e)
+                return Result.failure(e)
+            }
+
+            scanError.get()?.let { e ->
+                notifyError(e)
+                return Result.failure(e)
+            }
             
-            // 扫描是异步的，结果会通过监听器回调
+            updateProgress(100, context.getString(R.string.scan_download_files_completed))
+            notifyCompleted()
             Result.success(Unit)
             
         } catch (e: Exception) {

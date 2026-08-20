@@ -243,6 +243,12 @@ components:
             type: integer
             format: int64
           example: [3344621, 3344622]
+        deleteFiles:
+          type: boolean
+          description: |
+            true=同时删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+            未指定时取查询参数 deleteFiles，其次全局设置 delete_files_on_remote_delete。
+          default: null
 
     PageListResponse:
       type: object
@@ -596,6 +602,116 @@ components:
           type: integer
           example: 1
 
+    DeleteTaskAccepted:
+      type: object
+      required: [success, accepted, taskId, status]
+      properties:
+        success:
+          type: boolean
+          example: true
+        accepted:
+          type: boolean
+          example: true
+        taskId:
+          type: string
+          example: "delete_range_download_1700000000000_1"
+        status:
+          type: string
+          example: "pending"
+        taskClassName:
+          type: string
+          example: "com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask"
+
+    BackgroundTask:
+      type: object
+      properties:
+        taskId:
+          type: string
+          example: "b0000000-0000-0000-0000-000000000000"
+        taskName:
+          type: string
+          example: "清理冗余文件"
+        taskDescription:
+          type: string
+          nullable: true
+        taskType:
+          type: string
+          enum: [DOWNLOAD, SYNC, SCAN, CLEANUP, MERGE, UPDATE, TRANSFER, IMPORT, EXPORT, BACKUP, OTHER]
+        taskClassName:
+          type: string
+          example: "com.hippo.ehviewer.task.CleanRedundancyTask"
+        startTime:
+          type: integer
+          format: int64
+        currentProgress:
+          type: integer
+        totalProgress:
+          type: integer
+          example: -1
+        progressPercentage:
+          type: integer
+          example: -1
+        progressDetail:
+          type: string
+          nullable: true
+        state:
+          type: string
+          enum: [PENDING, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED]
+        isPaused:
+          type: boolean
+        isCompleted:
+          type: boolean
+        isCancelled:
+          type: boolean
+        isPausable:
+          type: boolean
+          description: 任务是否支持暂停
+        isQueued:
+          type: boolean
+        canStart:
+          type: boolean
+        runningTimeMs:
+          type: integer
+          format: int64
+        estimatedRemainingMs:
+          type: integer
+          format: int64
+          example: -1
+        errorMessage:
+          type: string
+          nullable: true
+
+    BackgroundTasksResponse:
+      type: object
+      properties:
+        active:
+          type: array
+          items:
+            $ref: "#/components/schemas/BackgroundTask"
+        completed:
+          type: array
+          items:
+            $ref: "#/components/schemas/BackgroundTask"
+        total:
+          type: integer
+
+    BackgroundTaskType:
+      type: object
+      properties:
+        taskClassName:
+          type: string
+        taskType:
+          type: string
+        requiresParams:
+          type: boolean
+        paramType:
+          type: string
+          enum: [NONE, GALLERY_LIST, FILE_PATH, URI, CUSTOM]
+        displayName:
+          type: string
+        description:
+          type: string
+
     ThumbnailParams:
       type: object
       properties:
@@ -627,6 +743,10 @@ components:
         status:
           type: string
           enum: [pending, accepted, rejected, in_progress, transferring, completed, failed, cancelled]
+        paused:
+          type: boolean
+          description: 是否已暂停
+          example: false
         sourceDevice:
           type: string
           example: "Pixel 7"
@@ -964,7 +1084,7 @@ paths:
     delete:
       tags: [Galleries]
       summary: 异步删除画廊
-      description: 创建删除任务。任务完成前请通过 /api/v1/tasks/{taskId} 查询状态。
+      description: 提交删除后台任务。任务完成前请通过 /api/v1/background-tasks/{taskId} 查询状态。
       operationId: deleteGallery
       parameters:
         - name: gid
@@ -973,13 +1093,21 @@ paths:
           schema:
             type: integer
             format: int64
+        - name: deleteFiles
+          in: query
+          description: |
+            true/1=删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+            未指定时取全局设置 delete_files_on_remote_delete。
+          schema:
+            type: boolean
+            default: null
       responses:
         "202":
-          description: 删除任务已创建
+          description: 删除任务已提交为后台任务，通过 /api/v1/background-tasks/{taskId} 轮询状态
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AsyncTaskResponse"
+                $ref: "#/components/schemas/DeleteTaskAccepted"
 
   # ==================== Integrity Check ====================
   /api/v1/folders/{folder}/files/{filename}/hash:
@@ -1161,6 +1289,15 @@ paths:
       tags: [Galleries]
       summary: 批量删除画廊
       operationId: batchDeleteGalleries
+      parameters:
+        - name: deleteFiles
+          in: query
+          description: |
+            true/1=删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+            未指定时取全局设置 delete_files_on_remote_delete。
+          schema:
+            type: boolean
+            default: null
       requestBody:
         required: true
         content:
@@ -1168,12 +1305,12 @@ paths:
             schema:
               $ref: "#/components/schemas/GalleryBatchDeleteRequest"
       responses:
-        "200":
-          description: 批量删除结果
+        "202":
+          description: 删除任务已提交为后台任务，通过 /api/v1/background-tasks/{taskId} 轮询状态
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BatchDeleteResponse"
+                $ref: "#/components/schemas/DeleteTaskAccepted"
 
   /api/v1/galleries/{gid}/thumbnail:
     get:
@@ -1873,21 +2010,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/DeviceInfo"
 
-  # ==================== Debug ====================
-  /api/v1/debug:
-    get:
-      tags: [Debug]
-      summary: API 调试页面
-      description: 返回交互式 API 测试页面（HTML）
-      operationId: getDebugPage
-      responses:
-        "200":
-          description: 调试页面
-          content:
-            text/html:
-              schema:
-                type: string
-
   # ==================== OpenAPI ====================
   /openapi.yaml:
     get:
@@ -1933,7 +2055,7 @@ paths:
           schema:
             type: string
           enum: [all, push, compress, delete]
-            default: all
+          default: all
         - name: status
           in: query
           description: 状态筛选
@@ -2029,6 +2151,429 @@ paths:
       summary: 取消/删除任务
       description: 进行中的任务将被取消，已完成的任务将被移除
       operationId: deleteTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ==================== Transfer Task Control ====================
+
+  /api/v1/tasks/{taskId}/pause:
+    post:
+      tags: [Tasks]
+      summary: 暂停传输任务
+      description: 暂停进行中的推送/压缩/删除任务，执行循环会在检查点阻塞等待恢复
+      operationId: pauseTransferTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: true
+        "400":
+          description: 任务不可暂停
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/tasks/{taskId}/resume:
+    post:
+      tags: [Tasks]
+      summary: 恢复传输任务
+      operationId: resumeTransferTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: false
+        "400":
+          description: 任务未处于暂停状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/tasks/{taskId}/stop:
+    post:
+      tags: [Tasks]
+      summary: 停止传输任务
+      description: 停止进行中的传输任务（标记为已取消）
+      operationId: stopTransferTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "400":
+          description: 任务已完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ==================== Background Tasks ====================
+
+  /api/v1/background-tasks:
+    get:
+      tags: [BackgroundTasks]
+      summary: 获取所有后台任务
+      description: 获取活跃和已完成的后台任务列表
+      operationId: getBackgroundTasks
+      parameters:
+        - name: status
+          in: query
+          description: 筛选状态
+          schema:
+            type: string
+            enum: [all, active, completed]
+            default: all
+      responses:
+        "200":
+          description: 后台任务列表
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackgroundTasksResponse"
+    post:
+      tags: [BackgroundTasks]
+      summary: 创建后台任务
+      description: |
+        通过任务类名创建后台任务。
+        无参数任务 body: {"className": "com.hippo.ehviewer.task.CleanRedundancyTask"}
+        带参数任务（gids 数组）body: {"className": "...", "params": {"gids": [12345, 67890]}}
+      operationId: createBackgroundTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [className]
+              properties:
+                className:
+                  type: string
+                  description: 任务类名（可通过 /api/v1/background-tasks/task-types 获取）
+                params:
+                  type: object
+                  description: 任务参数（gids/uri/filePath）
+      responses:
+        "202":
+          description: 任务已创建
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AsyncTaskResponse"
+        "400":
+          description: 类名缺失或任务/参数不支持
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/task-types:
+    get:
+      tags: [BackgroundTasks]
+      summary: 获取可创建的任务类型
+      operationId: getBackgroundTaskTypes
+      responses:
+        "200":
+          description: 任务类型列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskTypes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/BackgroundTaskType"
+                  total:
+                    type: integer
+
+  /api/v1/background-tasks/{taskId}:
+    get:
+      tags: [BackgroundTasks]
+      summary: 获取后台任务详情
+      operationId: getBackgroundTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 后台任务详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BackgroundTask"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags: [BackgroundTasks]
+      summary: 取消/删除后台任务
+      description: 进行中的任务将被取消，已完成的任务将被移除
+      operationId: deleteBackgroundTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/{taskId}/logs:
+    get:
+      tags: [BackgroundTasks]
+      summary: 获取后台任务日志
+      operationId: getBackgroundTaskLogs
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 任务日志
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  taskId:
+                    type: string
+                  taskName:
+                    type: string
+                  logs:
+                    type: array
+                    items:
+                      type: string
+                  total:
+                    type: integer
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/{taskId}/start:
+    post:
+      tags: [BackgroundTasks]
+      summary: 开始/恢复后台任务
+      description: 暂停的任务将被恢复；排队中的任务等待自动启动
+      operationId: startBackgroundTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  state:
+                    type: string
+                  message:
+                    type: string
+        "400":
+          description: 任务已完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/{taskId}/pause:
+    post:
+      tags: [BackgroundTasks]
+      summary: 暂停后台任务
+      description: 仅支持实现了暂停逻辑的任务（isPausable=true）
+      operationId: pauseBackgroundTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: true
+        "400":
+          description: 任务不支持暂停或已暂停
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/{taskId}/resume:
+    post:
+      tags: [BackgroundTasks]
+      summary: 恢复后台任务
+      operationId: resumeBackgroundTask
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 操作成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  taskId:
+                    type: string
+                  paused:
+                    type: boolean
+                    example: false
+        "400":
+          description: 任务未处于暂停状态
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 任务不存在
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/background-tasks/{taskId}/stop:
+    post:
+      tags: [BackgroundTasks]
+      summary: 停止后台任务
+      description: 优雅停止后台任务（等同取消）
+      operationId: stopBackgroundTask
       parameters:
         - name: taskId
           in: path
@@ -2243,6 +2788,15 @@ paths:
       tags: [Downloads]
       summary: 批量删除下载任务
       operationId: batchDeleteDownloads
+      parameters:
+        - name: deleteFiles
+          in: query
+          description: |
+            true/1=删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+            未指定时取全局设置 delete_files_on_remote_delete。
+          schema:
+            type: boolean
+            default: null
       requestBody:
         required: true
         content:
@@ -2254,13 +2808,19 @@ paths:
                   type: array
                   items:
                     type: integer
+                deleteFiles:
+                  type: boolean
+                  description: |
+                    true=同时删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+                    未指定时取查询参数 deleteFiles，其次全局设置 delete_files_on_remote_delete。
+                  default: null
       responses:
         "202":
-          description: 批量删除任务已创建
+          description: 删除任务已提交为后台任务，通过 /api/v1/background-tasks/{taskId} 轮询状态
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AsyncTaskResponse"
+                $ref: "#/components/schemas/DeleteTaskAccepted"
 
   /api/v1/downloads/{gid}:
     get:
@@ -2296,13 +2856,21 @@ paths:
           required: true
           schema:
             type: integer
+        - name: deleteFiles
+          in: query
+          description: |
+            true/1=删除本地文件；false=移入回收站（下载目录/.recycle_bin）。
+            未指定时取全局设置 delete_files_on_remote_delete。
+          schema:
+            type: boolean
+            default: null
       responses:
         "202":
-          description: 删除任务已创建
+          description: 删除任务已提交为后台任务，通过 /api/v1/background-tasks/{taskId} 轮询状态
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AsyncTaskResponse"
+                $ref: "#/components/schemas/DeleteTaskAccepted"
 
   /api/v1/downloads/{gid}/start:
     post:

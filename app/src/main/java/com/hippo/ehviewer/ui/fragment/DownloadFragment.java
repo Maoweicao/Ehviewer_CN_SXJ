@@ -33,8 +33,6 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.app.NotificationCompat;
 import androidx.preference.Preference;
-import androidx.preference.PreferenceFragmentCompat;
-
 import com.hippo.preference.ListPreference;
 
 import com.hippo.ehviewer.AppConfig;
@@ -77,7 +75,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-public class DownloadFragment extends PreferenceFragmentCompat implements
+public class DownloadFragment extends BasePreferenceFragmentCompat implements
         Preference.OnPreferenceChangeListener,
         Preference.OnPreferenceClickListener {
 

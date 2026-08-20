@@ -20,7 +20,6 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Environment;
 import android.os.StatFs;
-import android.util.Log;
 
 import com.hippo.ehviewer.BuildConfig;
 import com.hippo.ehviewer.Settings;
@@ -29,6 +28,7 @@ import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
 import java.io.File;
@@ -52,7 +52,7 @@ public class SystemApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
         
         // /api/v1/system/info
         if (uri.equals("/api/v1/system/info")) {
@@ -62,6 +62,23 @@ public class SystemApiHandler extends BaseApiHandler {
         // /api/v1/system/stats
         if (uri.equals("/api/v1/system/stats")) {
             return handleSystemStats(session);
+        }
+        
+        // /api/v1/system/cache
+        if (uri.equals("/api/v1/system/cache")) {
+            return handleCacheList(session);
+        }
+        
+        return ResponseBuilder.notFound("Endpoint");
+    }
+    
+    @Override
+    public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
+        logRequest("POST", uri, session);
+        
+        // /api/v1/system/cache/clear
+        if (uri.equals("/api/v1/system/cache/clear")) {
+            return handleCacheClear(session);
         }
         
         return ResponseBuilder.notFound("Endpoint");
@@ -76,7 +93,7 @@ public class SystemApiHandler extends BaseApiHandler {
             String cacheKey = "system_info";
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for system info");
+                TransferLogger.getInstance().d(TAG, "Cache hit for system info");
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -132,7 +149,7 @@ public class SystemApiHandler extends BaseApiHandler {
                 sb.append(",\"storageUsedFormatted\":\"").append(formatSize(usedSpace)).append("\"");
                 sb.append(",\"storageFreeFormatted\":\"").append(formatSize(freeSpace)).append("\"");
             } catch (Exception e) {
-                Log.w(TAG, "Failed to get storage info", e);
+                TransferLogger.getInstance().w(TAG, "Failed to get storage info", e);
             }
             
             // 认证模式
@@ -151,11 +168,13 @@ public class SystemApiHandler extends BaseApiHandler {
             
             // Store in cache (system info changes infrequently)
             ResponseCache.getInstance().put(cacheKey, responseJson);
-            
+
+            TransferLogger.getInstance().d(TAG, "系统信息: totalGalleries=" + totalGalleries +
+                    ", downloadedGalleries=" + downloadedGalleries + ", totalPages=" + totalPages);
             return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting system info", e);
+            TransferLogger.getInstance().e(TAG, "Error getting system info", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -169,7 +188,7 @@ public class SystemApiHandler extends BaseApiHandler {
             String cacheKey = "system_stats";
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for system stats");
+                TransferLogger.getInstance().d(TAG, "Cache hit for system stats");
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -216,11 +235,74 @@ public class SystemApiHandler extends BaseApiHandler {
             
             // Store in cache (shorter TTL since download status changes)
             ResponseCache.getInstance().put(cacheKey, responseJson, 60 * 1000); // 1 minute
-            
+
+            TransferLogger.getInstance().d(TAG, "系统统计: total=" + totalGalleries +
+                    ", downloading=" + downloading + ", waiting=" + waiting +
+                    ", finished=" + finished + ", failed=" + failed);
             return ResponseBuilder.jsonSuccess(responseJson);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting system stats", e);
+            TransferLogger.getInstance().e(TAG, "Error getting system stats", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+    
+    /**
+     * 获取Web服务器缓存列表
+     */
+    private NanoHTTPD.Response handleCacheList(NanoHTTPD.IHTTPSession session) {
+        try {
+            java.util.List<ResponseCache.CacheEntrySnapshot> snapshots = ResponseCache.getInstance().getSnapshot();
+            StringBuilder sb = new StringBuilder();
+            sb.append("{");
+            sb.append("\"success\":true");
+            sb.append(",\"total\":").append(snapshots.size());
+            long totalBytes = 0;
+            for (ResponseCache.CacheEntrySnapshot s : snapshots) {
+                totalBytes += s.size;
+            }
+            sb.append(",\"totalBytes\":").append(totalBytes);
+            sb.append(",\"totalBytesFormatted\":\"").append(formatSize(totalBytes)).append("\"");
+            sb.append(",\"entries\":[");
+            for (int i = 0; i < snapshots.size(); i++) {
+                ResponseCache.CacheEntrySnapshot s = snapshots.get(i);
+                if (i > 0) sb.append(",");
+                sb.append("{");
+                sb.append("\"key\":\"").append(escapeJson(s.key)).append("\"");
+                sb.append(",\"size\":").append(s.size);
+                sb.append(",\"sizeFormatted\":\"").append(formatSize(s.size)).append("\"");
+                sb.append(",\"createdAt\":").append(s.createdAt);
+                sb.append(",\"ttlMs\":").append(s.ttlMs);
+                sb.append(",\"expiresAt\":").append(s.expiresAt);
+                sb.append(",\"remainingMs\":").append(s.remainingMs);
+                sb.append("}");
+            }
+            sb.append("]}");
+
+            String responseJson = sb.toString();
+            TransferLogger.getInstance().d(TAG, "缓存列表: total=" + snapshots.size() + ", totalBytes=" + totalBytes);
+            return ResponseBuilder.jsonSuccess(responseJson);
+
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "Error getting cache list", e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+    
+    /**
+     * 清空Web服务器缓存
+     */
+    private NanoHTTPD.Response handleCacheClear(NanoHTTPD.IHTTPSession session) {
+        try {
+            int before = ResponseCache.getInstance().size();
+            ResponseCache.getInstance().clear();
+            int cleared = before;
+            String responseJson = "{\"success\":true,\"cleared\":" + cleared + ",\"message\":\"Cache cleared\"}";
+            TransferLogger.getInstance().d(TAG, "清空缓存: cleared=" + cleared);
+            return ResponseBuilder.jsonSuccess(responseJson);
+
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "Error clearing cache", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

@@ -17,12 +17,12 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -54,7 +54,7 @@ public class ConnectApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         // GET /api/v1/connect/peers - 获取已连接设备列表
         if (uri.equals("/api/v1/connect/peers")) {
@@ -66,7 +66,7 @@ public class ConnectApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         // POST /api/v1/connect - 注册设备连接
         if (uri.equals("/api/v1/connect")) {
@@ -78,7 +78,7 @@ public class ConnectApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("DELETE", uri);
+        logRequest("DELETE", uri, session);
 
         // DELETE /api/v1/connect - 注销设备连接
         if (uri.equals("/api/v1/connect")) {
@@ -102,6 +102,7 @@ public class ConnectApiHandler extends BaseApiHandler {
             String deviceName = json.getString("deviceName");
             String deviceType = json.getString("deviceType");
             int port = json.getIntValue("port");
+            TransferLogger.getInstance().i(TAG, "设备连接请求: deviceId=" + deviceId + ", name=" + deviceName + ", type=" + deviceType);
 
             if (deviceId == null || deviceId.isEmpty()) {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "deviceId is required");
@@ -125,7 +126,7 @@ public class ConnectApiHandler extends BaseApiHandler {
 
             peers.put(deviceId, peer);
 
-            Log.d(TAG, "Device connected: " + deviceName + " (" + deviceId + ") from " + remoteIp);
+            TransferLogger.getInstance().i(TAG, "设备已连接: " + deviceName + " (" + deviceId + ") from " + remoteIp);
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -136,7 +137,7 @@ public class ConnectApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to connect", e);
+            TransferLogger.getInstance().e(TAG, "Failed to connect", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -164,7 +165,7 @@ public class ConnectApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Device");
             }
 
-            Log.d(TAG, "Device disconnected: " + removed.deviceName + " (" + deviceId + ")");
+            TransferLogger.getInstance().i(TAG, "设备已断开: " + removed.deviceName + " (" + deviceId + ")");
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -174,7 +175,7 @@ public class ConnectApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to disconnect", e);
+            TransferLogger.getInstance().e(TAG, "Failed to disconnect", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -204,10 +205,11 @@ public class ConnectApiHandler extends BaseApiHandler {
             response.put("peers", peersArray);
             response.put("total", peersArray.size());
 
+            TransferLogger.getInstance().d(TAG, "获取已连接设备列表: " + peersArray.size() + " 台");
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get peers", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get peers", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -222,7 +224,7 @@ public class ConnectApiHandler extends BaseApiHandler {
         peers.entrySet().removeIf(entry -> {
             boolean expired = (now - entry.getValue().lastSeen) > PEER_TIMEOUT_MS;
             if (expired) {
-                Log.d(TAG, "Removing expired peer: " + entry.getValue().deviceName);
+                TransferLogger.getInstance().d(TAG, "Removing expired peer: " + entry.getValue().deviceName);
             }
             return expired;
         });

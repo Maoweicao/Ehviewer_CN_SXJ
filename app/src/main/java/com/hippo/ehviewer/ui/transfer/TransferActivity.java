@@ -17,15 +17,22 @@
 package com.hippo.ehviewer.ui.transfer;
 
 import android.app.AlertDialog;
+import android.app.PendingIntent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.graphics.Bitmap;
 import android.net.Uri;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.Parcelable;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -34,6 +41,7 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -49,8 +57,10 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.TransferService;
+import com.hippo.ehviewer.transfer.core.ConnectInfoCodec;
 import com.hippo.ehviewer.transfer.core.DeviceDiscoveryManager;
 import com.hippo.ehviewer.transfer.core.NetworkUtils;
+import com.hippo.ehviewer.transfer.core.QrUtils;
 import com.hippo.ehviewer.transfer.data.ClientInfo;
 import com.hippo.ehviewer.transfer.data.ConnectedDevice;
 import com.hippo.ehviewer.transfer.data.DiscoveredDevice;
@@ -62,6 +72,10 @@ import com.hippo.ehviewer.transfer.log.LogLevel;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.ehviewer.ui.ToolbarActivity;
 import com.hippo.ehviewer.ui.transfer.adapter.AddressListAdapter;
+import com.hippo.ehviewer.ui.transfer.adapter.ConnectedDeviceAdapter;
+import com.hippo.ehviewer.ui.transfer.adapter.DiscoveredDeviceAdapter;
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -94,6 +108,20 @@ public class TransferActivity extends ToolbarActivity implements TransferService
             }
     );
 
+    // ActivityResultLauncher for QR scan (内置扫码)
+    private final ActivityResultLauncher<ScanOptions> qrScanLauncher = registerForActivityResult(
+            new ScanContract(),
+            result -> {
+                if (result.getContents() != null) {
+                    handleQrScanResult(result.getContents());
+                }
+            }
+    );
+
+    // NFC
+    private NfcAdapter nfcAdapter;
+    private PendingIntent nfcPendingIntent;
+
     // UI components
     private Button startButton;
     private Button stopButton;
@@ -116,6 +144,8 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private com.google.android.material.switchmaterial.SwitchMaterial remoteDeleteSwitch;
     private com.google.android.material.switchmaterial.SwitchMaterial remoteManagementSwitch;
     private View remoteManagementContent;
+    private Button cacheViewButton;
+    private Button cacheClearButton;
 
     // Send data
     private Button sendBookmarksAll;
@@ -130,9 +160,13 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private EditText addressInput;
     private Button connectButton;
     private Button refreshDevicesButton;
+    private Button scanQrButton;
+    private Button showQrButton;
     private Spinner refreshIntervalSpinner;
     private RecyclerView discoveredListView;
     private RecyclerView connectedListView;
+    private DiscoveredDeviceAdapter discoveredAdapter;
+    private ConnectedDeviceAdapter connectedAdapter;
 
     // Log section
     private View logHeader;
@@ -197,6 +231,8 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         remoteDeleteSwitch = findViewById(R.id.remote_delete_switch);
         remoteManagementSwitch = findViewById(R.id.remote_management_switch);
         remoteManagementContent = findViewById(R.id.remote_management_content);
+        cacheViewButton = findViewById(R.id.cache_view_button);
+        cacheClearButton = findViewById(R.id.cache_clear_button);
 
         // Initialize remote management switch
         remoteManagementSwitch.setChecked(Settings.isRemoteManagementEnabled());
@@ -231,6 +267,8 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         addressInput = findViewById(R.id.address_input);
         connectButton = findViewById(R.id.connect_button);
         refreshDevicesButton = findViewById(R.id.refresh_devices);
+        scanQrButton = findViewById(R.id.scan_qr_button);
+        showQrButton = findViewById(R.id.show_qr_button);
         refreshIntervalSpinner = findViewById(R.id.refresh_interval_spinner);
         discoveredListView = findViewById(R.id.discovered_list);
         connectedListView = findViewById(R.id.connected_list);
@@ -242,10 +280,18 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         clientListView.setAdapter(clientAdapter);
 
         // Setup discovered list
+        discoveredAdapter = new DiscoveredDeviceAdapter(this);
+        discoveredAdapter.setOnConnectListener(this::connectToDiscoveredDevice);
         discoveredListView.setLayoutManager(new LinearLayoutManager(this));
+        discoveredListView.setAdapter(discoveredAdapter);
 
         // Setup connected list
+        connectedAdapter = new ConnectedDeviceAdapter(this);
+        connectedAdapter.setOnPushListener(device ->
+                Toast.makeText(this, "推送功能即将支持: " + device.getName(), Toast.LENGTH_SHORT).show());
+        connectedAdapter.setOnDisconnectListener(this::disconnectFromDevice);
         connectedListView.setLayoutManager(new LinearLayoutManager(this));
+        connectedListView.setAdapter(connectedAdapter);
 
         // Setup refresh interval spinner
         setupRefreshIntervalSpinner();
@@ -256,6 +302,8 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         remoteSettingsButton.setOnClickListener(v -> showRemoteSettingsDialog());
         remoteOpenBrowser.setOnClickListener(v -> openRemoteInBrowser());
         remoteCopyUrl.setOnClickListener(v -> copyRemoteUrl());
+        cacheViewButton.setOnClickListener(v -> showCacheDialog());
+        cacheClearButton.setOnClickListener(v -> clearCacheWithConfirm());
 
         sendBookmarksAll.setOnClickListener(v -> sendAll("bookmarks"));
         sendBookmarksSelect.setOnClickListener(v -> openDataSelector("bookmarks"));
@@ -267,6 +315,8 @@ public class TransferActivity extends ToolbarActivity implements TransferService
 
         connectButton.setOnClickListener(v -> connectToDevice());
         refreshDevicesButton.setOnClickListener(v -> refreshDevices());
+        scanQrButton.setOnClickListener(v -> startQrScan());
+        showQrButton.setOnClickListener(v -> showQrDialog());
 
         // Initialize device discovery
         deviceDiscoveryManager = new DeviceDiscoveryManager(this);
@@ -276,6 +326,34 @@ public class TransferActivity extends ToolbarActivity implements TransferService
 
         // Initialize transfer client manager
         transferClientManager = TransferClientManager.getInstance(this);
+        transferClientManager.addListener(new TransferClientManager.ClientConnectionListener() {
+            @Override
+            public void onConnected(ConnectedDevice device) {
+                runOnUiThread(() -> {
+                    refreshConnectedList();
+                    Toast.makeText(TransferActivity.this,
+                            getString(R.string.device_connected, device.getName()),
+                            Toast.LENGTH_SHORT).show();
+                    updateUI();
+                });
+            }
+
+            @Override
+            public void onDisconnected(ConnectedDevice device) {
+                runOnUiThread(() -> {
+                    refreshConnectedList();
+                    Toast.makeText(TransferActivity.this,
+                            R.string.wifi_server_disconnect, Toast.LENGTH_SHORT).show();
+                });
+            }
+
+            @Override
+            public void onConnectionFailed(String host, int port, String error) {
+                runOnUiThread(() -> Toast.makeText(TransferActivity.this,
+                        getString(R.string.connection_failed_format, host + ":" + port, error),
+                        Toast.LENGTH_LONG).show());
+            }
+        });
 
         // Initialize relay task section
         setupRelayTaskSection();
@@ -283,7 +361,206 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         // Initialize log section
         setupLogSection();
 
+        // Initialize NFC 碰一碰连接
+        initNfc();
+
         updateUI();
+    }
+
+    // ==================== 二维码连接 ====================
+
+    private void startQrScan() {
+        ScanOptions options = new ScanOptions();
+        options.setDesiredBarcodeFormats(ScanOptions.QR_CODE);
+        options.setPrompt(getString(R.string.scan_qr_connect));
+        options.setCameraId(0);
+        options.setBeepEnabled(false);
+        qrScanLauncher.launch(options);
+    }
+
+    private void handleQrScanResult(String content) {
+        TransferLogger.getInstance().i(TAG, "扫码结果: " + content);
+        ConnectInfoCodec.ConnectParams params = ConnectInfoCodec.decode(content);
+        if (params == null) {
+            Toast.makeText(this, R.string.invalid_qr_content, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        connectToDevice(params.host, params.port);
+    }
+
+    private void showQrDialog() {
+        String host = NetworkUtils.getWifiIpAddress();
+        if (host == null) {
+            Toast.makeText(this, R.string.no_wifi_address, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        int port = getServerPort();
+        String deviceName = android.os.Build.MODEL;
+        String content = ConnectInfoCodec.encode(host, port, deviceName);
+
+        final int sizePx = getResources().getDimensionPixelSize(R.dimen.qr_code_size);
+        final Bitmap qrBitmap = QrUtils.generateQrBitmap(content, sizePx);
+        if (qrBitmap == null) {
+            Toast.makeText(this, R.string.invalid_qr_content, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_show_qr, null);
+        ImageView qrImage = dialogView.findViewById(R.id.qr_image);
+        TextView qrHint = dialogView.findViewById(R.id.qr_hint);
+        TextView qrAddress = dialogView.findViewById(R.id.qr_address);
+
+        qrImage.setImageBitmap(qrBitmap);
+        qrHint.setText(R.string.my_qr_code_hint);
+        qrAddress.setText(getString(R.string.access_address) + " http://" + host + ":" + port);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.my_qr_code_title)
+                .setView(dialogView)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    // ==================== NFC 碰一碰连接 ====================
+
+    private void initNfc() {
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+        if (nfcAdapter == null) {
+            TextView nfcHint = findViewById(R.id.nfc_hint);
+            if (nfcHint != null) {
+                nfcHint.setText(R.string.nfc_not_supported);
+            }
+            return;
+        }
+
+        try {
+            Intent intent = new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            nfcPendingIntent = PendingIntent.getActivity(this, 0, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "初始化NFC失败", e);
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        enableNfcForegroundDispatch();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        disableNfcForegroundDispatch();
+    }
+
+    private void enableNfcForegroundDispatch() {
+        if (nfcAdapter == null || nfcPendingIntent == null || !nfcAdapter.isEnabled()) {
+            return;
+        }
+        try {
+            IntentFilter ndefFilter = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+            ndefFilter.addDataType("*/*");
+            IntentFilter techFilter = new IntentFilter(NfcAdapter.ACTION_TECH_DISCOVERED);
+            IntentFilter tagFilter = new IntentFilter(NfcAdapter.ACTION_TAG_DISCOVERED);
+            IntentFilter[] filters = new IntentFilter[]{ndefFilter, techFilter, tagFilter};
+            String[][] techLists = new String[][]{new String[]{"android.nfc.tech.Ndef"}};
+            nfcAdapter.enableForegroundDispatch(this, nfcPendingIntent, filters, techLists);
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "启用NFC前台分发失败", e);
+        }
+    }
+
+    private void disableNfcForegroundDispatch() {
+        if (nfcAdapter != null) {
+            try {
+                nfcAdapter.disableForegroundDispatch(this);
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        handleNfcIntent(intent);
+    }
+
+    private void handleNfcIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String action = intent.getAction();
+        if (!NfcAdapter.ACTION_NDEF_DISCOVERED.equals(action)
+                && !NfcAdapter.ACTION_TECH_DISCOVERED.equals(action)
+                && !NfcAdapter.ACTION_TAG_DISCOVERED.equals(action)) {
+            return;
+        }
+
+        Parcelable[] rawMessages = intent.getParcelableArrayExtra(NfcAdapter.EXTRA_NDEF_MESSAGES);
+        if (rawMessages == null) {
+            return;
+        }
+
+        for (Parcelable rawMessage : rawMessages) {
+            NdefMessage message = (NdefMessage) rawMessage;
+            NdefRecord[] records = message.getRecords();
+            if (records == null) {
+                continue;
+            }
+            for (NdefRecord record : records) {
+                String content = parseNdefRecordPayload(record);
+                if (content == null) {
+                    continue;
+                }
+                ConnectInfoCodec.ConnectParams params = ConnectInfoCodec.decode(content);
+                if (params != null) {
+                    Toast.makeText(this,
+                            getString(R.string.nfc_connected, params.host + ":" + params.port),
+                            Toast.LENGTH_SHORT).show();
+                    connectToDevice(params.host, params.port);
+                    return;
+                }
+            }
+        }
+    }
+
+    private String parseNdefRecordPayload(NdefRecord record) {
+        try {
+            short tnf = record.getTnf();
+            byte[] payload = record.getPayload();
+            if (payload == null || payload.length == 0) {
+                return null;
+            }
+            // URI record (TNF = TNF_WELL_KNOWN, type = "U")
+            if (tnf == NdefRecord.TNF_WELL_KNOWN
+                    && java.util.Arrays.equals(record.getType(), NdefRecord.RTD_URI)) {
+                byte[] uriPayload = payload;
+                byte prefix = uriPayload[0];
+                String baseUri = URI_PREFIXES[prefix & 0xFF];
+                String rest = new String(uriPayload, 1, uriPayload.length - 1, "UTF-8");
+                return (baseUri != null ? baseUri : "") + rest;
+            }
+            // 直接以文本方式携带 URI
+            return new String(payload, "UTF-8");
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "解析NFC记录失败", e);
+            return null;
+        }
+    }
+
+    private static final String[] URI_PREFIXES = {
+            "", "http://", "https://", "http://www.", "https://www.", "ftp://", "ftps://",
+            "file://", "urn:epc:id:", "urn:epc:tag:", "urn:epc:pat:", "urn:epc:raw:", "urn:epc:",
+            "urn:nfc:"
+    };
+
+    private int getServerPort() {
+        if (isBound && transferService != null && transferService.getServerManager() != null) {
+            return transferService.getServerManager().getPort();
+        }
+        return 8080;
     }
 
     /**
@@ -918,6 +1195,79 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         return "none";
     }
 
+    /**
+     * 显示Web服务器缓存列表对话框
+     */
+    private void showCacheDialog() {
+        java.util.List<com.hippo.ehviewer.transfer.core.ResponseCache.CacheEntrySnapshot> snapshots =
+                com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().getSnapshot();
+
+        if (snapshots.isEmpty()) {
+            Toast.makeText(this, R.string.cache_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        long totalBytes = 0;
+        for (com.hippo.ehviewer.transfer.core.ResponseCache.CacheEntrySnapshot s : snapshots) {
+            totalBytes += s.size;
+        }
+
+        String[] lines = new String[snapshots.size()];
+        for (int i = 0; i < snapshots.size(); i++) {
+            com.hippo.ehviewer.transfer.core.ResponseCache.CacheEntrySnapshot s = snapshots.get(i);
+            lines[i] = s.key + "\n    大小: " + formatBytes(s.size) +
+                    " · 剩余: " + formatRemaining(s.remainingMs);
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(getString(R.string.cache_view_title) + " (" + snapshots.size() + " 条 · " + formatBytes(totalBytes) + ")")
+                .setItems(lines, null)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+    }
+
+    /**
+     * 清空Web服务器缓存（带确认）
+     */
+    private void clearCacheWithConfirm() {
+        int count = com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().size();
+        if (count == 0) {
+            Toast.makeText(this, R.string.cache_no_entries, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.cache_clear_confirm_title)
+                .setMessage(R.string.cache_clear_confirm_message)
+                .setPositiveButton(R.string.cache_clear, (dialog, which) -> {
+                    int cleared = com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().size();
+                    com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().clear();
+                    Toast.makeText(this, getString(R.string.cache_cleared, cleared), Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        } else if (bytes < 1024 * 1024) {
+            return String.format("%.1f KB", bytes / 1024.0);
+        } else {
+            return String.format("%.1f MB", bytes / (1024.0 * 1024));
+        }
+    }
+
+    private String formatRemaining(long ms) {
+        if (ms <= 0) return "0s";
+        long sec = ms / 1000;
+        if (sec < 60) return sec + "s";
+        long min = sec / 60;
+        if (min < 60) return min + "分";
+        long hour = min / 60;
+        return hour + "小时";
+    }
+
     private void updateUI() {
         TransferLogger.getInstance().d(TAG, "updateUI() 开始");
         boolean isServiceRunning = isServiceRunning();
@@ -938,6 +1288,9 @@ public class TransferActivity extends ToolbarActivity implements TransferService
 
             // Update remote access info
             updateRemoteAccessInfo();
+
+            // Refresh connected devices list
+            refreshConnectedList();
         } else {
             clientCountText.setText(getString(R.string.connected_clients_count, 0));
             statusText.setText(R.string.transfer_service_not_running);
@@ -1201,20 +1554,57 @@ public class TransferActivity extends ToolbarActivity implements TransferService
             return;
         }
 
-        // Parse address
-        String[] parts = address.split(":");
-        if (parts.length != 2) {
+        String host;
+        int port;
+        try {
+            if (address.startsWith("[")) {
+                // IPv6 形式: [::1]:8080
+                int closeBracket = address.indexOf(']');
+                if (closeBracket <= 0 || address.length() <= closeBracket + 2
+                        || address.charAt(closeBracket + 1) != ':') {
+                    throw new NumberFormatException();
+                }
+                host = address.substring(1, closeBracket);
+                port = Integer.parseInt(address.substring(closeBracket + 2));
+            } else {
+                int colon = address.lastIndexOf(':');
+                if (colon <= 0 || colon == address.length() - 1) {
+                    throw new NumberFormatException();
+                }
+                host = address.substring(0, colon);
+                port = Integer.parseInt(address.substring(colon + 1));
+            }
+        } catch (NumberFormatException e) {
             Toast.makeText(this, R.string.invalid_address, Toast.LENGTH_SHORT).show();
             return;
         }
 
-        try {
-            String host = parts[0];
-            int port = Integer.parseInt(parts[1]);
-            // TODO: Connect using TransferClientManager
-            Toast.makeText(this, "Connecting to " + address, Toast.LENGTH_SHORT).show();
-        } catch (NumberFormatException e) {
-            Toast.makeText(this, R.string.invalid_address, Toast.LENGTH_SHORT).show();
+        connectToDevice(host, port);
+    }
+
+    private void connectToDiscoveredDevice(DiscoveredDevice device) {
+        connectToDevice(device.getHost(), device.getPort());
+    }
+
+    private void connectToDevice(String host, int port) {
+        if (transferClientManager == null) {
+            transferClientManager = TransferClientManager.getInstance(this);
+        }
+        if (transferClientManager.isConnected(host, port)) {
+            Toast.makeText(this, R.string.already_connected, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        TransferLogger.getInstance().i(TAG, "手动连接: " + host + ":" + port);
+        Toast.makeText(this, getString(R.string.connecting_to, host + ":" + port),
+                Toast.LENGTH_SHORT).show();
+        transferClientManager.connect(host, port, android.os.Build.MODEL,
+                transferClientManager.getLocalDeviceId());
+    }
+
+    private void disconnectFromDevice(ConnectedDevice device) {
+        if (transferClientManager != null) {
+            transferClientManager.disconnect(device.getHost(), device.getPort());
         }
     }
 
@@ -1226,8 +1616,15 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     }
 
     private void updateDiscoveredDevices(List<DiscoveredDevice> devices) {
-        // TODO: Update discovered devices adapter
-        Log.d(TAG, "Discovered devices: " + devices.size());
+        if (discoveredAdapter != null) {
+            discoveredAdapter.setDevices(devices);
+        }
+    }
+
+    private void refreshConnectedList() {
+        if (connectedAdapter != null && transferClientManager != null) {
+            connectedAdapter.setDevices(transferClientManager.getConnectedDevices());
+        }
     }
 
     private void updateClientList(List<ClientInfo> clients) {

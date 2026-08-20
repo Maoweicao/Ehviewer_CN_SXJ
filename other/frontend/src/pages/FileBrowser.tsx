@@ -6,7 +6,6 @@ import {
   Dropdown,
   Checkbox,
   Button,
-  SpinLoading,
   Empty,
   Dialog,
   Toast,
@@ -14,6 +13,7 @@ import {
   SafeArea,
 } from 'antd-mobile'
 import api, { type Folder, type FileEntry } from '../api/client'
+import FullScreenLoading from '../components/FullScreenLoading'
 
 type ViewMode = 'roots' | 'entries' | 'preview'
 
@@ -334,9 +334,7 @@ export default function FileBrowser() {
           </div>
           <div className="page-content">
             {loading && entries.length === 0 ? (
-              <div className="loading-container">
-                <SpinLoading style={{ '--size': '48px' }} />
-              </div>
+              <FullScreenLoading text="加载目录中..." />
             ) : !loading && filteredEntries.length === 0 ? (
               <Empty description="目录为空" style={{ padding: '60px 0' }} />
             ) : (

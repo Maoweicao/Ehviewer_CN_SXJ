@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -58,7 +57,7 @@ public class DataApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         if (uri.equals("/api/v1/data/export/files")) {
             return handleGetExportFiles(session);
@@ -84,7 +83,7 @@ public class DataApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         if (uri.equals("/api/v1/data/import/bookmarks")) {
             return handleImportBookmarks(session);
@@ -454,7 +453,7 @@ public class DataApiHandler extends BaseApiHandler {
                     EhDB.putLocalFavorite(info);
                     imported++;
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to import bookmark: " + gid, e);
+                    TransferLogger.getInstance().w(TAG, "Failed to import bookmark: " + gid, e);
                     failed++;
                 }
             }
@@ -542,7 +541,7 @@ public class DataApiHandler extends BaseApiHandler {
                     EhDB.putDownloadInfo(info);
                     imported++;
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to import download: " + gid, e);
+                    TransferLogger.getInstance().w(TAG, "Failed to import download: " + gid, e);
                     failed++;
                 }
             }
@@ -669,7 +668,7 @@ public class DataApiHandler extends BaseApiHandler {
                     EhDB.putDownloadInfo(info);
                     imported++;
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to import CSV line: " + lines[i], e);
+                    TransferLogger.getInstance().w(TAG, "Failed to import CSV line: " + lines[i], e);
                     failed++;
                 }
             }

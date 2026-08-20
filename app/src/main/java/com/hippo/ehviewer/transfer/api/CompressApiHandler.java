@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -73,7 +72,7 @@ public class CompressApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         if (uri.equals("/api/v1/compress/tasks")) {
             return handleGetTasks(session);
@@ -92,7 +91,7 @@ public class CompressApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         if (uri.equals("/api/v1/compress/create")) {
             return handleCreateTask(session);
@@ -103,13 +102,65 @@ public class CompressApiHandler extends BaseApiHandler {
         if (uri.equals("/api/v1/compress/import")) {
             return handleImportScan(session);
         }
+        if (uri.matches("/api/v1/compress/tasks/[^/]+/pause")) {
+            String taskId = uri.substring("/api/v1/compress/tasks/".length(), uri.length() - "/pause".length());
+            return handlePauseTask(session, taskId);
+        }
+        if (uri.matches("/api/v1/compress/tasks/[^/]+/resume")) {
+            String taskId = uri.substring("/api/v1/compress/tasks/".length(), uri.length() - "/resume".length());
+            return handleResumeTask(session, taskId);
+        }
+        if (uri.matches("/api/v1/compress/tasks/[^/]+/stop")) {
+            String taskId = uri.substring("/api/v1/compress/tasks/".length(), uri.length() - "/stop".length());
+            return handleCancelTask(session, taskId);
+        }
 
         return ResponseBuilder.notFound("Endpoint");
     }
 
+    /**
+     * POST /api/v1/compress/tasks/{taskId}/pause
+     */
+    private NanoHTTPD.Response handlePauseTask(NanoHTTPD.IHTTPSession session, String taskId) {
+        CompressTask task = tasks.get(taskId);
+        if (task == null) {
+            return ResponseBuilder.notFound("CompressTask");
+        }
+        if (!"in_progress".equals(task.status) || task.paused) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Task cannot be paused");
+        }
+        task.paused = true;
+        TransferLogger.getInstance().i(TAG, "压缩任务已暂停: " + taskId);
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("taskId", taskId);
+        response.put("paused", true);
+        return ResponseBuilder.jsonSuccess(response.toJSONString());
+    }
+
+    /**
+     * POST /api/v1/compress/tasks/{taskId}/resume
+     */
+    private NanoHTTPD.Response handleResumeTask(NanoHTTPD.IHTTPSession session, String taskId) {
+        CompressTask task = tasks.get(taskId);
+        if (task == null) {
+            return ResponseBuilder.notFound("CompressTask");
+        }
+        if (!task.paused) {
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Task is not paused");
+        }
+        task.paused = false;
+        TransferLogger.getInstance().i(TAG, "压缩任务已恢复: " + taskId);
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("taskId", taskId);
+        response.put("paused", false);
+        return ResponseBuilder.jsonSuccess(response.toJSONString());
+    }
+
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("DELETE", uri);
+        logRequest("DELETE", uri, session);
 
         if (uri.matches("/api/v1/compress/tasks/[^/]+")) {
             String taskId = uri.substring("/api/v1/compress/tasks/".length());
@@ -189,6 +240,7 @@ public class CompressApiHandler extends BaseApiHandler {
             }
 
             response.put("tasks", tasksArray);
+            TransferLogger.getInstance().d(TAG, "压缩任务列表: " + tasksArray.size() + " 个任务");
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
@@ -206,6 +258,7 @@ public class CompressApiHandler extends BaseApiHandler {
             if (task == null) {
                 return ResponseBuilder.notFound("Task");
             }
+            TransferLogger.getInstance().d(TAG, "查询压缩任务状态: taskId=" + taskId + ", status=" + task.status);
             return ResponseBuilder.jsonSuccess(formatTask(task).toJSONString());
 
         } catch (Exception e) {
@@ -504,6 +557,11 @@ public class CompressApiHandler extends BaseApiHandler {
                     TransferLogger.getInstance().d(TAG, "压缩任务已取消: " + task.taskId);
                     break;
                 }
+                // 暂停检查点
+                task.waitWhilePaused();
+                if ("cancelled".equals(task.status)) {
+                    break;
+                }
 
                 long gid = task.gids.get(i);
                 DownloadInfo info = downloadManager.getDownloadInfo(gid);
@@ -601,7 +659,7 @@ public class CompressApiHandler extends BaseApiHandler {
                 zos.closeEntry();
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to add SpiderInfo to zip", e);
+            TransferLogger.getInstance().w(TAG, "Failed to add SpiderInfo to zip", e);
         }
     }
 
@@ -617,7 +675,7 @@ public class CompressApiHandler extends BaseApiHandler {
             is.close();
             zos.closeEntry();
         } catch (Exception e) {
-            Log.w(TAG, "Failed to add file to zip: " + entryName, e);
+            TransferLogger.getInstance().w(TAG, "Failed to add file to zip: " + entryName, e);
         }
     }
 
@@ -675,7 +733,7 @@ public class CompressApiHandler extends BaseApiHandler {
                                     info.gid = spiderInfo.gid;
                                 }
                             } catch (Exception e) {
-                                Log.w(TAG, "Failed to read SpiderInfo from zip", e);
+                                TransferLogger.getInstance().w(TAG, "Failed to read SpiderInfo from zip", e);
                             }
                         }
                     }
@@ -769,7 +827,7 @@ public class CompressApiHandler extends BaseApiHandler {
                 detail.put("message", "无法创建目录");
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to import gallery: " + galleryInfo.gid, e);
+            TransferLogger.getInstance().w(TAG, "Failed to import gallery: " + galleryInfo.gid, e);
             detail.put("status", "failed");
             detail.put("message", e.getMessage());
         }
@@ -876,6 +934,7 @@ public class CompressApiHandler extends BaseApiHandler {
         JSONObject json = new JSONObject();
         json.put("taskId", task.taskId);
         json.put("status", task.status);
+        json.put("paused", task.paused);
         json.put("totalGalleries", task.totalGalleries);
         json.put("completedGalleries", task.completedGalleries);
         json.put("progress", task.progress);
@@ -911,12 +970,24 @@ public class CompressApiHandler extends BaseApiHandler {
         long splitSizeBytes;
         boolean includeMetadata;
         String status;
+        volatile boolean paused;
         int totalGalleries;
         int completedGalleries;
         double progress;
         long createdTime;
         Long completedTime;
         List<File> outputFiles;
+
+        void waitWhilePaused() {
+            while (paused && !"cancelled".equals(status)) {
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
     }
 
     private static class ImportScanResult {

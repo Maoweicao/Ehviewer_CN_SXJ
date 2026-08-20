@@ -30,6 +30,12 @@
             android:summary="@string/lab_ai_translate_summary"
             app:fragment="com.hippo.ehviewer.ui.fragment.lab.AiTranslateFragment" />
 
+        <com.hippo.ehviewer.ui.fragment.lab.LabPreference
+            android:key="lab_ai_analyze"
+            android:title="@string/lab_ai_analyze"
+            android:summary="@string/lab_ai_analyze_summary"
+            app:fragment="com.hippo.ehviewer.ui.fragment.lab.AiAnalyzeFragment" />
+
         <com.hippo.ehviewer.preference.ProgressiveManagerPreference
             android:key="lab_progressive_manager" />
 

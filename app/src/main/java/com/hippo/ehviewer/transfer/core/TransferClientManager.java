@@ -19,7 +19,6 @@ package com.hippo.ehviewer.transfer.core;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
@@ -30,6 +29,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.net.Proxy;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -48,6 +48,8 @@ public class TransferClientManager {
 
     private static final String TAG = "ClientManager";
     private static final MediaType JSON_MEDIA = MediaType.parse("application/json; charset=utf-8");
+    // 本地传输服务监听端口，与 TransferServerManager.DEFAULT_PORT 保持一致
+    public static final int DEFAULT_PORT = 8080;
 
     private static TransferClientManager instance;
 
@@ -64,6 +66,8 @@ public class TransferClientManager {
                 .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
                 .writeTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                // 局域网直连，绕过系统全局代理（如 VPN/Clash），避免代理拦截返回 503
+                .proxy(Proxy.NO_PROXY)
                 .build();
         this.mainHandler = new Handler(Looper.getMainLooper());
     }
@@ -102,16 +106,20 @@ public class TransferClientManager {
 
                         connectedDevices.put(host + ":" + port, device);
 
-                        // 注册到目标设备
+                        // 注册到目标设备（上报本地监听端口，便于目标设备回连）
                         registerToDevice(host, port, deviceName, deviceId);
+
+                        TransferLogger.getInstance().i(TAG, "设备连接成功: " + host + ":" + port + " -> " + device.getName());
 
                         mainHandler.post(() -> notifyConnected(device));
                     } else {
-                        mainHandler.post(() -> notifyConnectionFailed(host, port, "连接失败"));
+                        TransferLogger.getInstance().e(TAG, "连接失败: " + url + " HTTP " + response.code());
+                        mainHandler.post(() -> notifyConnectionFailed(host, port, "HTTP " + response.code()));
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Connection failed", e);
+                TransferLogger.getInstance().e(TAG, "Connection failed", e);
+                TransferLogger.getInstance().e(TAG, "连接异常: " + host + ":" + port + " " + e.getMessage());
                 mainHandler.post(() -> notifyConnectionFailed(host, port, e.getMessage()));
             }
         }).start();
@@ -126,7 +134,8 @@ public class TransferClientManager {
             JSONObject body = new JSONObject();
             body.put("deviceId", deviceId);
             body.put("deviceName", deviceName);
-            body.put("port", port);
+            body.put("deviceType", "android");
+            body.put("port", DEFAULT_PORT);
 
             RequestBody requestBody = RequestBody.create(JSON_MEDIA, body.toJSONString());
             Request request = new Request.Builder()
@@ -138,7 +147,7 @@ public class TransferClientManager {
                 // Ensure the connection can be reused after registration.
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to register to device", e);
+            TransferLogger.getInstance().w(TAG, "Failed to register to device", e);
         }
     }
 
@@ -158,7 +167,7 @@ public class TransferClientManager {
                         // Best-effort unregister.
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to unregister from device", e);
+                    TransferLogger.getInstance().w(TAG, "Failed to unregister from device", e);
                 }
             }).start();
 
@@ -257,7 +266,7 @@ public class TransferClientManager {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "pushDatabase failed", e);
+                TransferLogger.getInstance().e(TAG, "pushDatabase failed", e);
                 TransferLogger.getInstance().e(TAG, "pushDatabase 异常: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e.getMessage()));
             }
@@ -289,7 +298,7 @@ public class TransferClientManager {
                 body.put("pages", info.pages);
                 body.put("sourceDevice", android.os.Build.MODEL);
                 body.put("sourceDeviceId", getDeviceId());
-                body.put("sourcePort", 8080);
+                body.put("sourcePort", DEFAULT_PORT);
                 body.put("autoReturn", true);
 
                 RequestBody requestBody = RequestBody.create(JSON_MEDIA, body.toJSONString());
@@ -311,7 +320,7 @@ public class TransferClientManager {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "createRelayTask failed", e);
+                TransferLogger.getInstance().e(TAG, "createRelayTask failed", e);
                 TransferLogger.getInstance().e(TAG, "createRelayTask 异常: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e.getMessage()));
             }
@@ -351,7 +360,7 @@ public class TransferClientManager {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "acceptRelayTask failed", e);
+                TransferLogger.getInstance().e(TAG, "acceptRelayTask failed", e);
                 TransferLogger.getInstance().e(TAG, "acceptRelayTask 异常: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e.getMessage()));
             }
@@ -403,7 +412,7 @@ public class TransferClientManager {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "pushRelayBack failed", e);
+                TransferLogger.getInstance().e(TAG, "pushRelayBack failed", e);
                 TransferLogger.getInstance().e(TAG, "pushRelayBack 异常: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e.getMessage()));
             }
@@ -421,6 +430,13 @@ public class TransferClientManager {
             prefs.edit().putString("device_id", deviceId).apply();
         }
         return deviceId;
+    }
+
+    /**
+     * 获取本地设备ID（对外暴露，供连接其他设备时使用）
+     */
+    public String getLocalDeviceId() {
+        return getDeviceId();
     }
 
     /**
@@ -470,7 +486,7 @@ public class TransferClientManager {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "downloadRelayZip failed", e);
+                TransferLogger.getInstance().e(TAG, "downloadRelayZip failed", e);
                 TransferLogger.getInstance().e(TAG, "downloadRelayZip 异常: " + e.getMessage());
                 mainHandler.post(() -> callback.onError(e.getMessage()));
             }

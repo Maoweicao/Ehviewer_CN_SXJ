@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -29,6 +28,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.RelayTaskManager;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.ehviewer.transfer.data.RelayTask;
 import com.hippo.ehviewer.util.GZIPUtils;
 
@@ -225,7 +225,7 @@ public class RelayApiHandler extends BaseApiHandler {
                 galleryInfo.rating = rating;
                 galleryInfo.pages = pages;
                 downloadManager.addDownload(galleryInfo, null, DownloadInfo.STATE_NONE);
-                Log.d(TAG, "Created DownloadInfo for relay gid: " + gid);
+                TransferLogger.getInstance().d(TAG, "Created DownloadInfo for relay gid: " + gid);
             }
 
             RelayTask task = relayTaskManager.createIncomingTask(gid, token, title, titleJpn,
@@ -234,7 +234,7 @@ public class RelayApiHandler extends BaseApiHandler {
                     priority, autoReturn);
 
             if (isAlreadyCompleted) {
-                Log.i(TAG, "Gallery already completed for gid: " + gid + ", directly packaging and pushing back");
+                TransferLogger.getInstance().i(TAG, "Gallery already completed for gid: " + gid + ", directly packaging and pushing back");
                 relayTaskManager.acceptTask(task.getTaskId(), null, null);
                 relayTaskManager.markCompleted(task.getTaskId());
             }
@@ -253,7 +253,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to create relay task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to create relay task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -298,7 +298,7 @@ public class RelayApiHandler extends BaseApiHandler {
                     GalleryInfo galleryInfo = new GalleryInfo();
                     galleryInfo.gid = gid;
                     downloadManager.addDownload(galleryInfo, null, DownloadInfo.STATE_NONE);
-                    Log.d(TAG, "Batch: created DownloadInfo for relay gid: " + gid);
+                    TransferLogger.getInstance().d(TAG, "Batch: created DownloadInfo for relay gid: " + gid);
                 }
 
                 // 这里需要从下载信息中获取详细信息
@@ -323,7 +323,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to batch create relay tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to batch create relay tasks", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -398,6 +398,9 @@ public class RelayApiHandler extends BaseApiHandler {
                     sourceDevice, sourceDeviceId, remoteIp, sourcePort,
                     priority, autoReturn);
 
+            // 请求方即执行端：直接接受任务，无需等待手动接受，避免出现待接受死等
+            relayTaskManager.acceptTask(task.getTaskId(), sourceDevice, sourceDeviceId);
+
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("taskId", task.getTaskId());
@@ -405,12 +408,13 @@ public class RelayApiHandler extends BaseApiHandler {
             response.put("state", DownloadInfo.STATE_RELAY_DOWNLOAD);
             response.put("stateName", "relay_download");
             response.put("status", task.getStatus());
+            response.put("accepted", true);
             response.put("createdTime", task.getCreatedTime());
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to request relay", e);
+            TransferLogger.getInstance().e(TAG, "Failed to request relay", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -508,7 +512,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to receive relay return", e);
+            TransferLogger.getInstance().e(TAG, "Failed to receive relay return", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -579,7 +583,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get relay tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get relay tasks", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -597,7 +601,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(taskToJson(task).toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get relay task status", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get relay task status", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -613,6 +617,14 @@ public class RelayApiHandler extends BaseApiHandler {
             }
 
             if (!task.isPending()) {
+                // 请求端已通过 /relay/request 时自动接受，重复接受视为幂等成功
+                if (task.isAccepted()) {
+                    JSONObject alreadyResponse = new JSONObject();
+                    alreadyResponse.put("success", true);
+                    alreadyResponse.put("message", "Task already accepted");
+                    alreadyResponse.put("taskId", taskId);
+                    return ResponseBuilder.jsonSuccess(alreadyResponse.toJSONString());
+                }
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
                         "Task is in state " + task.getStatus() + ", cannot accept");
             }
@@ -631,7 +643,7 @@ public class RelayApiHandler extends BaseApiHandler {
                 }
             } catch (Exception e) {
                 // 请求体为空或解析失败，使用默认值
-                Log.d(TAG, "No device info in accept request body");
+                TransferLogger.getInstance().d(TAG, "No device info in accept request body");
             }
 
             // 如果请求体中没有设备信息，尝试从Header获取
@@ -658,7 +670,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to accept relay task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to accept relay task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -688,7 +700,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to reject relay task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to reject relay task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -718,7 +730,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to cancel relay task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to cancel relay task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -786,7 +798,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return response;
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to download relay task file", e);
+            TransferLogger.getInstance().e(TAG, "Failed to download relay task file", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -811,7 +823,7 @@ public class RelayApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to delete relay task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to delete relay task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

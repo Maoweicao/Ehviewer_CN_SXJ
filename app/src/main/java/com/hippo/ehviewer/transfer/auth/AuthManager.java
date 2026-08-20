@@ -16,7 +16,7 @@
 
 package com.hippo.ehviewer.transfer.auth;
 
-import android.util.Log;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.security.SecureRandom;
 import java.util.HashSet;
@@ -87,20 +87,21 @@ public class AuthManager {
      */
     public void initialize(AuthMode authMode) {
         this.authMode = authMode;
-        
+        TransferLogger logger = TransferLogger.getInstance();
+
         switch (authMode) {
             case PASSWORD:
                 this.generatedPassword = generateRandomPassword(6);
-                Log.i(TAG, "Password authentication enabled. Password: " + generatedPassword);
+                logger.i(TAG, "已启用密码认证, 密码: " + generatedPassword);
                 break;
             case TOKEN:
                 this.generatedToken = generateRandomToken();
                 sessionStore.registerToken(generatedToken);
-                Log.i(TAG, "Token authentication enabled. Token: " + generatedToken);
+                logger.i(TAG, "已启用Token认证, Token: " + generatedToken);
                 break;
             case NONE:
             default:
-                Log.i(TAG, "No authentication enabled (LAN only)");
+                logger.i(TAG, "未启用认证（仅限局域网）");
                 break;
         }
     }
@@ -112,26 +113,41 @@ public class AuthManager {
      */
     public boolean authenticate(NanoHTTPD.IHTTPSession session) {
         String uri = session.getUri();
-        
+        String remoteIp = session.getRemoteIpAddress();
+        TransferLogger logger = TransferLogger.getInstance();
+
         // 白名单路径直接放行
         if (WHITELIST_PATHS.contains(uri)) {
+            logger.d(TAG, "白名单放行: " + uri + " [来源: " + remoteIp + "]");
             return true;
         }
-        
+
+        boolean result;
         // 根据认证模式进行验证
         switch (authMode) {
             case NONE:
-                return isLocalNetwork(session.getRemoteIpAddress());
-                
+                result = isLocalNetwork(remoteIp);
+                break;
+
             case PASSWORD:
-                return authenticateWithPassword(session);
-                
+                result = authenticateWithPassword(session);
+                break;
+
             case TOKEN:
-                return authenticateWithToken(session);
-                
+                result = authenticateWithToken(session);
+                break;
+
             default:
-                return false;
+                result = false;
+                break;
         }
+
+        if (result) {
+            logger.d(TAG, "认证通过: " + uri + " [来源: " + remoteIp + ", 模式: " + authMode + "]");
+        } else {
+            logger.w(TAG, "认证失败: " + uri + " [来源: " + remoteIp + ", 模式: " + authMode + "]");
+        }
+        return result;
     }
     
     /**
@@ -183,13 +199,17 @@ public class AuthManager {
      */
     public String login(String password) {
         if (authMode != AuthMode.PASSWORD) {
+            TransferLogger.getInstance().w(TAG, "登录被拒绝: 当前认证模式不是密码模式");
             return null;
         }
         
         if (generatedPassword.equals(password)) {
-            return sessionStore.createSession();
+            String token = sessionStore.createSession();
+            TransferLogger.getInstance().i(TAG, "密码登录成功, 会话已创建");
+            return token;
         }
         
+        TransferLogger.getInstance().w(TAG, "密码登录失败: 密码错误");
         return null;
     }
     
@@ -200,13 +220,17 @@ public class AuthManager {
      */
     public String loginWithToken(String clientToken) {
         if (authMode != AuthMode.TOKEN) {
+            TransferLogger.getInstance().w(TAG, "Token登录被拒绝: 当前认证模式不是Token模式");
             return null;
         }
         
         if (sessionStore.validateRegisteredToken(clientToken)) {
-            return sessionStore.createSession();
+            String token = sessionStore.createSession();
+            TransferLogger.getInstance().i(TAG, "Token登录成功, 会话已创建");
+            return token;
         }
         
+        TransferLogger.getInstance().w(TAG, "Token登录失败: Token无效");
         return null;
     }
     
@@ -216,6 +240,7 @@ public class AuthManager {
      */
     public void logout(String sessionToken) {
         sessionStore.invalidateSession(sessionToken);
+        TransferLogger.getInstance().i(TAG, "会话已注销");
     }
     
     /**

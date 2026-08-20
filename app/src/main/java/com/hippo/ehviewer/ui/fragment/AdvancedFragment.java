@@ -98,6 +98,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private static final String KEY_TRAFFIC_CAPTURE_PAGE = "traffic_capture_page";
     private static final String KEY_VPN_AWARE_MODE = "vpn_aware_mode";
     private static final String KEY_VPN_STATUS_INDICATOR = "vpn_status_indicator";
+    private static final String KEY_MERGE_SCAN_MODE = "merge_scan_mode";
 
     public static final int REQUEST_CODE_PICK_EXPORT_DIR = 10;
     private static final String TAG = "AdvancedFragment";
@@ -195,6 +196,12 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         Preference vpnAwareMode = findPreference(KEY_VPN_AWARE_MODE);
         if (vpnAwareMode != null) {
             vpnAwareMode.setOnPreferenceChangeListener(this);
+        }
+
+        // Merge gallery scan mode setting
+        Preference mergeScanMode = findPreference(KEY_MERGE_SCAN_MODE);
+        if (mergeScanMode != null) {
+            mergeScanMode.setOnPreferenceChangeListener(this);
         }
 
         // Register for VPN state changes
@@ -554,6 +561,17 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
             Settings.putVpnAwareMode(mode);
             // Update VPN status indicator immediately
             updateVpnStatusIndicator();
+            return true;
+        }
+        if (KEY_MERGE_SCAN_MODE.equals(key)) {
+            int mode;
+            try {
+                mode = Integer.parseInt(String.valueOf(newValue));
+            } catch (Exception e) {
+                return false;
+            }
+            Settings.putMergeScanMode(mode);
+            Toast.makeText(getContext(), R.string.settings_advanced_merge_scan_mode_summary, Toast.LENGTH_SHORT).show();
             return true;
         }
         return false;

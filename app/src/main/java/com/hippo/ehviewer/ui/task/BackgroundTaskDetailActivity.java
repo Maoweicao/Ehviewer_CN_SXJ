@@ -19,6 +19,7 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.core.content.FileProvider;
 
+import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.ui.EhActivity;
@@ -59,6 +60,10 @@ public class BackgroundTaskDetailActivity extends EhActivity {
     private ScrollView mLogScroll;
     private Button mBtnExportTxt;
     private Button mBtnExportJson;
+    private Button mBtnPause;
+    private Button mBtnResume;
+    private Button mBtnStop;
+    private Button mBtnDelete;
     
     private BackgroundTaskStatusManager mTaskManager;
     private String mTaskId;
@@ -137,6 +142,10 @@ public class BackgroundTaskDetailActivity extends EhActivity {
         mLogScroll = findViewById(R.id.log_scroll);
         mBtnExportTxt = findViewById(R.id.btn_export_txt);
         mBtnExportJson = findViewById(R.id.btn_export_json);
+        mBtnPause = findViewById(R.id.btn_control_pause);
+        mBtnResume = findViewById(R.id.btn_control_resume);
+        mBtnStop = findViewById(R.id.btn_control_stop);
+        mBtnDelete = findViewById(R.id.btn_control_delete);
         
         if (mBtnExportTxt != null) {
             mBtnExportTxt.setOnClickListener(v -> exportLogAsTxt());
@@ -144,6 +153,52 @@ public class BackgroundTaskDetailActivity extends EhActivity {
         if (mBtnExportJson != null) {
             mBtnExportJson.setOnClickListener(v -> exportLogAsJson());
         }
+        if (mBtnPause != null) {
+            mBtnPause.setOnClickListener(v -> handlePause());
+        }
+        if (mBtnResume != null) {
+            mBtnResume.setOnClickListener(v -> handleResume());
+        }
+        if (mBtnStop != null) {
+            mBtnStop.setOnClickListener(v -> handleStop());
+        }
+        if (mBtnDelete != null) {
+            mBtnDelete.setOnClickListener(v -> handleDelete());
+        }
+    }
+
+    private void handlePause() {
+        if (mTaskId == null) return;
+        if (BackgroundTaskManager.getInstance().pauseTask(mTaskId)) {
+            Toast.makeText(this, R.string.task_paused, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, R.string.task_cancelling, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void handleResume() {
+        if (mTaskId == null) return;
+        if (BackgroundTaskManager.getInstance().resumeTask(mTaskId)) {
+            Toast.makeText(this, R.string.task_resumed, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void handleStop() {
+        if (mTaskId == null) return;
+        BackgroundTaskManager.getInstance().cancelTask(mTaskId);
+        Toast.makeText(this, R.string.task_cancelling, Toast.LENGTH_SHORT).show();
+    }
+
+    private void handleDelete() {
+        if (mTaskId == null) return;
+        BackgroundTaskInfo taskInfo = mTaskManager != null ? mTaskManager.getTaskInfo(mTaskId) : null;
+        if (taskInfo != null && (taskInfo.isCompleted() || taskInfo.isCancelled())) {
+            mTaskManager.removeFromCompleted(mTaskId);
+        } else {
+            BackgroundTaskManager.getInstance().removeTask(mTaskId);
+        }
+        Toast.makeText(this, R.string.task_cleared_from_completed, Toast.LENGTH_SHORT).show();
+        finish();
     }
     
     private void initTaskManager() {
@@ -248,6 +303,9 @@ public class BackgroundTaskDetailActivity extends EhActivity {
             }
             mTaskStatusText.setText(status);
         }
+
+        // 更新控制按钮显隐
+        updateControlButtons(taskInfo);
         
         // 更新运行时间
         if (mTaskTimeText != null) {
@@ -315,6 +373,40 @@ public class BackgroundTaskDetailActivity extends EhActivity {
         }
     }
     
+    private void updateControlButtons(@NonNull BackgroundTaskInfo taskInfo) {
+        if (mBtnPause == null || mBtnResume == null || mBtnStop == null || mBtnDelete == null) {
+            return;
+        }
+        boolean isActive = !taskInfo.isCompleted() && !taskInfo.isCancelled();
+        boolean isPaused = taskInfo.isPaused();
+        boolean isQueued = taskInfo.isQueued();
+        boolean isFinished = taskInfo.isCompleted() || taskInfo.isCancelled();
+
+        if (isFinished) {
+            mBtnPause.setVisibility(View.GONE);
+            mBtnResume.setVisibility(View.GONE);
+            mBtnStop.setVisibility(View.GONE);
+            mBtnDelete.setVisibility(View.VISIBLE);
+        } else if (isQueued) {
+            // 排队中的互斥任务：只能停止（取消排队）
+            mBtnPause.setVisibility(View.GONE);
+            mBtnResume.setVisibility(View.GONE);
+            mBtnStop.setVisibility(View.VISIBLE);
+            mBtnDelete.setVisibility(View.GONE);
+        } else if (isPaused) {
+            mBtnPause.setVisibility(View.GONE);
+            mBtnResume.setVisibility(View.VISIBLE);
+            mBtnStop.setVisibility(View.VISIBLE);
+            mBtnDelete.setVisibility(View.GONE);
+        } else {
+            // 运行中
+            mBtnPause.setVisibility(taskInfo.isPausable() ? View.VISIBLE : View.GONE);
+            mBtnResume.setVisibility(View.GONE);
+            mBtnStop.setVisibility(View.VISIBLE);
+            mBtnDelete.setVisibility(View.GONE);
+        }
+    }
+
     private void exportLogAsTxt() {
         if (mTaskManager == null || mTaskId == null) return;
         

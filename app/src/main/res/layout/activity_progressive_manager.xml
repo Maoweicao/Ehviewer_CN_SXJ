@@ -78,8 +78,7 @@
             android:id="@+id/backup_panel"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            android:orientation="vertical"
             android:visibility="gone"
             android:layout_marginTop="8dp">
 
@@ -88,6 +87,13 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/progressive_backup_checkbox"
+                android:textSize="14sp" />
+
+            <CheckBox
+                android:id="@+id/cb_delete_missing"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/progressive_delete_missing_checkbox"
                 android:textSize="14sp" />
 
         </LinearLayout>

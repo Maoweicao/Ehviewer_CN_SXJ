@@ -40,12 +40,6 @@
             android:summary="@string/settings_download_reset_media_scan_summary" />
 
         <com.hippo.preference.SwitchPreference
-            android:defaultValue="true"
-            android:key="download_list_pagination"
-            android:summary="@string/settings_download_download_list_pagination_summary"
-            android:title="@string/settings_download_download_list_pagination" />
-
-        <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
             android:key="use_system_download_manager"
             android:summary="@string/settings_download_use_system_download_manager_summary"
@@ -69,6 +63,17 @@
         android:title="@string/settings_category_download_speed"
         android:summary="@string/settings_category_download_speed_summary">
 
+        <!-- Default value for debugging: 3 -->
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="3"
+            android:key="download_thread"
+            android:title="@string/settings_download_multi_thread_download"
+            app:minValue="1"
+            app:maxValue="7"
+            app:stepSize="2"
+            app:unit="个"
+            app:showValue="true" />
+
         <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
             android:key="enable_min_download_speed"
@@ -84,48 +89,6 @@
             app:stepSize="2"
             app:unit="KB/s"
             app:showValue="true" />
-
-        <com.hippo.preference.SwitchPreference
-            android:defaultValue="false"
-            android:key="download_logging_enabled"
-            android:title="@string/settings_download_logging_enabled"
-            android:summary="@string/settings_download_logging_enabled_summary" />
-
-        <!-- Default value for debugging: 3 -->
-        <com.hippo.ehviewer.preference.SliderPreference
-            android:defaultValue="3"
-            android:key="download_thread"
-            android:title="@string/settings_download_multi_thread_download"
-            app:minValue="1"
-            app:maxValue="7"
-            app:stepSize="2"
-            app:unit="个"
-            app:showValue="true" />
-
-        <com.hippo.ehviewer.preference.SliderPreference
-            android:defaultValue="5"
-            android:key="preload_image"
-            android:title="@string/settings_download_preload_image"
-            app:minValue="3"
-            app:maxValue="17"
-            app:stepSize="2"
-            app:unit="张"
-            app:showValue="true" />
-
-        <!-- Default value for debugging: a -->
-        <com.hippo.preference.ListPreference
-            android:defaultValue="a"
-            android:key="image_size"
-            android:summary="@string/settings_download_image_resolution_summary"
-            android:title="@string/settings_download_image_resolution"
-            app:entries="@array/image_resolution_entries"
-            app:entryValues="@array/image_resolution_entry_values" />
-
-        <com.hippo.preference.SwitchPreference
-            android:defaultValue="false"
-            android:key="download_origin_image"
-            android:summary="@string/settings_download_download_origin_image_summary"
-            android:title="@string/settings_download_download_origin_image" />
 
         <!-- Default value for debugging: 60 -->
         <com.hippo.preference.SwitchPreference
@@ -143,6 +106,38 @@
             app:maxValue="300"
             app:stepSize="10"
             app:unit="秒"
+            app:showValue="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_download_image"
+        android:title="@string/settings_category_download_image"
+        android:summary="@string/settings_category_download_image_summary">
+
+        <!-- Default value for debugging: a -->
+        <com.hippo.preference.ListPreference
+            android:defaultValue="a"
+            android:key="image_size"
+            android:summary="@string/settings_download_image_resolution_summary"
+            android:title="@string/settings_download_image_resolution"
+            app:entries="@array/image_resolution_entries"
+            app:entryValues="@array/image_resolution_entry_values" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_origin_image"
+            android:summary="@string/settings_download_download_origin_image_summary"
+            android:title="@string/settings_download_download_origin_image" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="5"
+            android:key="preload_image"
+            android:title="@string/settings_download_preload_image"
+            app:minValue="3"
+            app:maxValue="17"
+            app:stepSize="2"
+            app:unit="张"
             app:showValue="true" />
 
     </PreferenceCategory>
@@ -192,6 +187,25 @@
             app:entries="@array/download_queue_secondary_order_entries"
             app:entryValues="@array/download_queue_secondary_order_entry_values" />
 
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_download_behavior"
+        android:title="@string/settings_category_download_behavior"
+        android:summary="@string/settings_category_download_behavior_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_keep_screen_on"
+            android:summary="@string/settings_download_keep_screen_on_summary"
+            android:title="@string/settings_download_keep_screen_on" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="download_list_pagination"
+            android:summary="@string/settings_download_download_list_pagination_summary"
+            android:title="@string/settings_download_download_list_pagination" />
+
         <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
             android:key="sync_download_while_reading"
@@ -239,6 +253,12 @@
             android:summary="@string/settings_download_scan_download_files_summary"
             android:title="@string/settings_download_scan_download_files" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_logging_enabled"
+            android:title="@string/settings_download_logging_enabled"
+            android:summary="@string/settings_download_logging_enabled_summary" />
+
         <Preference
             android:key="view_download_logs"
             android:summary="@string/settings_download_view_logs_summary"
@@ -263,6 +283,12 @@
             android:key="verify_download_integrity"
             android:summary="@string/settings_download_verify_integrity_summary"
             android:title="@string/settings_download_verify_integrity" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="loop_download_until_complete"
+            android:summary="@string/settings_download_loop_until_complete_summary"
+            android:title="@string/settings_download_loop_until_complete" />
 
         <Preference
             android:key="repair_all_downloaded_gallery"

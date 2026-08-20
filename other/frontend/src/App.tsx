@@ -16,6 +16,7 @@ import Settings from './pages/Settings'
 import DataTransfer from './pages/DataTransfer'
 import TaskCenter from './pages/TaskCenter'
 import DebugPanel from './components/DebugPanel'
+import FullScreenLoading from './components/FullScreenLoading'
 import { startAutoThemeWatcher, stopAutoThemeWatcher } from './utils/theme'
 
 function MainLayout() {
@@ -97,11 +98,7 @@ export default function App() {
   }, [])
 
   if (authenticated === null) {
-    return (
-      <div className="loading-container" style={{ minHeight: '100vh' }}>
-        <div>加载中...</div>
-      </div>
-    )
+    return <FullScreenLoading text="连接中..." />
   }
 
   if (!authenticated && location.pathname !== '/login') {

@@ -20,7 +20,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -32,6 +31,7 @@ import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.transfer.data.ConnectedDevice;
 import com.hippo.ehviewer.transfer.data.RelayTask;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
 import java.io.File;
@@ -143,7 +143,10 @@ public class RelayTaskManager {
         // 通知监听器
         notifyTaskCreated(task);
 
-        Log.d(TAG, "Created relay task: " + task.getTaskId() + " for gid: " + gid);
+        TransferLogger.getInstance().d(TAG, "创建接力任务: taskId=" + task.getTaskId() + ", gid=" + gid
+                + ", title=" + title + ", sourceDevice=" + sourceDevice + ", targetDevice=" + targetDevice);
+        TransferLogger.getInstance().i(TAG, "接力任务已创建: taskId=" + task.getTaskId() + ", gid=" + gid
+                + ", direction=" + task.getDirection());
         return task;
     }
 
@@ -242,8 +245,11 @@ public class RelayTaskManager {
      * @param acceptedDeviceId 接受方设备ID
      */
     public boolean acceptTask(String taskId, String acceptedDevice, String acceptedDeviceId) {
+        TransferLogger.getInstance().d(TAG, "接受接力任务: taskId=" + taskId
+                + ", acceptedDevice=" + acceptedDevice + ", acceptedDeviceId=" + acceptedDeviceId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isPending()) {
+            TransferLogger.getInstance().w(TAG, "接受接力任务失败，任务不存在或非待处理状态: " + taskId);
             return false;
         }
 
@@ -254,7 +260,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.d(TAG, "Accepted relay task: " + taskId + " by " + acceptedDevice);
+        TransferLogger.getInstance().i(TAG, "任务已接受: taskId=" + taskId + ", acceptedDevice=" + acceptedDevice);
         return true;
     }
 
@@ -262,8 +268,10 @@ public class RelayTaskManager {
      * 拒绝任务
      */
     public boolean rejectTask(String taskId) {
+        TransferLogger.getInstance().d(TAG, "拒绝接力任务: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isPending()) {
+            TransferLogger.getInstance().w(TAG, "拒绝接力任务失败，任务不存在或非待处理状态: " + taskId);
             return false;
         }
 
@@ -271,7 +279,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.d(TAG, "Rejected relay task: " + taskId);
+        TransferLogger.getInstance().i(TAG, "任务已拒绝: " + taskId);
         return true;
     }
 
@@ -279,8 +287,10 @@ public class RelayTaskManager {
      * 开始下载（接受后调用）
      */
     public boolean startDownload(String taskId) {
+        TransferLogger.getInstance().d(TAG, "开始下载接力任务: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isAccepted()) {
+            TransferLogger.getInstance().w(TAG, "开始下载失败，任务不存在或未接受: " + taskId);
             return false;
         }
 
@@ -299,7 +309,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.d(TAG, "Started download for relay task: " + taskId + ", gid: " + gid);
+        TransferLogger.getInstance().i(TAG, "开始下载: taskId=" + taskId + ", gid=" + gid);
         return true;
     }
 
@@ -307,8 +317,10 @@ public class RelayTaskManager {
      * 取消任务
      */
     public boolean cancelTask(String taskId) {
+        TransferLogger.getInstance().d(TAG, "取消接力任务: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isCancellable()) {
+            TransferLogger.getInstance().w(TAG, "取消接力任务失败，任务不存在或不可取消: " + taskId);
             return false;
         }
 
@@ -323,7 +335,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.d(TAG, "Cancelled relay task: " + taskId);
+        TransferLogger.getInstance().i(TAG, "任务已取消: " + taskId);
         return true;
     }
 
@@ -331,8 +343,10 @@ public class RelayTaskManager {
      * 标记任务完成
      */
     public void markCompleted(String taskId) {
+        TransferLogger.getInstance().d(TAG, "标记任务完成: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null) {
+            TransferLogger.getInstance().w(TAG, "标记任务完成失败，任务不存在: " + taskId);
             return;
         }
 
@@ -341,7 +355,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.d(TAG, "Completed relay task: " + taskId);
+        TransferLogger.getInstance().i(TAG, "任务已完成: " + taskId);
 
         // 入站任务完成后自动打包
         if (task.isIncoming()) {
@@ -362,15 +376,16 @@ public class RelayTaskManager {
      * 将完成的接力任务ZIP推送到发起端设备
      */
     public void pushBackToSource(String taskId) {
+        TransferLogger.getInstance().d(TAG, "推送回发起端设备: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isReturned() || task.getZipFilePath() == null) {
-            Log.w(TAG, "pushBackToSource: task not ready, taskId=" + taskId);
+            TransferLogger.getInstance().w(TAG, "pushBackToSource: task not ready, taskId=" + taskId);
             return;
         }
 
         File zipFile = new File(task.getZipFilePath());
         if (!zipFile.exists()) {
-            Log.e(TAG, "pushBackToSource: ZIP file not found: " + task.getZipFilePath());
+            TransferLogger.getInstance().e(TAG, "pushBackToSource: ZIP file not found: " + task.getZipFilePath());
             markFailed(taskId, "ZIP文件不存在");
             return;
         }
@@ -382,35 +397,36 @@ public class RelayTaskManager {
             String sourceHost = task.getSourceDeviceHost();
             int sourcePort = task.getSourceDevicePort();
             if (sourceHost != null && !sourceHost.isEmpty() && sourcePort > 0) {
-                Log.i(TAG, "pushBackToSource: connecting to source device at " + sourceHost + ":" + sourcePort);
+                TransferLogger.getInstance().i(TAG, "pushBackToSource: connecting to source device at " + sourceHost + ":" + sourcePort);
                 clientManager.connect(sourceHost, sourcePort, android.os.Build.MODEL, getLocalDeviceId());
                 try {
                     Thread.sleep(2000);
                 } catch (InterruptedException ignored) {
+                    TransferLogger.getInstance().w(TAG, "pushBackToSource: 等待源设备连接被中断");
                 }
                 sourceDevice = findSourceDevice(clientManager, task);
             }
         }
 
         if (sourceDevice == null) {
-            Log.w(TAG, "pushBackToSource: source device not connected, taskId=" + taskId);
+            TransferLogger.getInstance().w(TAG, "pushBackToSource: source device not connected, taskId=" + taskId);
             return;
         }
 
-        Log.i(TAG, "pushBackToSource: pushing ZIP to " + sourceDevice.getName() + " for taskId=" + taskId);
+        TransferLogger.getInstance().i(TAG, "pushBackToSource: pushing ZIP to " + sourceDevice.getName() + " for taskId=" + taskId);
 
         clientManager.pushRelayBack(sourceDevice, task.getTaskId(), task.getGid(), zipFile,
                 new TransferClientManager.RelayTaskCallback() {
                     @Override
                     public void onSuccess(String result) {
-                        Log.i(TAG, "pushBackToSource succeeded for taskId=" + taskId);
+                        TransferLogger.getInstance().i(TAG, "pushBackToSource succeeded for taskId=" + taskId);
                         // 推送成功，清理本地任务和ZIP
                         deleteTask(taskId);
                     }
 
                     @Override
                     public void onError(String error) {
-                        Log.e(TAG, "pushBackToSource failed for taskId=" + taskId + ": " + error);
+                        TransferLogger.getInstance().e(TAG, "pushBackToSource failed for taskId=" + taskId + ": " + error);
                         // 推送失败，保留任务等待重试或手动取回
                     }
                 });
@@ -445,8 +461,10 @@ public class RelayTaskManager {
      * 标记任务失败
      */
     public void markFailed(String taskId, String errorMessage) {
+        TransferLogger.getInstance().d(TAG, "标记任务失败: taskId=" + taskId + ", error=" + errorMessage);
         RelayTask task = tasks.get(taskId);
         if (task == null) {
+            TransferLogger.getInstance().w(TAG, "标记任务失败，任务不存在: " + taskId);
             return;
         }
 
@@ -455,15 +473,17 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskUpdated(task);
 
-        Log.e(TAG, "Failed relay task: " + taskId + ", error: " + errorMessage);
+        TransferLogger.getInstance().e(TAG, "任务失败: taskId=" + taskId + ", error=" + errorMessage);
     }
 
     /**
      * 打包任务文件为ZIP
      */
     public boolean packageTask(String taskId) {
+        TransferLogger.getInstance().d(TAG, "打包接力任务: taskId=" + taskId);
         RelayTask task = tasks.get(taskId);
         if (task == null || !task.isCompleted()) {
+            TransferLogger.getInstance().w(TAG, "打包失败，任务不存在或未完成: " + taskId);
             return false;
         }
 
@@ -471,13 +491,13 @@ public class RelayTaskManager {
             // 获取下载目录
             DownloadInfo downloadInfo = downloadManager.getDownloadInfo(task.getGid());
             if (downloadInfo == null) {
-                Log.e(TAG, "Download info not found for gid: " + task.getGid());
+                TransferLogger.getInstance().e(TAG, "Download info not found for gid: " + task.getGid());
                 return false;
             }
 
             UniFile downloadDir = SpiderDen.getGalleryDownloadDir(downloadInfo);
             if (downloadDir == null || !downloadDir.isDirectory()) {
-                Log.e(TAG, "Download directory not found for gid: " + task.getGid());
+                TransferLogger.getInstance().e(TAG, "Download directory not found for gid: " + task.getGid());
                 return false;
             }
 
@@ -491,6 +511,7 @@ public class RelayTaskManager {
 
             // 遍历下载目录中的文件
             UniFile[] files = downloadDir.listFiles();
+            int fileCount = 0;
             if (files != null) {
                 for (UniFile file : files) {
                     if (file.isFile()) {
@@ -507,11 +528,14 @@ public class RelayTaskManager {
                         }
                         is.close();
                         zos.closeEntry();
+                        fileCount++;
                     }
                 }
             }
 
             zos.close();
+            TransferLogger.getInstance().i(TAG, "打包完成: taskId=" + taskId + ", 文件数=" + fileCount
+                    + ", 字节数=" + zipFile.length() + ", 路径=" + zipFile.getAbsolutePath());
 
             // 更新任务信息
             task.setZipFilePath(zipFile.getAbsolutePath());
@@ -521,11 +545,11 @@ public class RelayTaskManager {
             saveTasks();
             notifyTaskUpdated(task);
 
-            Log.d(TAG, "Packaged relay task: " + taskId + ", file: " + zipFile.getAbsolutePath());
+            TransferLogger.getInstance().d(TAG, "Packaged relay task: " + taskId + ", file: " + zipFile.getAbsolutePath());
             return true;
 
         } catch (IOException e) {
-            Log.e(TAG, "Failed to package task: " + taskId, e);
+            TransferLogger.getInstance().e(TAG, "Failed to package task: " + taskId, e);
             markFailed(taskId, "打包失败: " + e.getMessage());
             return false;
         }
@@ -535,8 +559,10 @@ public class RelayTaskManager {
      * 删除任务
      */
     public boolean deleteTask(String taskId) {
+        TransferLogger.getInstance().d(TAG, "删除接力任务: taskId=" + taskId);
         RelayTask task = tasks.remove(taskId);
         if (task == null) {
+            TransferLogger.getInstance().w(TAG, "删除接力任务失败，任务不存在: " + taskId);
             return false;
         }
 
@@ -553,7 +579,7 @@ public class RelayTaskManager {
         saveTasks();
         notifyTaskDeleted(task);
 
-        Log.d(TAG, "Deleted relay task: " + taskId);
+        TransferLogger.getInstance().i(TAG, "接力任务已删除: " + taskId);
         return true;
     }
 
@@ -632,6 +658,9 @@ public class RelayTaskManager {
             task.setTotalSize(info.fileSize);
         }
 
+        TransferLogger.getInstance().d(TAG, "下载进度: taskId=" + taskId + ", finished=" + task.getFinished()
+                + "/" + task.getTotal() + ", speed=" + task.getSpeed() + "B/s");
+
         // 检查状态变化
         if (info.state == DownloadInfo.STATE_FINISH) {
             markCompleted(taskId);
@@ -653,7 +682,7 @@ public class RelayTaskManager {
             }
             prefs.edit().putString(KEY_TASKS, tasksArray.toJSONString()).apply();
         } catch (Exception e) {
-            Log.e(TAG, "Failed to save tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to save tasks", e);
         }
     }
 
@@ -674,9 +703,9 @@ public class RelayTaskManager {
                 }
             }
 
-            Log.d(TAG, "Loaded " + tasks.size() + " relay tasks");
+            TransferLogger.getInstance().d(TAG, "Loaded " + tasks.size() + " relay tasks");
         } catch (Exception e) {
-            Log.e(TAG, "Failed to load tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to load tasks", e);
         }
     }
 
@@ -762,7 +791,7 @@ public class RelayTaskManager {
             task.setErrorMessage(json.getString("errorMessage"));
             return task;
         } catch (Exception e) {
-            Log.e(TAG, "Failed to parse task json", e);
+            TransferLogger.getInstance().e(TAG, "Failed to parse task json", e);
             return null;
         }
     }

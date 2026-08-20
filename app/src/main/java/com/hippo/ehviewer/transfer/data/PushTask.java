@@ -63,6 +63,9 @@ public class PushTask {
     private long receivedBytes;    // 已接收字节数
     private String tempFilePath;   // 临时文件路径
 
+    // 暂停控制
+    private volatile boolean paused;
+
     public PushTask() {
         this.taskId = UUID.randomUUID().toString();
         this.status = STATUS_PENDING;
@@ -223,6 +226,28 @@ public class PushTask {
 
     public void setTempFilePath(String tempFilePath) {
         this.tempFilePath = tempFilePath;
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void setPaused(boolean paused) {
+        this.paused = paused;
+    }
+
+    /**
+     * 暂停时阻塞等待恢复（供推送循环检查）。
+     */
+    public void waitWhilePaused() {
+        while (paused && !STATUS_COMPLETED.equals(status) && !STATUS_FAILED.equals(status)) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 
     /**

@@ -17,11 +17,13 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+
+import java.util.Map;
 
 import fi.iki.elonen.NanoHTTPD;
 
@@ -88,6 +90,39 @@ public abstract class BaseApiHandler {
      * 记录请求日志
      */
     protected void logRequest(String method, String uri) {
-        Log.d(TAG, method + " " + uri);
+        logRequest(method, uri, null);
+    }
+
+    /**
+     * 记录请求日志（带远程IP和查询参数）
+     */
+    protected void logRequest(String method, String uri, NanoHTTPD.IHTTPSession session) {
+        if (session != null) {
+            String remoteIp = session.getRemoteIpAddress();
+            Map<String, String> parms = null;
+            try {
+                parms = session.getParms();
+            } catch (Exception e) {
+                // ignore
+            }
+            String query = (parms == null || parms.isEmpty()) ? "" : " params=" + parms;
+            TransferLogger.getInstance().d(TAG, "[" + remoteIp + "] " + method + " " + uri + query);
+        } else {
+            TransferLogger.getInstance().d(TAG, method + " " + uri);
+        }
+    }
+
+    /**
+     * 记录成功日志
+     */
+    protected void logSuccess(String action, String detail) {
+        TransferLogger.getInstance().i(TAG, action + " 成功: " + detail);
+    }
+
+    /**
+     * 记录失败日志
+     */
+    protected void logFailure(String action, String detail) {
+        TransferLogger.getInstance().w(TAG, action + " 失败: " + detail);
     }
 }

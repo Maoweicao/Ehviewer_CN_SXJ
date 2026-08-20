@@ -162,6 +162,46 @@
                         android:id="@+id/sort_by_file_size_desc"
                         android:title="@string/sort_by_file_size_desc"
                         app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/sort_by_state_queue_asc"
+                        android:title="@string/sort_by_state_queue_asc"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/sort_by_state_queue_desc"
+                        android:title="@string/sort_by_state_queue_desc"
+                        app:showAsAction="ifRoom"/>
+                </menu>
+            </item>
+
+            <item
+                android:id="@+id/quick_filter"
+                android:title="@string/quick_filter"
+                app:showAsAction="ifRoom">
+                <menu>
+                    <item
+                        android:id="@+id/quick_filter_big_low_rating"
+                        android:title="@string/quick_filter_big_low_rating"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_duplicates"
+                        android:title="@string/quick_filter_duplicates"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_low_space_efficiency"
+                        android:title="@string/quick_filter_low_space_efficiency"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_low_rating"
+                        android:title="@string/quick_filter_low_rating"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_huge_file"
+                        android:title="@string/quick_filter_huge_file"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_old_unfavorited"
+                        android:title="@string/quick_filter_old_unfavorited"
+                        app:showAsAction="ifRoom"/>
                 </menu>
             </item>
 

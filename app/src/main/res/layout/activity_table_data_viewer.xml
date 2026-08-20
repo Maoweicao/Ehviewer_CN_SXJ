@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="?android:attr/windowBackground">
+
+    <!-- 搜索栏：模式切换 + 输入框 + 清空 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/search_mode_toggle"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:gravity="center"
+            android:minWidth="64dp"
+            android:text="@string/database_viewer_search_mode_keyword"
+            android:textSize="13sp"
+            android:textColor="?attr/widgetColorThemePrimary"
+            android:background="?android:attr/selectableItemBackground" />
+
+        <EditText
+            android:id="@+id/search_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="6dp"
+            android:layout_marginEnd="4dp"
+            android:hint="@string/database_viewer_search_hint"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:maxLines="1"
+            android:padding="6dp"
+            android:textSize="14sp" />
+
+        <ImageView
+            android:id="@+id/search_clear"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/database_viewer_search_clear"
+            android:padding="8dp"
+            android:src="@drawable/v_close_dark_x24"
+            android:background="?android:attr/selectableItemBackgroundBorderless" />
+
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#33000000" />
+
+    <!-- 表格内容 -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <HorizontalScrollView
+            android:id="@+id/table_scroll"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scrollbars="horizontal"
+            android:fillViewport="false">
+
+            <LinearLayout
+                android:id="@+id/table_container"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical" />
+
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/table_empty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/database_viewer_table_empty"
+            android:textSize="@dimen/text_super_large"
+            android:visibility="gone" />
+
+    </FrameLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="#33000000" />
+
+    <!-- 分页栏 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp">
+
+        <TextView
+            android:id="@+id/button_prev"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/database_viewer_prev_page"
+            android:textSize="14sp"
+            android:textColor="?attr/widgetColorThemePrimary"
+            android:background="?android:attr/selectableItemBackground" />
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/text_page"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/text_total_rows"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textSize="11sp" />
+
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/button_next"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:gravity="center"
+            android:text="@string/database_viewer_next_page"
+            android:textSize="14sp"
+            android:textColor="?attr/widgetColorThemePrimary"
+            android:background="?android:attr/selectableItemBackground" />
+
+        <Spinner
+            android:id="@+id/spinner_page_size"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="4dp"
+            android:layout_marginEnd="8dp" />
+
+    </LinearLayout>
+
+</LinearLayout>

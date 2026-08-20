@@ -5,6 +5,7 @@ import android.util.Log
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.GalleryPageFetcher
 import com.hippo.ehviewer.spider.SpiderDen
@@ -77,16 +78,27 @@ class VerifyDownloadIntegrityTask(
                 return Result.success(Unit)
             }
 
-            totalProgress = finishList.size
+            // 只检测未被标记为已删除/重复/递进合并的画廊
+            val verifiableList = finishList.filter { !isMarkedDeletedOrMerged(it.gid) }
+            if (verifiableList.isEmpty()) {
+                val msg = "没有需要校验的画廊（剩余均已标记为已删除或递进关系）"
+                Log.d(TAG, msg)
+                appendTaskLog(msg)
+                notifyCompleted()
+                notifyStatus()
+                return Result.success(Unit)
+            }
+
+            totalProgress = verifiableList.size
             verifyCurrent = 0
             completeCount = 0
             incompleteCount = 0
             removedCount = 0
             notifyStatus()
 
-            appendTaskLog("总共需要校验 $totalProgress 个画廊")
+            appendTaskLog("总共需要校验 $totalProgress 个画廊（跳过 ${finishList.size - verifiableList.size} 个已删除/递进关系画廊）")
 
-            for (info in finishList) {
+            for (info in verifiableList) {
                 if (isCancelled) throw CancellationException("任务已取消")
                 coroutineContext[Job]?.ensureActive()
 
@@ -225,6 +237,15 @@ class VerifyDownloadIntegrityTask(
         }
     }
 
+    /**
+     * 判断画廊是否已在下载历史中被标记为已删除或递进/重复合并。
+     * 这些画廊不应参与不完整画廊检测。
+     */
+    private fun isMarkedDeletedOrMerged(gid: Long): Boolean {
+        val history = EhDB.getDownloadHistory(gid) ?: return false
+        return history.deletionType != DownloadHistory.DELETION_NONE
+    }
+
     private fun markAsRemoved(info: DownloadInfo) {
         info.state = DownloadInfo.STATE_FINISH
         info.total = 0
@@ -233,6 +254,8 @@ class VerifyDownloadIntegrityTask(
         info.downloaded = 0
         info.legacy = 0
         EhDB.putDownloadInfo(info)
+        // 在下载历史中标记为已删除，避免后续重复校验
+        EhDB.recordDownloadAsDuplicate(info, DownloadHistory.DELETION_NORMAL, 0L)
         Log.i(TAG, "画廊已被远端删除，标记为已完成: ${info.title} (${info.gid})")
     }
 

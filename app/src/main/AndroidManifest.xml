@@ -26,8 +26,10 @@
     <uses-permission android:name="android.permission.CAMERA" /> <!-- 用于获取wifi状态 -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" /> <!-- 使用系统自带下载器 -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" /> <!-- WifiLock保持后台WiFi高性能 -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" /> <!-- mDNS设备发现需要接收组播包 -->
     <uses-permission android:name="android.permission.ACCESS_DOWNLOAD_MANAGER" /> <!-- 自动安装apk -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.NFC" /> <!-- NFC碰一碰连接 -->
 
     <uses-feature
         android:glEsVersion="0x00020000"
@@ -37,6 +39,9 @@
         android:required="false" />
     <uses-feature
         android:name="android.hardware.camera"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.nfc"
         android:required="false" />
 
     <application
@@ -321,8 +326,33 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <service
+            android:name="com.hippo.ehviewer.transfer.core.TransferNfcService"
+            android:exported="true"
+            android:permission="android.permission.BIND_NFC_SERVICE">
+            <intent-filter>
+                <action android:name="android.nfc.cardemulation.action.HOST_APDU_SERVICE" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.nfc.cardemulation.host_apdu_service"
+                android:resource="@xml/apdu_service" />
+        </service>
+
         <activity
             android:name="com.hippo.ehviewer.ui.DatabaseViewerActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/settings_advanced_database_viewer"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.DatabaseTablesActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/settings_advanced_database_viewer"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.TableDataViewerActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_advanced_database_viewer"
             android:theme="@style/AppTheme.Toolbar" />
@@ -381,6 +411,12 @@
         <activity
             android:name="com.hippo.ehviewer.ui.PerformanceLogActivity"
             android:label="@string/performance_log_title"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.PerformanceBenchmarkActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/performance_benchmark_title"
             android:theme="@style/AppTheme.Toolbar" />
 
         <activity

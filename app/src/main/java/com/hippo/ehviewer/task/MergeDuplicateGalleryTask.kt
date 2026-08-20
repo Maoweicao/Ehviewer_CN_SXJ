@@ -22,6 +22,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedReader
+import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -46,7 +48,9 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
     context: Context,
     private val taskId: String = "merge_duplicate_gallery_${System.currentTimeMillis()}",
     /** 指定只扫描并合并单个画廊（gid），-1L 表示扫描全部 */
-    private val targetGid: Long = -1L
+    private val targetGid: Long = -1L,
+    /** 自动触发时跳过数据库全量备份，避免每次下载完成都复制整个 DB 文件 */
+    private val skipBackup: Boolean = false
 ) : BaseBackgroundTask(context) {
 
     private val galleryGroups = mutableListOf<GalleryGroup>()
@@ -169,7 +173,7 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         @JvmStatic
         fun mergeForGallery(context: Context, gid: Long): MergeDuplicateGalleryTask {
             val taskId = "merge_single_${gid}_${System.currentTimeMillis()}"
-            val task = MergeDuplicateGalleryTask(context, taskId, gid)
+            val task = MergeDuplicateGalleryTask(context, taskId, gid, true)
             // 预先加载标题用于任务名
             val info = EhDB.getDownloadInfo(gid)
             if (info != null) {
@@ -178,15 +182,78 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             }
             return task
         }
+
+        /**
+         * 解析 Shell 批量扫描输出（D 行 + uniq -c 计数行）。纯函数，便于单测。
+         */
+        @JvmStatic
+        fun parseShellScanOutput(raw: String): Map<String, DirScanEntry> {
+            val mtimes = HashMap<String, Long>()
+            val counts = HashMap<String, Int>()
+            for (line in raw.lines()) {
+                if (line.isBlank()) continue
+                if (line.startsWith("D\t")) {
+                    val parts = line.substring(2).split("\t", limit = 2)
+                    val name = parts.getOrElse(0) { "" }
+                    if (name.isEmpty()) continue
+                    mtimes[name] = parts.getOrElse(1) { "0" }.toDoubleOrNull()?.times(1000)?.toLong() ?: 0L
+                } else {
+                    val trimmed = line.trim()
+                    val sp = trimmed.indexOf(' ')
+                    if (sp <= 0) continue
+                    val count = trimmed.substring(0, sp).toIntOrNull() ?: continue
+                    val path = trimmed.substring(sp + 1).trim()
+                    val name = path.removePrefix("./")
+                    if (name.isNotEmpty() && name != ".") {
+                        counts[name] = count
+                    }
+                }
+            }
+            val result = LinkedHashMap<String, DirScanEntry>()
+            for ((name, mtime) in mtimes) {
+                result[name] = DirScanEntry(
+                    dirname = name,
+                    fileCount = counts[name] ?: 0,
+                    mtime = mtime
+                )
+            }
+            return result
+        }
+
+        /**
+         * 原生扫描目录（纯 java.io.File，零进程）。纯函数，便于单测。
+         */
+        @JvmStatic
+        fun scanNativeDirectory(root: File): Map<String, DirScanEntry>? {
+            val children = root.listFiles() ?: return null
+            val result = LinkedHashMap<String, DirScanEntry>()
+            for (dir in children) {
+                if (!dir.isDirectory) continue
+                val name = dir.name
+                result[name] = DirScanEntry(
+                    dirname = name,
+                    fileCount = countFilesNative(dir),
+                    mtime = dir.lastModified()
+                )
+            }
+            return result
+        }
+
+        @JvmStatic
+        fun countFilesNative(dir: File): Int {
+            var total = 0
+            val children = dir.listFiles() ?: return 0
+            for (child in children) {
+                total += if (child.isDirectory) countFilesNative(child) else 1
+            }
+            return total
+        }
     }
 
-    private data class ShellScanEntry(
+    data class DirScanEntry(
         val dirname: String,
         val fileCount: Int,
-        val mtime: Long,
-        val gid: String,
-        val token: String,
-        val hashes: Set<String>
+        val mtime: Long
     )
 
     private fun getRealDownloadPath(): String? {
@@ -194,30 +261,48 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         return if (downloadDir.uri.scheme == "file") downloadDir.uri.path else null
     }
 
-    private fun execShellScan(downloadPath: String): Map<String, ShellScanEntry>? {
+    /** 按设置分发快速扫描：Shell 批量（默认）或原生 Java */
+    private fun runFastScan(downloadPath: String): Map<String, DirScanEntry>? {
+        return when (Settings.getMergeScanMode()) {
+            Settings.MERGE_SCAN_MODE_NATIVE -> execNativeScan(downloadPath)
+            else -> execShellScan(downloadPath)
+        }
+    }
+
+    /**
+     * Shell 批量扫描：进程数与目录数量无关，只启动常数个进程。
+     * 用 find/sort/uniq 一次性取回所有子目录名、修改时间与文件数；
+     * .ehviewer 元数据改由 Kotlin 用 java.io.File 读取解析（见 buildFromDirScan），
+     * 不再为每个目录启动 sed/awk，且顺带修复 v2 元数据解析错误。
+     */
+    private fun execShellScan(downloadPath: String): Map<String, DirScanEntry>? {
         val escapedPath = downloadPath.replace("'", "'\\''")
         val script = (
             "cd '$escapedPath' 2>/dev/null || exit 1;" +
-            "for dir in */; do" +
-            " d=\${dir%/};" +
-            " c=\$(find \"\$d\" -type f 2>/dev/null | wc -l);" +
-            " m=\$(stat -c '%Y' \"\$d\" 2>/dev/null || echo 0);" +
-            " e=\"\$d/${SpiderQueen.SPIDER_INFO_FILENAME}\";" +
-            " if [ -f \"\$e\" ]; then" +
-            "  g=\$(sed -n '2p' \"\$e\" 2>/dev/null | tr -d '\\r\\n ');" +
-            "  t=\$(sed -n '3p' \"\$e\" 2>/dev/null | tr -d '\\r\\n ');" +
-            "  h=\$(awk 'NR>=4{printf \"%s,\",\$2}' \"\$e\" 2>/dev/null | sed 's/,\$//');" +
-            "  printf 'EHV|%s|%s|%s|%s|%s|%s\\n' \"\$d\" \"\$c\" \"\$m\" \"\$g\" \"\$t\" \"\$h\";" +
-            " else" +
-            "  printf 'RAW|%s|%s|%s\\n' \"\$d\" \"\$c\" \"\$m\";" +
-            " fi;" +
-            "done"
+            "find . -mindepth 1 -maxdepth 1 -type d -printf 'D\\t%f\\t%T@\\n';" +
+            "find . -type f -printf '%h\\t\\n' | sort | uniq -c"
             )
         return try {
             val process = ProcessBuilder("/system/bin/sh", "-c", script)
                 .redirectErrorStream(true)
                 .start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val output = java.util.concurrent.CompletableFuture<String>()
+            val reader = process.inputStream.bufferedReader()
+            Thread {
+                try {
+                    output.complete(buildString {
+                        reader.forEachLine { line ->
+                            append(line)
+                            append('\n')
+                        }
+                    })
+                } catch (_: Exception) {
+                    output.complete("")
+                }
+            }.apply {
+                isDaemon = true
+                start()
+            }
             val completed = process.waitFor(SHELL_TIMEOUT_SECONDS, java.util.concurrent.TimeUnit.SECONDS)
             if (!completed) {
                 process.destroyForcibly()
@@ -229,36 +314,41 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 Log.w(TAG, "Shell scan failed with exit code $exitCode")
                 null
             } else {
-                val result = LinkedHashMap<String, ShellScanEntry>()
-                for (line in output.lines()) {
-                    if (line.isBlank()) continue
-                    val parts = line.split("|", limit = 7)
-                    val dirname = parts.getOrElse(1) { "" }
-                    if (dirname.isEmpty()) continue
-                    if (parts[0] == "EHV") {
-                        result[dirname] = ShellScanEntry(
-                            dirname = dirname,
-                            fileCount = parts.getOrElse(2) { "0" }.trim().toIntOrNull() ?: 0,
-                            mtime = parts.getOrElse(3) { "0" }.trim().toLongOrNull() ?: 0L,
-                            gid = parts.getOrElse(4) { "" },
-                            token = parts.getOrElse(5) { "" },
-                            hashes = parts.getOrElse(6) { "" }.split(",").filter { it.isNotEmpty() }.toSet()
-                        )
-                    } else {
-                        result[dirname] = ShellScanEntry(
-                            dirname = dirname,
-                            fileCount = parts.getOrElse(2) { "0" }.trim().toIntOrNull() ?: 0,
-                            mtime = parts.getOrElse(3) { "0" }.trim().toLongOrNull() ?: 0L,
-                            gid = "",
-                            token = "",
-                            hashes = emptySet()
-                        )
-                    }
-                }
-                result
+                parseShellScanOutput(output.get())
             }
         } catch (e: Exception) {
             Log.w(TAG, "Shell scan failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 原生扫描：纯 java.io.File，零进程，比 Shell 批量更快更稳。
+     * 仅当下载目录为 file:// 时使用。
+     */
+    private fun execNativeScan(downloadPath: String): Map<String, DirScanEntry>? {
+        val root = File(downloadPath)
+        if (!root.exists() || !root.isDirectory) return null
+        return scanNativeDirectory(root)
+    }
+
+    private fun readEhviewerMetaFromFile(dirFile: File): EhviewerMeta? {
+        val eh = File(dirFile, SpiderQueen.SPIDER_INFO_FILENAME)
+        if (!eh.isFile) return null
+        return try {
+            val reader = BufferedReader(InputStreamReader(FileInputStream(eh), StandardCharsets.UTF_8))
+            try {
+                val parsed = EhviewerMetaParser.parseFromReader(reader) ?: return null
+                val meta = EhviewerMeta()
+                meta.gid = parsed.gid.toString()
+                meta.token = parsed.token
+                meta.files.putAll(parsed.indexToHash)
+                meta.hashes.addAll(parsed.hashes)
+                meta
+            } finally {
+                reader.close()
+            }
+        } catch (_: Exception) {
             null
         }
     }
@@ -284,11 +374,15 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
             }
 
             ensureNotCancelled()
-            logInfo("开始备份数据库")
-            dispatchProgress(STEP_BACKUP, context.getString(R.string.merge_backing_up_database), 0, 1)
-            if (!backupDatabase()) {
-                logError("备份数据库失败")
-                return Result.failure(IllegalStateException(lastError.ifEmpty { "备份数据库失败" }))
+            if (skipBackup) {
+                logInfo("自动合并模式：跳过数据库备份")
+            } else {
+                logInfo("开始备份数据库")
+                dispatchProgress(STEP_BACKUP, context.getString(R.string.merge_backing_up_database), 0, 1)
+                if (!backupDatabase()) {
+                    logError("备份数据库失败")
+                    return Result.failure(IllegalStateException(lastError.ifEmpty { "备份数据库失败" }))
+                }
             }
 
             ensureNotCancelled()
@@ -434,21 +528,24 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 null
             }
 
-            if (isSingleMode && targetCleanName != null) {
-                scanDownloadedGalleriesJava(infos, total, targetCleanName)
-            } else {
-                val realPath = getRealDownloadPath()
-                if (realPath != null) {
-                    logInfo("尝试 Shell 批量扫描: $realPath")
-                    val shellResults = execShellScan(realPath)
-                    if (shellResults != null && shellResults.isNotEmpty()) {
-                        logInfo("Shell 扫描完成，发现 ${shellResults.size} 个目录")
-                        return buildFromShellScan(shellResults, infos)
-                    }
-                    logInfo("Shell 扫描失败或无结果，回退到 Java 扫描")
-                }
-                scanDownloadedGalleriesJava(infos, total, null)
+            val realPath = getRealDownloadPath()
+            val modeName = when (Settings.getMergeScanMode()) {
+                Settings.MERGE_SCAN_MODE_NATIVE -> "原生 Java"
+                else -> "Shell"
             }
+
+            if (realPath != null) {
+                logInfo("尝试 $modeName 快速扫描: $realPath")
+                val entries = runFastScan(realPath)
+                if (entries != null && entries.isNotEmpty()) {
+                    logInfo("$modeName 扫描完成，发现 ${entries.size} 个目录")
+                    return buildFromDirScan(entries, infos, targetCleanName, realPath)
+                }
+                logInfo("$modeName 扫描失败或无结果，回退到 Java 扫描")
+            } else {
+                logInfo("下载目录不是 file://，回退到 Java 扫描")
+            }
+            scanDownloadedGalleriesJava(infos, total, targetCleanName)
         } catch (t: Throwable) {
             lastError = t.message ?: "扫描失败"
             logError("扫描失败: ${t.message}")
@@ -456,33 +553,52 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
         }
     }
 
-    private fun buildFromShellScan(
-        shellResults: Map<String, ShellScanEntry>,
-        infos: List<DownloadInfo>
+    /**
+     * 用快速扫描结果（Shell 或原生）构建重复分组。
+     * 目录→下载记录匹配优先用目录名中的 gid 前缀走 O(1) 索引，
+     * 避免对每条下载记录做 UniFile 往返；无 gid 前缀时回退到名称匹配。
+     * .ehviewer 元数据统一由 java.io.File 读取并用 EhviewerMetaParser 解析。
+     */
+    private fun buildFromDirScan(
+        entries: Map<String, DirScanEntry>,
+        infos: List<DownloadInfo>,
+        targetCleanName: String?,
+        realPath: String
     ): Boolean {
-        val dirnameToInfo = LinkedHashMap<String, DownloadInfo>()
+        val gidToInfo = HashMap<Long, DownloadInfo>(infos.size)
         for (info in infos) {
-            val dir = SpiderDen.getGalleryDownloadDir(info) ?: continue
-            if (!dir.exists() || !dir.isDirectory) continue
-            val name = dir.name ?: info.gid.toString()
-            dirnameToInfo[name] = info
+            gidToInfo[info.gid] = info
+        }
+        var dirnameToInfo: Map<String, DownloadInfo>? = null
+
+        fun infoFor(dirname: String): DownloadInfo? {
+            val id = extractIdFromFolderName(dirname)
+            if (id != null) {
+                val info = gidToInfo[id.toLong()]
+                if (info != null) return info
+            }
+            if (dirnameToInfo == null) {
+                val map = LinkedHashMap<String, DownloadInfo>()
+                for (info in infos) {
+                    val dir = SpiderDen.getGalleryDownloadDir(info) ?: continue
+                    if (!dir.exists() || !dir.isDirectory) continue
+                    val name = dir.name ?: info.gid.toString()
+                    map[name] = info
+                }
+                dirnameToInfo = map
+            }
+            return dirnameToInfo?.get(dirname)
         }
 
         val buckets = LinkedHashMap<String, MutableList<GalleryFolder>>()
-        for ((dirname, entry) in shellResults) {
-            val info = dirnameToInfo[dirname] ?: continue
+        for ((dirname, entry) in entries) {
+            if (targetCleanName != null && removeIdPrefix(dirname) != targetCleanName) {
+                continue
+            }
+            val info = infoFor(dirname) ?: continue
             val dir = SpiderDen.getGalleryDownloadDir(info) ?: continue
             val cleanName = removeIdPrefix(dirname)
-            val ehMeta = if (entry.gid.isNotEmpty()) {
-                val meta = EhviewerMeta()
-                meta.gid = entry.gid
-                meta.token = entry.token
-                meta.hashes.addAll(entry.hashes)
-                for ((idx, hash) in entry.hashes.withIndex()) {
-                    meta.files[idx] = hash
-                }
-                meta
-            } else null
+            val ehMeta = readEhviewerMetaFromFile(File(realPath, dirname))
 
             val folder = GalleryFolder(
                 info = info,
@@ -493,14 +609,18 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 fileCount = entry.fileCount,
                 ehMeta = ehMeta
             )
-            logInfo(
-                "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-            )
+            if (isSingleMode) {
+                logInfo(
+                    "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+                )
+            }
             buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
         }
 
-        MergeScanCache.put(HashMap(buckets))
-        logInfo("全量扫描结果已缓存至 MergeScanCache")
+        if (!isSingleMode) {
+            MergeScanCache.put(HashMap(buckets))
+            logInfo("全量扫描结果已缓存至 MergeScanCache")
+        }
 
         galleryGroups.clear()
         for ((key, value) in buckets) {
@@ -512,7 +632,12 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 )
             )
         }
-        logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+
+        if (isSingleMode && galleryGroups.isEmpty()) {
+            logInfo("单画廊模式: 未发现目标画廊的重复，无需合并")
+        } else {
+            logInfo("扫描完成，发现 ${galleryGroups.size} 组候选重复画廊")
+        }
         return true
     }
 
@@ -552,9 +677,11 @@ class MergeDuplicateGalleryTask @JvmOverloads constructor(
                 ehMeta = parseEhviewerMeta(dir)
             )
 
-            logInfo(
-                "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
-            )
+            if (isSingleMode) {
+                logInfo(
+                    "扫描到下载目录: ${folder.name}，文件数=${folder.fileCount}，修改时间=${folder.modifiedAt}，是否有ehviewer元数据=${folder.ehMeta != null}"
+                )
+            }
 
             buckets.getOrPut(cleanName) { mutableListOf() }.add(folder)
             dispatchProgress(STEP_SCAN, "扫描中: ${i + 1}/$total", i + 1, maxOf(total, 1))

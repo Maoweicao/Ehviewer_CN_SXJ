@@ -20,10 +20,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.BitmapFactory
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
@@ -72,6 +75,12 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
     
     // WifiLock 用于保持WiFi高性能模式（HyperOS/Android 14+ 后台WiFi会被降速）
     private var mWifiLock: WifiManager.WifiLock? = null
+    
+    // 屏幕常亮锁：保持亮屏并防止自动锁屏（需设置开启且仅充电时生效）
+    private var mScreenWakeLock: PowerManager.WakeLock? = null
+    
+    // 电源状态监听：充电状态变化时动态启停屏幕常亮
+    private var mPowerReceiver: BroadcastReceiver? = null
     
     // 定时刷新锁的 Runnable - 每5分钟重新获取锁，防止WakeLock超时（10分钟）后失效
     private val mLockRefreshRunnable = Runnable { refreshLocks() }
@@ -141,6 +150,9 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         // 初始化 WifiLock（用于防止后台WiFi降速，HyperOS/Android 14+）
         initWifiLock()
         
+        // 注册电源状态监听（充电状态变化时动态启停屏幕常亮）
+        registerPowerReceiver()
+        
         // 注册网络状态监听（使用全局 NetworkStateManager）
         NetworkStateManager.addListener(this)
         
@@ -166,6 +178,12 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         
         // 释放 WifiLock
         releaseWifiLock()
+        
+        // 释放屏幕常亮锁
+        releaseScreenWakeLock()
+        
+        // 注销电源状态监听
+        unregisterPowerReceiver()
         
         // 释放网络监听
         NetworkStateManager.removeListener(this)
@@ -290,6 +308,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             }
 
             ACTION_START_ALL -> if (mDownloadManager != null) {
+                mDownloadManager!!.resetLoopDownloadRetryCount()
                 mDownloadManager!!.startAllDownload()
             }
 
@@ -297,6 +316,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
                 @Suppress("DEPRECATION")
                 val gidListSR = intent!!.getParcelableExtra<LongList>(KEY_GID_LIST)
                 if (gidListSR != null && mDownloadManager != null) {
+                    mDownloadManager!!.resetLoopDownloadRetryCount()
                     mDownloadManager!!.startRangeDownload(gidListSR)
                 }
             }
@@ -306,6 +326,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
                 val gi = intent!!.getParcelableExtra<GalleryInfo>(KEY_GALLERY_INFO)
                 val label = intent.getStringExtra(KEY_LABEL)
                 if (gi != null && mDownloadManager != null) {
+                    mDownloadManager!!.resetLoopDownloadRetryCount()
                     mDownloadManager!!.startDownload(gi, label)
                 }
             }
@@ -420,6 +441,9 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         
         // 启动锁定时刷新（每5分钟刷新一次，防止超时失效）
         startLockRefresh()
+        
+        // 根据设置更新屏幕常亮锁（仅充电时生效）
+        updateScreenWakeLock()
 
         ensureDownloadingBuilder()
 
@@ -651,6 +675,8 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             releaseWakeLock()
             // 释放 WifiLock
             releaseWifiLock()
+            // 释放屏幕常亮锁
+            releaseScreenWakeLock()
             stopSelf()
         }
     }
@@ -782,6 +808,115 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
     }
     
     /**
+     * 当前设备是否正在充电
+     */
+    private fun isCharging(): Boolean {
+        return try {
+            val intent = applicationContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to query battery status", e)
+            false
+        }
+    }
+    
+    /**
+     * 屏幕常亮条件是否满足：设置开启 + 有活跃下载 + 正在充电
+     */
+    private fun shouldKeepScreenOn(): Boolean {
+        if (!Settings.getDownloadKeepScreenOn()) return false
+        if (mDownloadManager == null || !mDownloadManager!!.hasActiveDownload()) return false
+        return isCharging()
+    }
+    
+    /**
+     * 根据条件动态获取/释放屏幕常亮锁
+     * 避免下载时自动息屏/锁屏导致无法查看进度，仅充电时生效以省电
+     */
+    @SuppressLint("WakelockTimeout")
+    private fun updateScreenWakeLock() {
+        try {
+            if (shouldKeepScreenOn()) {
+                if (mScreenWakeLock == null) {
+                    val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                    mScreenWakeLock = powerManager.newWakeLock(
+                        PowerManager.FULL_WAKE_LOCK,
+                        "EhViewer:DownloadScreenOnLock"
+                    ).apply {
+                        setReferenceCounted(false)
+                    }
+                }
+                if (mScreenWakeLock != null && !mScreenWakeLock!!.isHeld) {
+                    mScreenWakeLock!!.acquire()
+                    Log.i(TAG, "Screen-on WakeLock acquired (charging + active download)")
+                    NetworkLogger.logBackground("Screen-on WakeLock acquired (charging + active download)")
+                }
+            } else {
+                releaseScreenWakeLock()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to update screen-on WakeLock", e)
+        }
+    }
+    
+    /**
+     * 释放屏幕常亮锁
+     */
+    private fun releaseScreenWakeLock() {
+        try {
+            if (mScreenWakeLock != null && mScreenWakeLock!!.isHeld) {
+                mScreenWakeLock!!.release()
+                Log.i(TAG, "Screen-on WakeLock released")
+                if (NetworkLogger.enabled) {
+                    NetworkLogger.logBackground("Screen-on WakeLock released")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to release screen-on WakeLock", e)
+        }
+    }
+    
+    /**
+     * 注册电源状态广播监听，充电状态变化时动态启停屏幕常亮
+     */
+    private fun registerPowerReceiver() {
+        if (mPowerReceiver != null) return
+        mPowerReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                when (intent.action) {
+                    Intent.ACTION_POWER_CONNECTED,
+                    Intent.ACTION_POWER_DISCONNECTED -> updateScreenWakeLock()
+                }
+            }
+        }
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_POWER_CONNECTED)
+                addAction(Intent.ACTION_POWER_DISCONNECTED)
+            }
+            registerReceiver(mPowerReceiver, filter)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to register power receiver", e)
+        }
+    }
+    
+    /**
+     * 注销电源状态广播监听
+     */
+    private fun unregisterPowerReceiver() {
+        val receiver = mPowerReceiver
+        if (receiver != null) {
+            try {
+                unregisterReceiver(receiver)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to unregister power receiver", e)
+            }
+            mPowerReceiver = null
+        }
+    }
+    
+    /**
      * 启动锁定时刷新
      * 每5分钟刷新一次 WakeLock 和 WifiLock，防止超时或系统回收
      */
@@ -824,6 +959,8 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
             acquireWakeLock()
             // 刷新 WifiLock
             acquireWifiLock()
+            // 刷新屏幕常亮锁（充电状态可能已变化）
+            updateScreenWakeLock()
             
             Log.d(TAG, "Locks refreshed, next refresh in 5 min")
             NetworkLogger.logBackground("Locks refreshed (WakeLock+WifiLock), next in 5min")
@@ -882,6 +1019,7 @@ class DownloadService : Service(), DownloadManager.DownloadListener, NetworkStat
         NetworkLogger.logBackground("DownloadService: network recovered, resuming downloads")
         acquireWakeLock()
         acquireWifiLock()
+        updateScreenWakeLock()
         mDownloadManager?.notifyNetworkRecovered()
     }
 

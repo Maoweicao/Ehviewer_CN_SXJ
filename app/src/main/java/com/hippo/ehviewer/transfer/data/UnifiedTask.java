@@ -65,6 +65,8 @@ public class UnifiedTask {
     public long createdTime;
     public long updatedTime;
     public long completedTime;
+    /** 是否已暂停（供执行循环检查） */
+    public volatile boolean paused;
 
     // Push specific
     public String mode;           // all / selected
@@ -158,6 +160,34 @@ public class UnifiedTask {
                 STATUS_REJECTED.equals(status);
     }
 
+    /**
+     * 是否处于可暂停状态（进行中且未暂停）
+     */
+    public boolean canPause() {
+        return !paused && !isTerminal() && !STATUS_PENDING.equals(status);
+    }
+
+    /**
+     * 是否处于可恢复状态（已暂停）
+     */
+    public boolean canResume() {
+        return paused && !isTerminal();
+    }
+
+    /**
+     * 暂停时是否应阻塞等待直到恢复（供执行循环使用）
+     */
+    public void waitWhilePaused() {
+        while (paused && !isTerminal()) {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+    }
+
     public void updateProgress(double progress) {
         this.progress = progress;
         this.updatedTime = System.currentTimeMillis();
@@ -194,6 +224,7 @@ public class UnifiedTask {
         json.put("createdTime", createdTime);
         json.put("updatedTime", updatedTime);
         json.put("completedTime", completedTime);
+        json.put("paused", paused);
 
         // Push fields
         json.put("mode", mode);
@@ -252,6 +283,7 @@ public class UnifiedTask {
         task.createdTime = json.getLongValue("createdTime");
         task.updatedTime = json.getLongValue("updatedTime");
         task.completedTime = json.getLongValue("completedTime");
+        task.paused = json.getBooleanValue("paused");
 
         // Push fields
         task.mode = json.getString("mode");
@@ -317,6 +349,7 @@ public class UnifiedTask {
         json.put("createdTime", createdTime);
         json.put("updatedTime", updatedTime);
         json.put("completedTime", completedTime);
+        json.put("paused", paused);
 
         if (isCompress()) {
             json.put("splitSizeMB", splitSizeMB);

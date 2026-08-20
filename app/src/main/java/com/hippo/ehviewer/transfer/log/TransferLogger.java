@@ -74,6 +74,10 @@ public class TransferLogger {
         addLog(LogLevel.WARN, tag, msg, null);
     }
 
+    public void w(String tag, String msg, Throwable t) {
+        addLog(LogLevel.WARN, tag, msg, Log.getStackTraceString(t));
+    }
+
     public void e(String tag, String msg) {
         addLog(LogLevel.ERROR, tag, msg, null);
     }

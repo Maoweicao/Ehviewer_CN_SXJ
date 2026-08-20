@@ -4,7 +4,6 @@ import android.util.Log;
 
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.dao.DownloadInfo;
-import com.hippo.ehviewer.dao.PtokensIndex;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.unifile.UniFile;
 
@@ -31,9 +30,8 @@ public class PtokenIndexRebuilder {
         }
 
         try {
-            List<PtokensIndex> existing = EhDB.getAllPtokensIndex();
-            if (!existing.isEmpty()) {
-                Log.i(TAG, "Ptoken index already has " + existing.size() + " entries, skipping rebuild");
+            if (EhDB.getPtokensIndexCount() > 0) {
+                Log.i(TAG, "Ptoken index already populated, skipping rebuild");
                 return;
             }
 

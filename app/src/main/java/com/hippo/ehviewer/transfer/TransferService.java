@@ -26,7 +26,6 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
-import android.util.Log;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -80,7 +79,7 @@ public class TransferService extends Service implements Observer {
     @Override
     public void onCreate() {
         super.onCreate();
-        Log.d(TAG, "TransferService created");
+        TransferLogger.getInstance().d(TAG, "TransferService created");
         mainHandler = new Handler(Looper.getMainLooper());
         serverManager = new TransferServerManager(this);
         serverManager.addObserver(this);
@@ -91,7 +90,7 @@ public class TransferService extends Service implements Observer {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        Log.d(TAG, "TransferService started");
+        TransferLogger.getInstance().d(TAG, "TransferService started");
 
         // 处理通知栏"停止服务"按钮
         if (intent != null && ACTION_STOP_SERVICE.equals(intent.getAction())) {
@@ -116,7 +115,7 @@ public class TransferService extends Service implements Observer {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        Log.d(TAG, "TransferService destroyed");
+        TransferLogger.getInstance().d(TAG, "TransferService destroyed");
         stopLockRefresh();
         releaseWakeLock();
         releaseWifiLock();
@@ -253,10 +252,10 @@ public class TransferService extends Service implements Observer {
                         "EhViewer:TransferWakeLock"
                 );
                 wakeLock.setReferenceCounted(false);
-                Log.i(TAG, "WakeLock initialized");
+                TransferLogger.getInstance().i(TAG, "WakeLock initialized");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to initialize WakeLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to initialize WakeLock", e);
         }
     }
 
@@ -270,10 +269,10 @@ public class TransferService extends Service implements Observer {
                     wakeLock.release(); // 先释放再重新获取，起刷新作用
                 }
                 wakeLock.acquire();
-                Log.d(TAG, "WakeLock acquired");
+                TransferLogger.getInstance().d(TAG, "WakeLock acquired");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to acquire WakeLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to acquire WakeLock", e);
         }
     }
 
@@ -281,10 +280,10 @@ public class TransferService extends Service implements Observer {
         try {
             if (wakeLock != null && wakeLock.isHeld()) {
                 wakeLock.release();
-                Log.d(TAG, "WakeLock released");
+                TransferLogger.getInstance().d(TAG, "WakeLock released");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to release WakeLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to release WakeLock", e);
         }
     }
 
@@ -302,10 +301,10 @@ public class TransferService extends Service implements Observer {
                         "EhViewer:TransferWifiLock"
                 );
                 wifiLock.setReferenceCounted(false);
-                Log.i(TAG, "WifiLock initialized (WIFI_MODE_FULL_HIGH_PERF)");
+                TransferLogger.getInstance().i(TAG, "WifiLock initialized (WIFI_MODE_FULL_HIGH_PERF)");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to initialize WifiLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to initialize WifiLock", e);
         }
     }
 
@@ -319,10 +318,10 @@ public class TransferService extends Service implements Observer {
             }
             if (wifiLock != null && !wifiLock.isHeld()) {
                 wifiLock.acquire();
-                Log.d(TAG, "WifiLock acquired");
+                TransferLogger.getInstance().d(TAG, "WifiLock acquired");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to acquire WifiLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to acquire WifiLock", e);
         }
     }
 
@@ -330,10 +329,10 @@ public class TransferService extends Service implements Observer {
         try {
             if (wifiLock != null && wifiLock.isHeld()) {
                 wifiLock.release();
-                Log.d(TAG, "WifiLock released");
+                TransferLogger.getInstance().d(TAG, "WifiLock released");
             }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to release WifiLock", e);
+            TransferLogger.getInstance().e(TAG, "Failed to release WifiLock", e);
         }
     }
 

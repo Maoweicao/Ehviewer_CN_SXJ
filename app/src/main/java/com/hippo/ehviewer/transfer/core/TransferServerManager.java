@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.core;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.hippo.ehviewer.transfer.data.ClientInfo;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
@@ -36,7 +35,8 @@ public class TransferServerManager extends Observable {
 
     private static final String TAG = "TransferServerManager";
     private static final int DEFAULT_PORT = 8080;
-    private static final String SERVICE_TYPE = "_ehviewer-transfer._tcp.local";
+    // 必须与DeviceDiscoveryManager.SERVICE_TYPE 完全一致，否则无法被发现
+    private static final String SERVICE_TYPE = "_ehviewer-transfer._tcp.local.";
 
     private Context context;
     private TransferHttpServer httpServer;
@@ -212,7 +212,7 @@ public class TransferServerManager extends Observable {
      */
     public String createClientPushTask(String type) {
         String taskId = java.util.UUID.randomUUID().toString();
-        Log.d(TAG, "Create client push task: " + type + " id=" + taskId);
+        TransferLogger.getInstance().d(TAG, "Create client push task: " + type + " id=" + taskId);
         setChanged();
         notifyObservers("已请求客户端传输: " + type);
         return taskId;

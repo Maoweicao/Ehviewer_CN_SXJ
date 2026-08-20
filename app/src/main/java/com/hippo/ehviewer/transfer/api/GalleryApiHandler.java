@@ -20,7 +20,6 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.util.Base64;
-import android.util.Log;
 
 import com.hippo.beerbelly.BeerBelly;
 import com.hippo.ehviewer.EhApplication;
@@ -37,9 +36,12 @@ import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
-import com.hippo.ehviewer.transfer.core.DeleteTaskExecutor;
-import com.hippo.ehviewer.transfer.data.UnifiedTask;
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+import com.hippo.ehviewer.util.ImageMimeUtils;
+import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.unifile.UniFile;
+import com.hippo.ehviewer.BackgroundTaskManager;
+import com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -49,6 +51,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Locale;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -75,7 +78,7 @@ public class GalleryApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
         
         // 移除查询参数进行匹配
         String path = uri.split("\\?")[0];
@@ -107,7 +110,7 @@ public class GalleryApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("DELETE", uri);
+        logRequest("DELETE", uri, session);
         
         // 移除查询参数进行匹配
         String path = uri.split("\\?")[0];
@@ -128,7 +131,7 @@ public class GalleryApiHandler extends BaseApiHandler {
     
     @Override
     public NanoHTTPD.Response handleQuery(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("QUERY", uri);
+        logRequest("QUERY", uri, session);
         
         // /api/v1/galleries - 查询
         if (uri.equals("/api/v1/galleries")) {
@@ -159,6 +162,8 @@ public class GalleryApiHandler extends BaseApiHandler {
             boolean hasExpression = (sortExpr != null && !sortExpr.isEmpty()) ||
                     (filterExpr != null && !filterExpr.isEmpty()) ||
                     (search != null && !search.isEmpty());
+            TransferLogger.getInstance().d(TAG, "获取画廊列表: page=" + page + ", limit=" + limit +
+                    ", label=" + label + ", search=" + search);
 
             // Check cache (only for non-search / non-expression requests)
             String cacheKey = ResponseCache.buildKey("galleries", String.valueOf(page), String.valueOf(limit),
@@ -167,7 +172,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             if (!hasExpression) {
                 String cached = ResponseCache.getInstance().get(cacheKey);
                 if (cached != null) {
-                    Log.d(TAG, "Cache hit for galleries list");
+                    TransferLogger.getInstance().d(TAG, "Cache hit for galleries list");
                     return ResponseBuilder.jsonSuccess(cached);
                 }
             }
@@ -228,10 +233,11 @@ public class GalleryApiHandler extends BaseApiHandler {
                 ResponseCache.getInstance().put(cacheKey, responseJson);
             }
 
+            TransferLogger.getInstance().i(TAG, "已下载画廊: " + total + " 个, 返回 " + pageList.size() + " 个");
             return ResponseBuilder.jsonSuccess(responseJson);
 
         } catch (Exception e) {
-            Log.e(TAG, "Error listing galleries", e);
+            TransferLogger.getInstance().e(TAG, "Error listing galleries", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -241,11 +247,12 @@ public class GalleryApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleDetail(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().d(TAG, "获取画廊详情: gid=" + gid);
             // Check cache
             String cacheKey = ResponseCache.buildKey("gallery_detail", String.valueOf(gid));
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
-                Log.d(TAG, "Cache hit for gallery detail: " + gid);
+                TransferLogger.getInstance().d(TAG, "Cache hit for gallery detail: " + gid);
                 return ResponseBuilder.jsonSuccess(cached);
             }
 
@@ -263,7 +270,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(json);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting gallery detail", e);
+            TransferLogger.getInstance().e(TAG, "Error getting gallery detail", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -273,6 +280,7 @@ public class GalleryApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleThumbnail(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().d(TAG, "获取缩略图: gid=" + gid);
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
             
             if (info == null) {
@@ -306,10 +314,10 @@ public class GalleryApiHandler extends BaseApiHandler {
                     );
                 }
                 
-                // 压缩失败，返回原图
+                // 压缩失败，返回原图（按魔数标注真实 MIME，避免 WebP 被标成 jpeg）
                 return NanoHTTPD.newFixedLengthResponse(
                     NanoHTTPD.Response.Status.OK,
-                    "image/jpeg",
+                    ImageMimeUtils.detectImageMime(thumbData),
                     new java.io.ByteArrayInputStream(thumbData),
                     thumbData.length
                 );
@@ -319,7 +327,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             return ResponseBuilder.notFound("Thumbnail");
             
         } catch (Exception e) {
-            Log.e(TAG, "Error getting thumbnail", e);
+            TransferLogger.getInstance().e(TAG, "Error getting thumbnail", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -352,6 +360,7 @@ public class GalleryApiHandler extends BaseApiHandler {
      */
     private NanoHTTPD.Response handleDeleteGallery(NanoHTTPD.IHTTPSession session, long gid) {
         try {
+            TransferLogger.getInstance().i(TAG, "删除画廊: gid=" + gid);
             // 检查删除开关
             if (!Settings.isRemoteDeleteEnabled()) {
                 return ResponseBuilder.forbidden("Remote delete is disabled");
@@ -363,12 +372,11 @@ public class GalleryApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Gallery");
             }
             
-            UnifiedTask task = DeleteTaskExecutor.getInstance().submitGalleryDelete(
-                    context, java.util.Collections.singletonList(gid), Settings.isDeleteFilesOnRemoteDelete());
-            return ResponseBuilder.accepted(deleteTaskJson(task));
+            boolean deleteFiles = parseDeleteFiles(session);
+            return submitDeleteTask(java.util.Collections.singletonList(gid), deleteFiles);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error deleting gallery", e);
+            TransferLogger.getInstance().e(TAG, "Error deleting gallery", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -385,31 +393,76 @@ public class GalleryApiHandler extends BaseApiHandler {
             
             String body = RequestParser.readBody(session);
             
-            // 解析GID列表
-            List<Long> gids = parseGidList(body);
+            // 解析GID列表（优先 fastjson，失败时回退到简单的字符串解析）
+            List<Long> gids = new ArrayList<>();
+            boolean deleteFiles = parseDeleteFiles(session);
+            try {
+                com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(body);
+                if (json != null) {
+                    com.alibaba.fastjson.JSONArray gidsArray = json.getJSONArray("gids");
+                    if (gidsArray != null) {
+                        for (int i = 0; i < gidsArray.size(); i++) {
+                            gids.add(gidsArray.getLongValue(i));
+                        }
+                    }
+                    if (json.containsKey("deleteFiles")) {
+                        deleteFiles = json.getBooleanValue("deleteFiles");
+                    }
+                }
+            } catch (Exception e) {
+                TransferLogger.getInstance().w(TAG, "解析批量删除请求体失败，回退到简单解析", e);
+                gids = parseGidList(body);
+            }
+            TransferLogger.getInstance().i(TAG, "批量删除画廊: " + gids.size() + " 个, deleteFiles=" + deleteFiles);
             
             if (gids.isEmpty()) {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, 
                     "No GIDs provided");
             }
             
-            UnifiedTask task = DeleteTaskExecutor.getInstance().submitGalleryDelete(
-                    context, gids, Settings.isDeleteFilesOnRemoteDelete());
-            return ResponseBuilder.accepted(deleteTaskJson(task));
+            return submitDeleteTask(gids, deleteFiles);
             
         } catch (Exception e) {
-            Log.e(TAG, "Error batch deleting galleries", e);
+            TransferLogger.getInstance().e(TAG, "Error batch deleting galleries", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
 
-    private String deleteTaskJson(UnifiedTask task) {
+    /**
+     * 提交删除后台任务，返回 202 + 后台任务 taskId。
+     */
+    private NanoHTTPD.Response submitDeleteTask(List<Long> gids, boolean deleteFiles) {
+        LongList gidList = new LongList(gids.size());
+        for (Long gid : gids) {
+            gidList.add(gid);
+        }
+        DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
+                context, downloadManager, gidList, deleteFiles, null);
+        BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+        return ResponseBuilder.accepted(deleteTaskJson(handle));
+    }
+
+    /**
+     * 解析 deleteFiles（true/1 为删除本地文件，false 为移入回收站）。
+     * 单个删除取查询参数；批量删除优先取请求体字段，其次查询参数；
+     * 均未指定时取全局设置 isDeleteFilesOnRemoteDelete。
+     */
+    private boolean parseDeleteFiles(NanoHTTPD.IHTTPSession session) {
+        Map<String, String> parms = session.getParms();
+        String value = parms != null ? parms.get("deleteFiles") : null;
+        if (value == null) {
+            return Settings.isDeleteFilesOnRemoteDelete();
+        }
+        return "1".equals(value) || "true".equalsIgnoreCase(value);
+    }
+
+    private String deleteTaskJson(BackgroundTaskManager.TaskHandle handle) {
         com.alibaba.fastjson.JSONObject response = new com.alibaba.fastjson.JSONObject();
         response.put("success", true);
         response.put("accepted", true);
-        response.put("taskId", task.taskId);
-        response.put("status", task.status);
-        response.put("total", task.total);
+        response.put("taskId", handle.taskId);
+        response.put("status", "pending");
+        response.put("taskClassName", DeleteRangeDownloadTask.class.getName());
         return response.toJSONString();
     }
     
@@ -439,7 +492,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                     if (json.containsKey("label")) label = json.getString("label");
                 }
             } catch (Exception e) {
-                Log.w(TAG, "Failed to parse QUERY body, falling back", e);
+                TransferLogger.getInstance().w(TAG, "Failed to parse QUERY body, falling back", e);
             }
 
             limit = normalizeLimit(limit);
@@ -493,10 +546,11 @@ public class GalleryApiHandler extends BaseApiHandler {
 
             sb.append("]}");
 
+            TransferLogger.getInstance().i(TAG, "QUERY查询画廊: total=" + total + ", 返回 " + pageList.size() + " 个");
             return ResponseBuilder.jsonSuccess(sb.toString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Error querying galleries", e);
+            TransferLogger.getInstance().e(TAG, "Error querying galleries", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -526,7 +580,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                         if (json.containsKey("search")) search = json.getString("search");
                     }
                 } catch (Exception e) {
-                    Log.w(TAG, "Failed to parse favorites QUERY body", e);
+                    TransferLogger.getInstance().w(TAG, "Failed to parse favorites QUERY body", e);
                 }
             } else {
                 page = RequestParser.getIntQueryParameter(session, "page", 1);
@@ -537,6 +591,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             }
 
             limit = normalizeLimit(limit);
+            TransferLogger.getInstance().d(TAG, "获取收藏列表: page=" + page + ", limit=" + limit + ", search=" + search);
 
             // 获取本地收藏
             List<GalleryInfo> favList = EhDB.getAllLocalFavorites();
@@ -593,10 +648,11 @@ public class GalleryApiHandler extends BaseApiHandler {
 
             sb.append("]}");
 
+            TransferLogger.getInstance().i(TAG, "收藏列表: 共 " + views.size() + " 条, 返回 " + pageList.size() + " 条");
             return ResponseBuilder.jsonSuccess(sb.toString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Error listing favorites", e);
+            TransferLogger.getInstance().e(TAG, "Error listing favorites", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -615,10 +671,11 @@ public class GalleryApiHandler extends BaseApiHandler {
             sb.append(",\"titleJpn\":\"").append(escapeJson(info.titleJpn)).append("\"");
         }
 
-        // 缩略图（Base64）
+        // 缩略图（Base64，按魔数探测真实格式输出正确 MIME）
         String thumbBase64 = getThumbnailBase64(info.gid);
         if (thumbBase64 != null) {
-            sb.append(",\"thumb\":\"data:image/jpeg;base64,").append(thumbBase64).append("\"");
+            String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
+            sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
         } else if (info.thumb != null) {
             sb.append(",\"thumb\":\"").append(escapeJson(info.thumb)).append("\"");
         }
@@ -711,7 +768,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                 return Base64.encodeToString(thumbData, Base64.NO_WRAP);
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to get thumbnail for gid: " + gid, e);
+            TransferLogger.getInstance().w(TAG, "Failed to get thumbnail for gid: " + gid, e);
         }
         return null;
     }
@@ -764,7 +821,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             return baos.toByteArray();
             
         } catch (Exception e) {
-            Log.w(TAG, "Failed to compress thumbnail", e);
+            TransferLogger.getInstance().w(TAG, "Failed to compress thumbnail", e);
             return null;
         }
     }
@@ -1357,7 +1414,8 @@ public class GalleryApiHandler extends BaseApiHandler {
 
         String thumbBase64 = getThumbnailBase64(fav.gid);
         if (thumbBase64 != null) {
-            sb.append(",\"thumb\":\"data:image/jpeg;base64,").append(thumbBase64).append("\"");
+            String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
+            sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
         } else if (fav.thumb != null) {
             sb.append(",\"thumb\":\"").append(escapeJson(fav.thumb)).append("\"");
         }
@@ -1496,7 +1554,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                 }
             }
         } catch (Exception e) {
-            Log.w(TAG, "Failed to get pages from SpiderInfo", e);
+            TransferLogger.getInstance().w(TAG, "Failed to get pages from SpiderInfo", e);
         }
         return 0;
     }
@@ -1518,7 +1576,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             }
             return total;
         } catch (Exception e) {
-            Log.w(TAG, "Failed to compute gallery size: " + info.gid, e);
+            TransferLogger.getInstance().w(TAG, "Failed to compute gallery size: " + info.gid, e);
             return -1;
         }
     }

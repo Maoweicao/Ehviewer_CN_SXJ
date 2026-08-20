@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -116,7 +115,6 @@ public class FileApiHandler extends BaseApiHandler {
             String folder = extractFolder(uri, "/api/v1/folders/", "/files");
             return handleFileList(session, folder);
         }
-
         // GET /api/v1/folders/downloads/files/{gid}/integrity
         if (uri.matches("/api/v1/folders/downloads/files/\\d+/integrity")) {
             long gid = extractGidFromUri(uri);

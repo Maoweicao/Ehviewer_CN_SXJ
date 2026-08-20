@@ -14,6 +14,7 @@ import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.callBack.DownloadSearchCallback;
 import com.hippo.ehviewer.client.EhConfig;
 import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.download.DownloadManager;
@@ -23,11 +24,13 @@ import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.unifile.UniFile;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -439,6 +442,271 @@ public class DownloadListInfosExecutor {
         });
     }
 
+    // 快捷筛选类型（与菜单 R.id 对应）
+    public static final int QUICK_FILTER_BIG_LOW_RATING = R.id.quick_filter_big_low_rating;
+    public static final int QUICK_FILTER_DUPLICATES = R.id.quick_filter_duplicates;
+    public static final int QUICK_FILTER_LOW_SPACE_EFFICIENCY = R.id.quick_filter_low_space_efficiency;
+    public static final int QUICK_FILTER_LOW_RATING = R.id.quick_filter_low_rating;
+    public static final int QUICK_FILTER_HUGE_FILE = R.id.quick_filter_huge_file;
+    public static final int QUICK_FILTER_OLD_UNFAVORITED = R.id.quick_filter_old_unfavorited;
+
+    // 快捷筛选体积阈值
+    private static final long SIZE_100MB = 100L * 1024 * 1024;
+    private static final long SIZE_200MB = 200L * 1024 * 1024;
+    private static final double SIZE_PER_PAGE_4MB = 4.0 * 1024 * 1024;
+
+    /**
+     * 执行快捷筛选预设。所有预设均要求“已下载完成”（STATE_FINISH）。
+     * 在后台线程中一次遍历完成，体积类预设复用同一张尺寸表，避免重复 I/O。
+     */
+    @SuppressLint("NonConstantResourceId")
+    public void executeQuickFilter(int quickFilterId) {
+        mCancelled = false;
+        service.execute(() -> {
+            if (mCancelled) return;
+            List<DownloadInfo> source = mList != null ? mList : new ArrayList<>();
+            // 统一先过滤已完成下载，这是所有快捷筛选的前提
+            List<DownloadInfo> finished = filterDownloadState(source, DownloadInfo.STATE_FINISH);
+            List<DownloadInfo> result = new ArrayList<>();
+            long start = System.currentTimeMillis();
+            try {
+                switch (quickFilterId) {
+                    case QUICK_FILTER_BIG_LOW_RATING: {
+                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
+                        for (DownloadInfo info : finished) {
+                            long size = sizeMap.getOrDefault(info.gid, 0L);
+                            info.fileSize = size;
+                            if (size >= SIZE_100MB && info.rating > 0f && info.rating < 3.5f) {
+                                result.add(info);
+                            }
+                        }
+                        result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
+                        break;
+                    }
+                    case QUICK_FILTER_DUPLICATES: {
+                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
+                        for (DownloadInfo info : finished) {
+                            info.fileSize = sizeMap.getOrDefault(info.gid, 0L);
+                        }
+                        result = filterDuplicatesExceptBest(finished);
+                        break;
+                    }
+                    case QUICK_FILTER_LOW_SPACE_EFFICIENCY: {
+                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
+                        Map<DownloadInfo, Double> perPageMap = new HashMap<>();
+                        for (DownloadInfo info : finished) {
+                            long size = sizeMap.getOrDefault(info.gid, 0L);
+                            info.fileSize = size;
+                            long pages = getPageCount(info);
+                            if (pages > 0 && size >= SIZE_PER_PAGE_4MB * pages) {
+                                perPageMap.put(info, size / (double) pages);
+                                result.add(info);
+                            }
+                        }
+                        result.sort((a, b) -> Double.compare(perPageMap.getOrDefault(b, 0d), perPageMap.getOrDefault(a, 0d)));
+                        break;
+                    }
+                    case QUICK_FILTER_LOW_RATING: {
+                        for (DownloadInfo info : finished) {
+                            if (info.rating > 0f && info.rating < 3f) {
+                                result.add(info);
+                            }
+                        }
+                        result.sort((a, b) -> Float.compare(a.rating, b.rating));
+                        break;
+                    }
+                    case QUICK_FILTER_HUGE_FILE: {
+                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
+                        for (DownloadInfo info : finished) {
+                            long size = sizeMap.getOrDefault(info.gid, 0L);
+                            info.fileSize = size;
+                            if (size >= SIZE_200MB) {
+                                result.add(info);
+                            }
+                        }
+                        result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
+                        break;
+                    }
+                    case QUICK_FILTER_OLD_UNFAVORITED: {
+                        Set<Long> favoritedGids = loadLocalFavoritedGids();
+                        for (DownloadInfo info : finished) {
+                            if (!favoritedGids.contains(info.gid) && getPostedYear(info) < 2024) {
+                                result.add(info);
+                            }
+                        }
+                        result.sort((a, b) -> Integer.compare(getPostedYear(a), getPostedYear(b)));
+                        break;
+                    }
+                    default:
+                        result = finished;
+                        break;
+                }
+            } catch (Exception e) {
+                Log.w("DownloadListInfos", "executeQuickFilter failed, quickFilterId=" + quickFilterId, e);
+                result = new ArrayList<>();
+            }
+            Log.d("DownloadListInfos", "executeQuickFilter 完成, id=" + quickFilterId + ", 结果=" + result.size() + ", 耗时=" + (System.currentTimeMillis() - start) + "ms");
+            List<DownloadInfo> finalResult = result;
+            handler.post(() -> {
+                if (mCancelled || mDownloadSearchCallback == null) {
+                    return;
+                }
+                mDownloadSearchCallback.onDownloadSearchSuccess(finalResult);
+            });
+        });
+    }
+
+    private long sizeOf(DownloadInfo info) {
+        return info.fileSize > 0 ? info.fileSize : 0L;
+    }
+
+    /**
+     * 获取页数：优先 total，其次 pages，再退化为 SpiderInfo。
+     */
+    private long getPageCount(DownloadInfo info) {
+        if (info.total > 0) {
+            return info.total;
+        }
+        if (info.pages > 0) {
+            return info.pages;
+        }
+        try {
+            SpiderInfo spiderInfo = SpiderInfo.getSpiderInfo(info);
+            if (spiderInfo != null && spiderInfo.pages > 0) {
+                return spiderInfo.pages;
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    /**
+     * 从 posted（yyyy-MM-dd HH:mm）解析发布年份；解析失败返回 0。
+     */
+    private int getPostedYear(DownloadInfo info) {
+        String posted = info.posted;
+        if (posted == null || posted.isEmpty()) {
+            return 0;
+        }
+        try {
+            String yearStr = posted.substring(0, Math.min(4, posted.length())).trim();
+            int dash = yearStr.indexOf('-');
+            if (dash > 0) {
+                yearStr = yearStr.substring(0, dash);
+            }
+            int year = Integer.parseInt(yearStr);
+            return year > 0 ? year : 0;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 加载本地收藏 gid 集合（仅本地收藏表，离线可靠）。
+     */
+    private Set<Long> loadLocalFavoritedGids() {
+        Set<Long> gids = new HashSet<>();
+        try {
+            List<GalleryInfo> favorites = EhDB.getAllLocalFavorites();
+            if (favorites != null) {
+                for (GalleryInfo gi : favorites) {
+                    if (gi != null) {
+                        gids.add(gi.gid);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w("DownloadListInfos", "loadLocalFavoritedGids failed", e);
+        }
+        return gids;
+    }
+
+    /**
+     * 重复作品：规范化标题相同的分组中 >= 2 个时，选出“最优”保留（评分最高 -> 完成度最高 -> 体积最大），
+     * 返回组内除最优外的其余，便于清理。
+     */
+    private List<DownloadInfo> filterDuplicatesExceptBest(List<DownloadInfo> sourceList) {
+        List<DownloadInfo> result = new ArrayList<>();
+        if (sourceList == null || sourceList.isEmpty()) {
+            return result;
+        }
+        Map<String, List<DownloadInfo>> grouped = new HashMap<>();
+        for (DownloadInfo info : sourceList) {
+            String key = buildNormalizedTitleKey(info);
+            grouped.computeIfAbsent(key, ignored -> new ArrayList<>()).add(info);
+        }
+        for (List<DownloadInfo> group : grouped.values()) {
+            if (group.size() < 2) {
+                continue;
+            }
+            DownloadInfo best = pickBestDuplicate(group);
+            for (DownloadInfo info : group) {
+                if (info != best) {
+                    result.add(info);
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 从重复组中选出最优：评分高 -> 完成度高 -> 体积大。
+     */
+    private DownloadInfo pickBestDuplicate(List<DownloadInfo> group) {
+        DownloadInfo best = group.get(0);
+        for (int i = 1; i < group.size(); i++) {
+            DownloadInfo candidate = group.get(i);
+            if (isBetterDuplicate(candidate, best)) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private boolean isBetterDuplicate(DownloadInfo candidate, DownloadInfo current) {
+        if (candidate.rating != current.rating) {
+            return candidate.rating > current.rating;
+        }
+        double candidateComplete = completion(candidate);
+        double currentComplete = completion(current);
+        if (candidateComplete != currentComplete) {
+            return candidateComplete > currentComplete;
+        }
+        return sizeOf(candidate) > sizeOf(current);
+    }
+
+    /**
+     * 完成度：已下载页 / 总页。总页未知时用 finished 或 total 兜底。
+     */
+    private double completion(DownloadInfo info) {
+        long total = info.total > 0 ? info.total : (info.pages > 0 ? info.pages : 0);
+        if (total <= 0) {
+            return info.finished > 0 ? 1d : 0d;
+        }
+        return (double) Math.min(info.finished, total) / total;
+    }
+
+    /**
+     * 标题规范化：NFKC、去首部 gid 前缀、去 🔄、去首尾空白、折叠空白、小写。
+     */
+    @NonNull
+    private String buildNormalizedTitleKey(@NonNull DownloadInfo info) {
+        String title = info.title;
+        if (title == null || title.isEmpty()) {
+            title = info.titleJpn;
+        }
+        if (title == null || title.isEmpty()) {
+            return String.valueOf(info.gid);
+        }
+        String normalized = title.replaceFirst("^\\d+-", "")
+                .replace("🔄", "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+        normalized = Normalizer.normalize(normalized, Normalizer.Form.NFKC);
+        normalized = normalized.replaceAll("\\s+", " ").trim();
+        return normalized.isEmpty() ? String.valueOf(info.gid) : normalized;
+    }
+
     private List<DownloadInfo> filterByRating(List<DownloadInfo> sourceList, float ratingFrom, float ratingTo) {
         if (sourceList == null) {
             return new ArrayList<>();
@@ -586,20 +854,52 @@ public class DownloadListInfosExecutor {
     }
 
     private Map<Long, Long> loadGallerySizeMap(@NonNull List<DownloadInfo> infos) {
-        List<Long> gids = new ArrayList<>(infos.size());
+        if (infos.isEmpty()) {
+            return new HashMap<>();
+        }
+        // 分批查询，避免 SQLite IN 子句变量数量上限（默认 999）
+        final int BATCH_SIZE = 500;
+        Map<Long, Long> sizeMap = new HashMap<>(infos.size());
+        List<Long> gids = new ArrayList<>(Math.min(BATCH_SIZE, infos.size()));
         for (DownloadInfo info : infos) {
             gids.add(info.gid);
+            if (gids.size() >= BATCH_SIZE) {
+                sizeMap.putAll(queryGallerySizeMap(gids));
+                gids.clear();
+            }
         }
+        if (!gids.isEmpty()) {
+            sizeMap.putAll(queryGallerySizeMap(gids));
+        }
+        return sizeMap;
+    }
 
+    private Map<Long, Long> queryGallerySizeMap(List<Long> gids) {
+        Map<Long, Long> result = new HashMap<>();
         try {
-            return DownloadedFileManager.getInstance().getGalleryFilesTotalSizeMap(gids);
+            Map<Long, Long> map = DownloadedFileManager.getInstance().getGalleryFilesTotalSizeMap(gids);
+            if (map != null) {
+                result.putAll(map);
+            }
         } catch (IllegalStateException e) {
             Log.w("DownloadListInfos", "DownloadedFileManager not initialized", e);
-            return new HashMap<>();
         } catch (Exception e) {
             Log.w("DownloadListInfos", "loadGallerySizeMap failed", e);
-            return new HashMap<>();
         }
+        // 兜底：仍未拿到有效体积的画廊，直接扫描实际下载目录
+        for (Long gid : gids) {
+            if (gid == null || result.getOrDefault(gid, 0L) > 0L) {
+                continue;
+            }
+            DownloadInfo info = EhDB.getDownloadInfo(gid);
+            if (info != null) {
+                long size = calculateDownloadDirSize(info);
+                if (size > 0L) {
+                    result.put(gid, size);
+                }
+            }
+        }
+        return result;
     }
 
     public List<DownloadInfo> sortByType(List<DownloadInfo> sourceList, int type) {
@@ -780,6 +1080,29 @@ public class DownloadListInfosExecutor {
                     }
                     break;
                 }
+                case R.id.sort_by_state_queue_asc:
+                case R.id.sort_by_state_queue_desc: {
+                    // 按下载状态队列排序：正在下载 > 等待中 > 已完成
+                    // 升序/降序影响同一状态内的排列顺序（按时间）
+                    int stateOrderI = getStateQueueOrder(arr[i].state);
+                    int stateOrderJ = getStateQueueOrder(arr[j].state);
+                    if (stateOrderI != stateOrderJ) {
+                        // 状态不同时，按队列顺序排列
+                        if (sortType == R.id.sort_by_state_queue_asc) {
+                            a[k++] = stateOrderI < stateOrderJ ? arr[i++] : arr[j++];
+                        } else {
+                            a[k++] = stateOrderI > stateOrderJ ? arr[i++] : arr[j++];
+                        }
+                    } else {
+                        // 状态相同时，按时间排序
+                        if (sortType == R.id.sort_by_state_queue_asc) {
+                            a[k++] = arr[i].time <= arr[j].time ? arr[i++] : arr[j++];
+                        } else {
+                            a[k++] = arr[i].time >= arr[j].time ? arr[i++] : arr[j++];
+                        }
+                    }
+                    break;
+                }
             }
 
         }
@@ -788,6 +1111,22 @@ public class DownloadListInfosExecutor {
         // 把临时数组复制到原数组
         for (i = 0; i < k; i++) {
             arr[left++] = a[i];
+        }
+    }
+
+    /**
+     * 获取下载状态的队列顺序值，值越小优先级越高。
+     * 顺序：正在下载(2) > 等待中(1) > 无状态(0) > 更新中(5) > 失败(4) > 已完成(3)
+     */
+    private static int getStateQueueOrder(int state) {
+        switch (state) {
+            case DownloadInfo.STATE_DOWNLOAD: return 0;  // 最高优先
+            case DownloadInfo.STATE_WAIT:     return 1;
+            case DownloadInfo.STATE_NONE:     return 2;
+            case DownloadInfo.STATE_UPDATE:   return 3;
+            case DownloadInfo.STATE_FAILED:   return 4;
+            case DownloadInfo.STATE_FINISH:   return 5;  // 最低优先
+            default: return 6;
         }
     }
 
@@ -930,6 +1269,8 @@ public class DownloadListInfosExecutor {
                 cache.add(info);
             } else if (matchTag(mSearchKey, info)) {
                 cache.add(info);
+            } else if (matchAiDescription(mSearchKey, info)) {
+                cache.add(info);
             }
         }
 
@@ -956,6 +1297,33 @@ public class DownloadListInfosExecutor {
 
 
         return result;
+    }
+
+    /**
+     * 匹配 AI 分析描述（summary / tags / 逐页描述）
+     */
+    private boolean matchAiDescription(String key, DownloadInfo info) {
+        if (info == null || key == null || key.isEmpty()) {
+            return false;
+        }
+        try {
+            com.hippo.ehviewer.dao.GalleryAiInfo aiInfo = EhDB.queryGalleryAiInfo(info.gid);
+            if (aiInfo == null) {
+                return false;
+            }
+            String summary = aiInfo.getSummary();
+            if (summary != null && summary.toLowerCase().contains(key)) {
+                return true;
+            }
+            String tags = aiInfo.getTags();
+            if (tags != null && tags.toLowerCase().contains(key)) {
+                return true;
+            }
+            String descriptions = aiInfo.getDescriptions();
+            return descriptions != null && descriptions.toLowerCase().contains(key);
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private ArrayList<String> searchTagList(long gid) {
@@ -1025,8 +1393,10 @@ public class DownloadListInfosExecutor {
             }
             
             if (!match && (searchOption & AdvanceSearchTable.SDESC) != 0 && info.title != null) {
-                // 简化处理，使用标题代替描述
-                if (info.title.toLowerCase().contains(key)) {
+                // 优先匹配 AI 描述，否则使用标题兜底
+                if (matchAiDescription(key, info)) {
+                    match = true;
+                } else if (info.title.toLowerCase().contains(key)) {
                     match = true;
                 }
             }
@@ -1045,11 +1415,11 @@ public class DownloadListInfosExecutor {
     }
 
     /**
-     * 计算下载目录的总大小
+     * 计算下载目录的总大小（只查找已存在的目录，不创建新目录）
      */
     private long calculateDownloadDirSize(DownloadInfo info) {
         try {
-            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+            UniFile downloadDir = SpiderDen.getExistingGalleryDownloadDir(info);
             if (downloadDir == null || !downloadDir.isDirectory()) {
                 return -1;
             }

@@ -50,6 +50,9 @@
                 layout="@layout/gallery_detail_tags"/>
 
             <include
+                layout="@layout/gallery_detail_ai"/>
+
+            <include
                 layout="@layout/gallery_detail_comments"/>
 
             <include

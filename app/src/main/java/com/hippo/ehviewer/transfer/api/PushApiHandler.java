@@ -17,7 +17,6 @@
 package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
-import android.util.Log;
 
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
@@ -56,7 +55,7 @@ public class PushApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("GET", uri);
+        logRequest("GET", uri, session);
 
         // /api/v1/push/tasks - 获取待处理任务列表
         if (uri.equals("/api/v1/push/tasks")) {
@@ -80,7 +79,7 @@ public class PushApiHandler extends BaseApiHandler {
 
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
-        logRequest("POST", uri);
+        logRequest("POST", uri, session);
 
         // /api/v1/push/create - 创建推送任务
         if (uri.equals("/api/v1/push/create")) {
@@ -152,6 +151,8 @@ public class PushApiHandler extends BaseApiHandler {
 
             pendingTasks.put(task.getTaskId(), task);
 
+            TransferLogger.getInstance().i(TAG, "创建推送任务: taskId=" + task.getTaskId() +
+                    ", type=" + type + ", mode=" + mode + ", totalCount=" + totalCount);
             JSONObject response = new JSONObject();
             response.put("taskId", task.getTaskId());
             response.put("type", task.getType());
@@ -171,7 +172,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to create task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to create task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -189,10 +190,11 @@ public class PushApiHandler extends BaseApiHandler {
             JSONObject response = new JSONObject();
             response.put("tasks", tasksArray);
 
+            TransferLogger.getInstance().d(TAG, "推送任务列表: " + tasksArray.size() + " 个任务");
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get tasks", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get tasks", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -207,10 +209,11 @@ public class PushApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Task");
             }
 
+            TransferLogger.getInstance().d(TAG, "查询推送任务状态: taskId=" + taskId);
             return ResponseBuilder.jsonSuccess(taskToJson(task).toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get task status", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get task status", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -227,6 +230,7 @@ public class PushApiHandler extends BaseApiHandler {
 
             task.setStatus(PushTask.STATUS_ACCEPTED);
             notifyTaskAccepted(task);
+            TransferLogger.getInstance().i(TAG, "接受推送任务: taskId=" + taskId);
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -234,7 +238,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to accept task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to accept task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -252,6 +256,7 @@ public class PushApiHandler extends BaseApiHandler {
             task.setStatus(PushTask.STATUS_REJECTED);
             pendingTasks.remove(taskId);
             notifyTaskRejected(task);
+            TransferLogger.getInstance().i(TAG, "拒绝推送任务: taskId=" + taskId);
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -259,7 +264,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to reject task", e);
+            TransferLogger.getInstance().e(TAG, "Failed to reject task", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -280,6 +285,7 @@ public class PushApiHandler extends BaseApiHandler {
 
             String body = RequestParser.readBody(session);
             JSONObject json = JSON.parseObject(body);
+            TransferLogger.getInstance().d(TAG, "推送任务数据: taskId=" + taskId);
 
             // 文件块传输
             if (task.isFileTransfer()) {
@@ -299,7 +305,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to post task data", e);
+            TransferLogger.getInstance().e(TAG, "Failed to post task data", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
@@ -315,6 +321,8 @@ public class PushApiHandler extends BaseApiHandler {
             int length = json.getIntValue("length");
             String data = json.getString("data");
             boolean isLast = json.getBooleanValue("isLast");
+            TransferLogger.getInstance().d(TAG, "接收文件块: taskId=" + task.getTaskId() +
+                    ", chunk=" + chunk + "/" + totalChunks + ", length=" + length);
 
             // 首次接收，创建临时文件
             if (task.getTempFilePath() == null) {
@@ -356,7 +364,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to handle file chunk", e);
+            TransferLogger.getInstance().e(TAG, "Failed to handle file chunk", e);
             task.setStatus(PushTask.STATUS_FAILED);
             return ResponseBuilder.internalError(e.getMessage());
         }
@@ -391,7 +399,7 @@ public class PushApiHandler extends BaseApiHandler {
             // 不删除临时文件，供用户查看
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to import transferred file", e);
+            TransferLogger.getInstance().e(TAG, "Failed to import transferred file", e);
             task.setStatus(PushTask.STATUS_FAILED);
         }
     }
@@ -408,6 +416,7 @@ public class PushApiHandler extends BaseApiHandler {
 
             int offset = RequestParser.getIntQueryParameter(session, "offset", 0);
             int limit = RequestParser.getIntQueryParameter(session, "limit", 50);
+            TransferLogger.getInstance().d(TAG, "获取推送任务数据: taskId=" + taskId + ", offset=" + offset + ", limit=" + limit);
 
             JSONArray data = new JSONArray();
             // 这里需要从发送端获取数据，暂时返回空
@@ -423,7 +432,7 @@ public class PushApiHandler extends BaseApiHandler {
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
         } catch (Exception e) {
-            Log.e(TAG, "Failed to get task data", e);
+            TransferLogger.getInstance().e(TAG, "Failed to get task data", e);
             return ResponseBuilder.internalError(e.getMessage());
         }
     }

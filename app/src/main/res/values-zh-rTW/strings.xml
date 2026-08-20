@@ -96,6 +96,10 @@
     <string name="task_paused">Task paused</string>
     <string name="task_resumed">Task resumed</string>
     <string name="task_cancelling">Task is being cancelled...</string>
+    <string name="task_action_pause">暫停</string>
+    <string name="task_action_resume">繼續</string>
+    <string name="task_action_stop">停止</string>
+    <string name="task_action_delete">刪除</string>
     <string name="background_task_submitted">Background task submitted</string>
     <string name="settings_download_export_download_items">Export Download Items</string>
 
@@ -497,6 +501,14 @@
     <string name="sort_by_file_size_desc">按檔案大小降序排列</string>
     <string name="sort_download_list">排序清單</string>
     <string name="advanced_filter">進階篩選</string>
+    <string name="quick_filter">快捷篩選</string>
+    <string name="quick_filter_big_low_rating">大佔用低評分</string>
+    <string name="quick_filter_duplicates">重複作品</string>
+    <string name="quick_filter_low_space_efficiency">低空間效率</string>
+    <string name="quick_filter_low_rating">低評分下載</string>
+    <string name="quick_filter_huge_file">超大檔案</string>
+    <string name="quick_filter_old_unfavorited">老舊未收藏</string>
+    <string name="filter_loading">正在載入篩選</string>
     <string name="download_search_gallery">搜尋藝廊</string>
     <string name="download_search_hint">輸入搜尋關鍵字</string>
     <string name="download_searching">搜尋中請稍候</string>
@@ -1333,6 +1345,8 @@
     <string name="settings_download_rebuild_no_records">No valid download records found</string>
     <string name="settings_download_rebuild_confirm">Are you sure you want to rebuild download records from download path? This will scan all folders and add valid galleries to the download list. Folders without .ehviewer files will be created as local gallery records.</string>
     <string name="settings_download_rebuild_download_records_started">Rebuild task started, check task manager for progress</string>
+    <string name="settings_download_loop_until_complete">循環開始下載直至完成</string>
+    <string name="settings_download_loop_until_complete_summary">當一批下載結束時若仍有未完成的任務，將自動循環執行 停止全部→開始全部，直到所有下載完成（最多自動循環 5 次）</string>
     <string name="settings_download_clean_redundancy_started">Clean redundancy task started, check task manager for progress</string>
     <string name="settings_advanced_user_agent">User Agent</string>
     <string name="settings_advanced_user_agent_summary">Custom user agent for network requests</string>
@@ -1399,6 +1413,10 @@
     <string name="background_task_running">背景任務執行中</string>
     <string name="background_task_running_description">任務完成後，通知將自動消失。</string>
     <string name="unavailable">Unavailable</string>
+    <string name="settings_advanced_merge_scan_mode_title">合併畫廊掃描方式</string>
+    <string name="settings_advanced_merge_scan_mode_summary">合併重複畫廊時使用的掃描方式：Shell 批次或原生 Java</string>
+    <string name="merge_scan_mode_shell">Shell（批次）</string>
+    <string name="merge_scan_mode_native">原生 Java（更快）</string>
     <string name="merge_scanning_galleries">Scanning downloaded galleries...</string>
     <string name="merge_start_scan">Start scanning downloaded galleries...</string>
     <string name="merge_scan_failed">Failed to scan downloaded galleries</string>

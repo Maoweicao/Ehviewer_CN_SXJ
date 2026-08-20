@@ -104,9 +104,7 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
-        compileOptions {
-            encoding = 'UTF-8'
-        }
+        encoding = 'UTF-8'
         // 允许 Java 8+ 核心库 API 进行 desugaring，兼容旧 Android 版本
         coreLibraryDesugaringEnabled true
     }
@@ -236,6 +234,9 @@ dependencies {
 
     // 内置轻量级HTTP服务器，用于本地REST端点
     implementation 'org.nanohttpd:nanohttpd:2.3.1'
+
+    // 二维码生成与扫描（内置扫码界面）
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
 
     // YAML解析 (用于Clash订阅)
     implementation 'org.yaml:snakeyaml:1.33'

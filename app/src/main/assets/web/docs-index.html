@@ -46,7 +46,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>EhViewer Remote Manager API</h1>
+        <h1>EHViewer API 文档</h1>
         <p>版本 1.0.0 | 基于 OpenAPI 3.0 规范</p>
     </div>
     
@@ -367,6 +367,126 @@
                     <div class="endpoint-detail">
                         <p>更新自动接收设置。</p>
                         <button class="try-btn" onclick="tryUpdateSettings(this)">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header" onclick="toggleSection(this)">
+                <h2>后台任务控制</h2>
+                <span style="color:#999;font-size:13px">创建 / 开始 / 暂停 / 继续 / 停止后台任务</span>
+            </div>
+            <div class="section-body">
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/background-tasks</span>
+                        <span class="endpoint-desc">获取后台任务列表</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>查询活跃与已完成的后台任务，支持 <code>?status=all|active|completed</code>。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/background-tasks')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/task-types</span>
+                        <span class="endpoint-desc">获取可创建的任务类型</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>返回可通过 POST /api/v1/background-tasks 创建的任务类型列表（TaskRegistry）。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/background-tasks/task-types')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/background-tasks</span>
+                        <span class="endpoint-desc">创建后台任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>通过任务类名创建后台任务。</p>
+                        <p>无参数任务：<code>{"className": "com.hippo.ehviewer.task.CleanRedundancyTask"}</code></p>
+                        <p>带参数任务：<code>{"className": "...", "params": {"gids": [12345, 67890]}}</code></p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/background-tasks', '{\"className\":\"com.hippo.ehviewer.task.CleanRedundancyTask\"}')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-get">GET</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/{taskId}</span>
+                        <span class="endpoint-desc">获取任务详情 / 日志</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>详情：GET /api/v1/background-tasks/{taskId}</p>
+                        <p>日志：GET /api/v1/background-tasks/{taskId}/logs</p>
+                        <button class="try-btn" onclick="tryApi(this, 'GET', '/api/v1/background-tasks/{taskId}')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/{taskId}/start</span>
+                        <span class="endpoint-desc">开始 / 恢复任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>暂停的任务将被恢复；排队中的任务等待自动启动。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/background-tasks/{taskId}/start')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/{taskId}/pause</span>
+                        <span class="endpoint-desc">暂停任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>仅支持实现了暂停逻辑的任务（isPausable=true）。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/background-tasks/{taskId}/pause')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/{taskId}/resume</span>
+                        <span class="endpoint-desc">继续任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>恢复已暂停的任务。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/background-tasks/{taskId}/resume')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/background-tasks/{taskId}/stop</span>
+                        <span class="endpoint-desc">停止任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>优雅停止后台任务（等同取消）。也支持 DELETE /api/v1/background-tasks/{taskId}。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/background-tasks/{taskId}/stop')">Try it out</button>
+                        <div class="try-result"></div>
+                    </div>
+                </div>
+                <div class="endpoint">
+                    <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                        <span class="method method-post">POST</span>
+                        <span class="endpoint-path">/api/v1/tasks/{taskId}/pause</span>
+                        <span class="endpoint-desc">暂停传输任务</span>
+                    </div>
+                    <div class="endpoint-detail">
+                        <p>暂停传输任务（删除/归档/文件夹压缩）。配套 /resume、/stop 端点。</p>
+                        <button class="try-btn" onclick="tryApi(this, 'POST', '/api/v1/tasks/{taskId}/pause')">Try it out</button>
                         <div class="try-result"></div>
                     </div>
                 </div>

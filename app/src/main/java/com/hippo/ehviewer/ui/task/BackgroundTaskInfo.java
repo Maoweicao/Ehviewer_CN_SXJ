@@ -27,6 +27,8 @@ public class BackgroundTaskInfo {
     private final String taskName;
     private final String taskDescription;
     private volatile Future<?> future;
+    // 后台任务实例（仅在活跃期间保留，用于调用真实的 pause/resume/cancel 方法）
+    private volatile BackgroundTask task;
     private final BackgroundTask.TaskType taskType;
     private final boolean uniqueTask;
     private final String taskClassName;
@@ -93,6 +95,32 @@ public class BackgroundTaskInfo {
 
     public void setFuture(@Nullable Future<?> future) {
         this.future = future;
+    }
+
+    /**
+     * 获取后台任务实例（可能为 null，例如旧式 Runnable 任务或持久化恢复占位）
+     */
+    @Nullable
+    public BackgroundTask getTask() {
+        return task;
+    }
+
+    public void setTask(@Nullable BackgroundTask task) {
+        this.task = task;
+    }
+
+    /**
+     * 任务是否支持暂停
+     */
+    public boolean isPausable() {
+        return task != null && task.isPausable();
+    }
+
+    /**
+     * 是否为可恢复持久化任务
+     */
+    public boolean isPersistable() {
+        return task != null && task.isPersistable();
     }
 
     @NonNull

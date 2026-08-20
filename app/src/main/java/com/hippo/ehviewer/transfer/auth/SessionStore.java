@@ -16,6 +16,8 @@
 
 package com.hippo.ehviewer.transfer.auth;
 
+import com.hippo.ehviewer.transfer.log.TransferLogger;
+
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,7 +27,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 负责生成、存储和验证会话Token
  */
 public class SessionStore {
-    
+
+    private static final String TAG = "SessionStore";
+
     // 会话有效期：24小时
     private static final long SESSION_EXPIRY_MS = 24 * 60 * 60 * 1000;
     
@@ -46,6 +50,7 @@ public class SessionStore {
         String token = UUID.randomUUID().toString();
         long expiry = System.currentTimeMillis() + SESSION_EXPIRY_MS;
         sessions.put(token, new SessionInfo(token, expiry));
+        TransferLogger.getInstance().d(TAG, "创建会话, 当前活跃会话数: " + sessions.size());
         return token;
     }
     
@@ -67,6 +72,7 @@ public class SessionStore {
         // 检查是否过期
         if (System.currentTimeMillis() > session.expiry) {
             sessions.remove(token);
+            TransferLogger.getInstance().d(TAG, "会话已过期并移除");
             return false;
         }
         
@@ -79,6 +85,7 @@ public class SessionStore {
      */
     public void invalidateSession(String token) {
         sessions.remove(token);
+        TransferLogger.getInstance().d(TAG, "会话已失效, 剩余活跃会话数: " + sessions.size());
     }
     
     /**
@@ -88,6 +95,7 @@ public class SessionStore {
     public void registerToken(String token) {
         if (token != null && !token.isEmpty()) {
             registeredTokens.put(token, true);
+            TransferLogger.getInstance().d(TAG, "已注册Token, 注册数: " + registeredTokens.size());
         }
     }
     
@@ -97,7 +105,11 @@ public class SessionStore {
      * @return 是否有效
      */
     public boolean validateRegisteredToken(String token) {
-        return token != null && registeredTokens.containsKey(token);
+        boolean valid = token != null && registeredTokens.containsKey(token);
+        if (!valid && token != null && !token.isEmpty()) {
+            TransferLogger.getInstance().w(TAG, "Token验证失败: 未注册");
+        }
+        return valid;
     }
     
     /**
@@ -106,6 +118,7 @@ public class SessionStore {
      */
     public void revokeToken(String token) {
         registeredTokens.remove(token);
+        TransferLogger.getInstance().d(TAG, "已撤销Token, 剩余注册数: " + registeredTokens.size());
     }
     
     /**
@@ -113,7 +126,12 @@ public class SessionStore {
      */
     public void cleanupExpiredSessions() {
         long now = System.currentTimeMillis();
+        int before = sessions.size();
         sessions.entrySet().removeIf(entry -> now > entry.getValue().expiry);
+        int removed = before - sessions.size();
+        if (removed > 0) {
+            TransferLogger.getInstance().d(TAG, "清理过期会话: " + removed + " 个");
+        }
     }
     
     /**

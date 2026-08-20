@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_analyze_basic"
+        app:allowDividerAbove="false">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_analyze_enabled"
+            android:title="@string/lab_ai_analyze_enable"
+            android:summary="@string/lab_ai_analyze_enable_summary"
+            android:defaultValue="false" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_analyze_service"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="ai_analyze_model"
+            android:title="@string/lab_ai_analyze_model"
+            android:summary="@string/lab_ai_analyze_model_summary"
+            app:allowDividerAbove="false" />
+
+        <Preference
+            android:key="ai_analyze_test"
+            android:title="@string/lab_ai_analyze_test"
+            android:summary="@string/lab_ai_analyze_test_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_ai_analyze_advanced"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="ai_analyze_sample_step"
+            android:title="@string/lab_ai_analyze_sample_step"
+            android:summary="@string/lab_ai_analyze_sample_step_summary"
+            android:entries="@array/analyze_sample_step_entries"
+            android:entryValues="@array/analyze_sample_step_values"
+            android:defaultValue="1" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="ai_analyze_auto_on_finish"
+            android:title="@string/lab_ai_analyze_auto_on_finish"
+            android:summary="@string/lab_ai_analyze_auto_on_finish_summary"
+            android:defaultValue="false"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

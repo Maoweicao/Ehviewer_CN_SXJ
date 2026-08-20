@@ -192,6 +192,7 @@ public class EhApplication extends RecordingApplication {
         StatusCodeException.initialize(this);
         Settings.initialize(this);
         EhDB.initialize(this);
+        DownloadedFileManager.initialize(this);
         DownloadLogger.initialize(this);
         ArchiverDownloadCompleter.resumePendingDownloads(this);
         SystemDownloadCompleteReceiver.ensureRegisteredAndResume(this);

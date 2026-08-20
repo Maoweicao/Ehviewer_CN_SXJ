@@ -140,7 +140,11 @@ public class BackgroundTaskActivity extends EhActivity {
     
     private void refreshData() {
         if (mAdapter != null && mTaskManager != null) {
-            mAdapter.updateData(mTaskManager.getActiveTasks(), mTaskManager.getCompletedTasks());
+            mAdapter.updateData(
+                mTaskManager.getRunningTasks(),
+                mTaskManager.getWaitingTasks(),
+                mTaskManager.getCompletedTasks()
+            );
             updateToolbarTitle();
         }
     }

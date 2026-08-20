@@ -51,6 +51,7 @@ public class AppConfig {
     private static final String DATA = "data";
     private static final String CRASH = "crash";
     private static final String COMPRESS_PLAN = "CompressPlan";
+    private static final String BENCHMARK = "benchmark";
     private static final String PROGRESSIVE_SCAN = "ProgressiveScan";
     private static final String PROGRESSIVE_BACKUP = "ProgressiveBackup";
 
@@ -169,6 +170,11 @@ public class AppConfig {
     @Nullable
     public static File getCompressPlanDir() {
         return getDirInExternalAppDir(COMPRESS_PLAN);
+    }
+
+    @Nullable
+    public static File getExternalBenchmarkDir() {
+        return getDirInExternalAppDir(BENCHMARK);
     }
 
     @Nullable

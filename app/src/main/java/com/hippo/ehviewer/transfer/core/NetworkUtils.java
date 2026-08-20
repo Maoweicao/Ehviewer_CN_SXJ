@@ -16,8 +16,6 @@
 
 package com.hippo.ehviewer.transfer.core;
 
-import android.util.Log;
-
 import com.hippo.ehviewer.transfer.data.NetworkAddress;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 
@@ -154,7 +152,7 @@ public class NetworkUtils {
     public static boolean isLocalNetwork(String ip) {
         if (ip == null || ip.isEmpty()) return false;
 
-        return ip.startsWith("192.168.") ||
+        boolean result = ip.startsWith("192.168.") ||
                ip.startsWith("10.") ||
                ip.startsWith("172.16.") ||
                ip.startsWith("172.17.") ||
@@ -175,5 +173,7 @@ public class NetworkUtils {
                ip.startsWith("127.") ||
                ip.equals("0:0:0:0:0:0:0:1") ||
                ip.equals("::1");
+        TransferLogger.getInstance().d(TAG, "isLocalNetwork: ip=" + ip + ", 结果=" + result);
+        return result;
     }
 }
