@@ -108,6 +108,12 @@
             app:unit="秒"
             app:showValue="true" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="show_download_eta"
+            android:title="@string/settings_download_show_eta"
+            android:summary="@string/settings_download_show_eta_summary" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -187,6 +193,12 @@
             app:entries="@array/download_queue_secondary_order_entries"
             app:entryValues="@array/download_queue_secondary_order_entry_values" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_sort_by_remaining"
+            android:summary="@string/settings_download_sort_by_remaining_summary"
+            android:title="@string/settings_download_sort_by_remaining" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -231,6 +243,28 @@
             android:key="restore_download_items"
             android:summary="@string/settings_download_restore_download_items_summary"
             android:title="@string/settings_download_restore_download_items" />
+
+        <com.hippo.ehviewer.preference.ScanDownloadHistoryPreference
+            android:key="scan_download_history"
+            android:summary="@string/settings_download_scan_download_history_summary"
+            android:title="@string/settings_download_scan_download_history" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="auto_scan_download_history"
+            android:title="@string/settings_download_auto_scan_download_history"
+            android:summary="@string/settings_download_auto_scan_download_history_summary" />
+
+        <com.hippo.ehviewer.preference.ResumeFromHistoryPreference
+            android:key="resume_from_download_history"
+            android:summary="@string/settings_download_resume_from_history_summary"
+            android:title="@string/settings_download_resume_from_history" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="auto_resume_from_history"
+            android:title="@string/settings_download_auto_resume_from_history"
+            android:summary="@string/settings_download_auto_resume_from_history_summary" />
 
         <com.hippo.ehviewer.preference.CleanRedundancyPreference3
             android:key="clean_redundancy"

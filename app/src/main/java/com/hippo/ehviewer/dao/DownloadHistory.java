@@ -25,6 +25,10 @@ public class DownloadHistory {
     private int deletionType;
     private long mergedTargetGid;
     private long deletedAt;
+    // 新增字段：用于预下载对比
+    private int totalFiles; // 总文件数（来自 .ehviewer）
+    private int downloadedFiles; // 已下载文件数
+    private String fileTokens; // JSON 格式存储文件 token 列表，用于后续增量对比
 
     @Generated
     public DownloadHistory() {
@@ -33,7 +37,7 @@ public class DownloadHistory {
     @Generated
     public DownloadHistory(long gid, String token, String title, String titleJpn, String filePath,
             long completedAt, long lastDownloadedAt, int downloadCount, int deletionType,
-            long mergedTargetGid, long deletedAt) {
+            long mergedTargetGid, long deletedAt, int totalFiles, int downloadedFiles, String fileTokens) {
         this.gid = gid;
         this.token = token;
         this.title = title;
@@ -45,6 +49,9 @@ public class DownloadHistory {
         this.deletionType = deletionType;
         this.mergedTargetGid = mergedTargetGid;
         this.deletedAt = deletedAt;
+        this.totalFiles = totalFiles;
+        this.downloadedFiles = downloadedFiles;
+        this.fileTokens = fileTokens;
     }
 
     public long getGid() { return gid; }
@@ -69,4 +76,10 @@ public class DownloadHistory {
     public void setMergedTargetGid(long mergedTargetGid) { this.mergedTargetGid = mergedTargetGid; }
     public long getDeletedAt() { return deletedAt; }
     public void setDeletedAt(long deletedAt) { this.deletedAt = deletedAt; }
+    public int getTotalFiles() { return totalFiles; }
+    public void setTotalFiles(int totalFiles) { this.totalFiles = totalFiles; }
+    public int getDownloadedFiles() { return downloadedFiles; }
+    public void setDownloadedFiles(int downloadedFiles) { this.downloadedFiles = downloadedFiles; }
+    public String getFileTokens() { return fileTokens; }
+    public void setFileTokens(String fileTokens) { this.fileTokens = fileTokens; }
 }

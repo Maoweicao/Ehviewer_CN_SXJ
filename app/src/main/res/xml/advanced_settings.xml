@@ -90,11 +90,28 @@
             android:title="@string/settings_advanced_performance_monitor_log"
             android:dependency="performance_monitor_enabled" />
 
+        <Preference
+            android:key="resource_viewer"
+            android:summary="@string/settings_advanced_resource_viewer_summary"
+            android:title="@string/settings_advanced_resource_viewer" />
+
         <com.hippo.preference.SwitchPreference
             android:defaultValue="true"
             android:key="pre_anr_detection_enabled"
             android:summary="@string/settings_advanced_pre_anr_detection_summary"
             android:title="@string/settings_advanced_pre_anr_detection" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="anr_auto_dismiss_enabled"
+            android:summary="@string/settings_advanced_anr_auto_dismiss_summary"
+            android:title="@string/settings_advanced_anr_auto_dismiss" />
+
+        <Preference
+            android:key="anr_auto_dismiss_enable_accessibility"
+            android:summary="@string/settings_advanced_anr_auto_dismiss_accessibility_summary"
+            android:title="@string/settings_advanced_anr_auto_dismiss_accessibility"
+            android:dependency="anr_auto_dismiss_enabled" />
 
         <Preference
             android:key="export_diagnostic"
@@ -314,6 +331,16 @@
             app:minValue="1"
             app:maxValue="32"
             app:stepSize="1"
+            app:showValue="true" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="64"
+            android:key="network_global_concurrency"
+            android:summary="@string/settings_advanced_network_global_concurrency_summary"
+            android:title="@string/settings_advanced_network_global_concurrency"
+            app:minValue="8"
+            app:maxValue="256"
+            app:stepSize="8"
             app:showValue="true" />
 
         <Preference

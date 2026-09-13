@@ -34,6 +34,8 @@ import com.hippo.ehviewer.transfer.api.ResponseBuilder;
 import com.hippo.ehviewer.transfer.api.SettingsApiHandler;
 import com.hippo.ehviewer.transfer.api.SystemApiHandler;
 import com.hippo.ehviewer.transfer.api.TasksApiHandler;
+import com.hippo.ehviewer.lab.LabApiHandler;
+import com.hippo.ehviewer.lab.SnapshotApiHandler;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
@@ -86,6 +88,18 @@ import fi.iki.elonen.NanoHTTPD;
  * - POST   /api/v1/connect                注册设备连接
  * - DELETE /api/v1/connect                注销设备连接
  * - GET    /api/v1/connect/peers          获取已连接设备列表
+ * - GET    /api/v1/lab/config             实验室配置（v3.0）
+ * - PUT    /api/v1/lab/config             更新实验室配置（v3.0）
+ * - GET    /api/v1/lab/topology           集群拓扑（v3.0）
+ * - GET    /api/v1/lab/stats              集群统计（v3.0）
+ * - GET    /api/v1/lab/trusted-peers      信任设备列表（v3.0）
+ * - POST   /api/v1/lab/trusted-peers      申请配对（生成 6 位码）（v3.0）
+ * - POST   /api/v1/lab/trusted-peers/pair 双向配对确认（v3.0）
+ * - GET    /api/v1/lab/trusted-peers/pair-info 探测配对码（白名单）（v3.0）
+ * - DELETE /api/v1/lab/trusted-peers/{id} 撤销信任（v3.0）
+ * - GET    /api/v1/lab/db/snapshot          DB 快照（v3.0）
+ * - POST   /api/v1/lab/db/snapshot/ack      确认快照版本（v3.0）
+ * - GET    /api/v1/lab/db/thumbnail/{gid}   缩略图（v3.0）
  * - GET    /docs                          Swagger UI 文档页面
  * - GET    /openapi.yaml                  OpenAPI 规范文件
  * - GET    /web/*                         静态资源
@@ -116,6 +130,8 @@ public class TransferHttpServer {
     private DownloadApiHandler downloadApiHandler;
     private ConnectApiHandler connectApiHandler;
     private RelayApiHandler relayApiHandler;
+    private LabApiHandler labApiHandler;
+    private SnapshotApiHandler snapshotApiHandler;
 
     public TransferHttpServer(int port, TransferServerManager serverManager, Context context) {
         this.port = port;
@@ -146,6 +162,9 @@ public class TransferHttpServer {
         this.downloadApiHandler = new DownloadApiHandler(context, authManager);
         this.connectApiHandler = new ConnectApiHandler(context, authManager);
         this.relayApiHandler = new RelayApiHandler(context, authManager);
+        // v3.0 实验室 / 多机联动（Lab）API
+        this.labApiHandler = new LabApiHandler(context, authManager);
+        this.snapshotApiHandler = new SnapshotApiHandler(context, authManager);
     }
 
     /** 启动HTTP服务器 */
@@ -358,7 +377,16 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/relay")) {
                 return relayApiHandler.handleGet(session, uri);
             }
-            
+
+            // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab")) {
+                // /api/v1/lab/db/* 走 SnapshotApiHandler
+                if (uri.startsWith("/api/v1/lab/db")) {
+                    return snapshotApiHandler.handleGet(session, uri);
+                }
+                return labApiHandler.handleGet(session, uri);
+            }
+
             // 设备信息（保持向后兼容）
             if (uri.equals("/api/v1/device/info")) {
                 String deviceName = android.os.Build.MODEL;
@@ -420,6 +448,14 @@ public class TransferHttpServer {
                 return relayApiHandler.handlePost(session, uri);
             }
 
+            // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab")) {
+                if (uri.startsWith("/api/v1/lab/db")) {
+                    return snapshotApiHandler.handlePost(session, uri);
+                }
+                return labApiHandler.handlePost(session, uri);
+            }
+
             // 统一任务API（后台任务创建 / 开始 / 暂停 / 恢复 / 停止，传输任务控制）
             if (uri.startsWith("/api/v1/tasks") || uri.startsWith("/api/v1/background-tasks")) {
                 return tasksApiHandler.handlePost(session, uri);
@@ -432,6 +468,11 @@ public class TransferHttpServer {
             // 设置API
             if (uri.startsWith("/api/v1/settings")) {
                 return settingsApiHandler.handlePut(session, uri);
+            }
+
+            // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab")) {
+                return labApiHandler.handlePut(session, uri);
             }
 
             return ResponseBuilder.notFound("Endpoint");
@@ -472,7 +513,12 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/relay")) {
                 return relayApiHandler.handleDelete(session, uri);
             }
-            
+
+            // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab")) {
+                return labApiHandler.handleDelete(session, uri);
+            }
+
             return ResponseBuilder.notFound("Endpoint");
         }
         

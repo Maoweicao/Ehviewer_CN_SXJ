@@ -56,6 +56,7 @@ import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.ehviewer.gallery.A7ZipArchive;
 import com.hippo.ehviewer.gallery.Pipe;
 import com.hippo.ehviewer.spider.SpiderInfo;
+import com.hippo.util.ReadableTime;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
 import com.hippo.ehviewer.ui.scene.download.DownloadsScene;
 import com.hippo.ehviewer.ui.scene.gallery.detail.GalleryDetailScene;
@@ -239,8 +240,24 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 // For imported archives, show 5 stars or hide rating
                 holder.rating.setRating(5.0f);
             } else {
-                // For normal downloads, show actual rating
-                holder.rating.setRating(info.rating);
+                // For normal downloads, show effective rating (local override takes priority)
+                com.hippo.ehviewer.local.LocalRatingManager lrm =
+                        com.hippo.ehviewer.local.LocalRatingManager.getInstance();
+                float localRating = lrm != null ? lrm.getRating(info.gid) : -1f;
+                holder.rating.setRating(localRating > 0f ? localRating : info.rating);
+            }
+
+            // Show local rating override indicator when present
+            com.hippo.ehviewer.local.LocalRatingManager lrm =
+                    com.hippo.ehviewer.local.LocalRatingManager.getInstance();
+            float localRating = lrm != null ? lrm.getRating(info.gid) : -1f;
+            if (localRating > 0f) {
+                holder.localRatingText.setVisibility(View.VISIBLE);
+                holder.localRatingText.setText(mScene.getString(R.string.local_rating_both_text,
+                        String.format(java.util.Locale.US, "%.1f", localRating),
+                        String.format(java.util.Locale.US, "%.1f", info.rating)));
+            } else {
+                holder.localRatingText.setVisibility(View.GONE);
             }
 
             SpiderInfo spiderInfo = mCallback.getSpiderInfoMap().get(info.gid);
@@ -345,6 +362,12 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
         // 预下载合并阶段：以彩色进度条展示合并过程
         if (info.phase == DownloadInfo.PHASE_MERGE) {
+            bindMergeProgress(holder, info);
+            return;
+        }
+
+        // 等待列表预碰撞检测阶段：复用合并进度样式展示检测过程
+        if (info.phase == DownloadInfo.PHASE_COLLISION_CHECK) {
             bindMergeProgress(holder, info);
             return;
         }
@@ -505,9 +528,15 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                 holder.speed.setText(mScene.getString(R.string.phase_merging));
                 break;
             case DownloadInfo.PHASE_DOWNLOAD:
-            default:
-                holder.speed.setText(com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(speed, false) + "/S");
+            default: {
+                String speedStr = com.hippo.lib.yorozuya.FileUtils.humanReadableByteCount(speed, false) + "/S";
+                if (Settings.getShowDownloadEta() && info.remaining > 0) {
+                    speedStr = mScene.getString(R.string.download_speed_text_with_eta,
+                            speedStr, ReadableTime.getShortTimeInterval(info.remaining));
+                }
+                holder.speed.setText(speedStr);
                 break;
+            }
         }
     }
 
@@ -984,6 +1013,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         public final TextView title;
         public final TextView uploader;
         public final SimpleRatingView rating;
+        public final TextView localRatingText;
         public final TextView category;
         public final TextView readProgress;
         public final View start;
@@ -1003,6 +1033,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             title = itemView.findViewById(R.id.title);
             uploader = itemView.findViewById(R.id.uploader);
             rating = itemView.findViewById(R.id.rating);
+            localRatingText = itemView.findViewById(R.id.local_rating_text);
             category = itemView.findViewById(R.id.category);
             readProgress = itemView.findViewById(R.id.read_progress);
             start = itemView.findViewById(R.id.start);
@@ -1091,6 +1122,9 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
                     if (info.phase == DownloadInfo.PHASE_MERGE) {
                         // 预下载合并阶段：停止 = 取消合并，随后按正常方式进入下载队列
                         downloadManager.cancelPreMergeDownload(info.gid);
+                    } else if (info.phase == DownloadInfo.PHASE_COLLISION_CHECK) {
+                        // 等待列表预碰撞检测阶段：停止 = 取消检测，按正常方式留在等待队列
+                        downloadManager.cancelWaitListCollisionCheck(info.gid);
                     } else {
                         downloadManager.stopDownload(info.gid);
                     }

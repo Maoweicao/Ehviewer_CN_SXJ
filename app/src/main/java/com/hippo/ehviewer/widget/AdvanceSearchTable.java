@@ -25,8 +25,11 @@ import android.view.View;
 import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.RatingBar;
 import android.widget.Spinner;
+
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.lib.yorozuya.NumberUtils;
 
 public class AdvanceSearchTable extends LinearLayout {
@@ -36,6 +39,9 @@ public class AdvanceSearchTable extends LinearLayout {
     private static final String STATE_KEY_MIN_RATING = "min_rating";
     private static final String STATE_KEY_PAGE_FROM = "page_from";
     private static final String STATE_KEY_PAGE_TO = "page_to";
+    private static final String STATE_KEY_RATING_RANGE_ENABLED = "rating_range_enabled";
+    private static final String STATE_KEY_RATING_RANGE_FROM = "rating_range_from";
+    private static final String STATE_KEY_RATING_RANGE_TO = "rating_range_to";
 
     public static final int SNAME = 0x1;
     public static final int STAGS = 0x2;
@@ -65,6 +71,13 @@ public class AdvanceSearchTable extends LinearLayout {
     private CheckBox mSfl;
     private CheckBox mSfu;
     private CheckBox mSft;
+
+    // Rating range filter (for download search)
+    private CheckBox mEnableRatingRange;
+    private RatingBar mRatingFromBar;
+    private RatingBar mRatingToBar;
+    private float mRatingRangeFrom = 0f;
+    private float mRatingRangeTo = 5f;
 
     public AdvanceSearchTable(Context context) {
         super(context);
@@ -130,6 +143,50 @@ public class AdvanceSearchTable extends LinearLayout {
         mSfu = (CheckBox) findViewById(R.id.disable_default_filter_uploader);
         mSft = (CheckBox) findViewById(R.id.disable_default_filter_tags);
 
+        // Rating range filter (optional, may not exist in layout)
+        mEnableRatingRange = findViewById(R.id.enable_rating_range_filter);
+        mRatingFromBar = findViewById(R.id.rating_range_from_bar);
+        mRatingToBar = findViewById(R.id.rating_range_to_bar);
+
+        // Setup rating range bars if they exist
+        if (mEnableRatingRange != null && mRatingFromBar != null && mRatingToBar != null) {
+            mRatingFromBar.setNumStars(5);
+            mRatingFromBar.setMax(10);
+            mRatingFromBar.setStepSize(1);
+            mRatingFromBar.setRating(0);
+
+            mRatingToBar.setNumStars(5);
+            mRatingToBar.setMax(10);
+            mRatingToBar.setStepSize(1);
+            mRatingToBar.setRating(10);
+
+            mEnableRatingRange.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                updateRatingBarsEnabled();
+            });
+
+            RatingBar.OnRatingBarChangeListener ratingListener = (bar, rating, fromUser) -> {
+                if (fromUser) {
+                    if (bar == mRatingFromBar) {
+                        mRatingRangeFrom = rating / 2f;
+                        if (mRatingRangeFrom > mRatingRangeTo) {
+                            mRatingRangeTo = mRatingRangeFrom;
+                            mRatingToBar.setRating(mRatingRangeTo * 2);
+                        }
+                    } else if (bar == mRatingToBar) {
+                        mRatingRangeTo = rating / 2f;
+                        if (mRatingRangeTo < mRatingRangeFrom) {
+                            mRatingRangeFrom = mRatingRangeTo;
+                            mRatingFromBar.setRating(mRatingRangeFrom * 2);
+                        }
+                    }
+                }
+            };
+            mRatingFromBar.setOnRatingBarChangeListener(ratingListener);
+            mRatingToBar.setOnRatingBarChangeListener(ratingListener);
+
+            updateRatingBarsEnabled();
+        }
+
         // Avoid java.lang.IllegalStateException: focus search returned a view that wasn't able to take focus!
         mSpt.setOnEditorActionListener((v, actionId, event) -> {
             View nextView = v.focusSearch(View.FOCUS_DOWN);
@@ -138,6 +195,14 @@ public class AdvanceSearchTable extends LinearLayout {
             }
             return true;
         });
+    }
+
+    private void updateRatingBarsEnabled() {
+        if (mEnableRatingRange != null && mRatingFromBar != null && mRatingToBar != null) {
+            boolean enabled = mEnableRatingRange.isChecked();
+            mRatingFromBar.setEnabled(enabled);
+            mRatingToBar.setEnabled(enabled);
+        }
     }
 
     public int getAdvanceSearch() {
@@ -153,13 +218,38 @@ public class AdvanceSearchTable extends LinearLayout {
         if (mSfl.isChecked()) advanceSearch |= SFL;
         if (mSfu.isChecked()) advanceSearch |= SFU;
         if (mSft.isChecked()) advanceSearch |= SFT;
+        SearchDebugLog.d("GallerySearch", "getAdvanceSearch() -> 0x" + Integer.toHexString(advanceSearch)
+                + "  [advsearch=1" + (advanceSearch != 0 ? "&" + flagsToString(advanceSearch) : "") + "]");
         return advanceSearch;
+    }
+
+    private static String flagsToString(int flags) {
+        StringBuilder sb = new StringBuilder();
+        if ((flags & SNAME) != 0) appendFlag(sb, "f_sname");
+        if ((flags & STAGS) != 0) appendFlag(sb, "f_stags");
+        if ((flags & SDESC) != 0) appendFlag(sb, "f_sdesc");
+        if ((flags & STORR) != 0) appendFlag(sb, "f_storr");
+        if ((flags & STO) != 0) appendFlag(sb, "f_sto");
+        if ((flags & SDT1) != 0) appendFlag(sb, "f_sdt1");
+        if ((flags & SDT2) != 0) appendFlag(sb, "f_sdt2");
+        if ((flags & SH) != 0) appendFlag(sb, "f_sh");
+        if ((flags & SFL) != 0) appendFlag(sb, "f_sfl");
+        if ((flags & SFU) != 0) appendFlag(sb, "f_sfu");
+        if ((flags & SFT) != 0) appendFlag(sb, "f_sft");
+        return sb.toString();
+    }
+
+    private static void appendFlag(StringBuilder sb, String flag) {
+        if (sb.length() > 0) sb.append('&');
+        sb.append(flag).append("=on");
     }
 
     public int getMinRating() {
         int position = mMinRating.getSelectedItemPosition();
         if (mSr.isChecked() && position >= 0) {
-            return position + 2;
+            int rating = position + 2;
+            SearchDebugLog.d("GallerySearch", "minRating=" + rating + "  [f_sr=on&f_srdd=" + rating + "]");
+            return rating;
         } else {
             return -1;
         }
@@ -167,14 +257,18 @@ public class AdvanceSearchTable extends LinearLayout {
 
     public int getPageFrom() {
         if (mSp.isChecked()) {
-            return NumberUtils.parseIntSafely(mSpf.getText().toString(), -1);
+            int from = NumberUtils.parseIntSafely(mSpf.getText().toString(), -1);
+            SearchDebugLog.d("GallerySearch", "pageFrom=" + from + "  [f_sp=on&f_spf=" + from + "]");
+            return from;
         }
         return -1;
     }
 
     public int getPageTo() {
         if (mSp.isChecked()) {
-            return NumberUtils.parseIntSafely(mSpt.getText().toString(), -1);
+            int to = NumberUtils.parseIntSafely(mSpt.getText().toString(), -1);
+            SearchDebugLog.d("GallerySearch", "pageTo=" + to + "  [f_sp=on&f_spt=" + to + "]");
+            return to;
         }
         return -1;
     }
@@ -226,6 +320,60 @@ public class AdvanceSearchTable extends LinearLayout {
         }
     }
 
+    // Rating range methods (for download search)
+    public boolean isRatingRangeEnabled() {
+        return mEnableRatingRange != null && mEnableRatingRange.isChecked();
+    }
+
+    public void setRatingRangeEnabled(boolean enabled) {
+        if (mEnableRatingRange != null) {
+            mEnableRatingRange.setChecked(enabled);
+            updateRatingBarsEnabled();
+        }
+    }
+
+    public float getRatingRangeFrom() {
+        return mRatingRangeFrom;
+    }
+
+    public float getRatingRangeTo() {
+        return mRatingRangeTo;
+    }
+
+    public void setRatingRange(float from, float to) {
+        mRatingRangeFrom = Math.max(0f, Math.min(5f, from));
+        mRatingRangeTo = Math.max(0f, Math.min(5f, to));
+        if (mRatingFromBar != null) {
+            mRatingFromBar.setRating(mRatingRangeFrom * 2);
+        }
+        if (mRatingToBar != null) {
+            mRatingToBar.setRating(mRatingRangeTo * 2);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // 标签组检索功能已迁移至 SearchBar 高级关键词编辑器，此处不再保留。
+    // ---------------------------------------------------------------------
+
+    public void reset() {
+        setAdvanceSearch(0);
+        setMinRating(-1);
+        setPageFrom(-1);
+        setPageTo(-1);
+        if (mEnableRatingRange != null) {
+            mEnableRatingRange.setChecked(false);
+            updateRatingBarsEnabled();
+        }
+        mRatingRangeFrom = 0f;
+        mRatingRangeTo = 5f;
+        if (mRatingFromBar != null) {
+            mRatingFromBar.setRating(0);
+        }
+        if (mRatingToBar != null) {
+            mRatingToBar.setRating(10);
+        }
+    }
+
     @Override
     public Parcelable onSaveInstanceState() {
         final Bundle state = new Bundle();
@@ -234,6 +382,11 @@ public class AdvanceSearchTable extends LinearLayout {
         state.putInt(STATE_KEY_MIN_RATING, getMinRating());
         state.putInt(STATE_KEY_PAGE_FROM, getPageFrom());
         state.putInt(STATE_KEY_PAGE_TO, getPageTo());
+        if (mEnableRatingRange != null) {
+            state.putBoolean(STATE_KEY_RATING_RANGE_ENABLED, mEnableRatingRange.isChecked());
+            state.putFloat(STATE_KEY_RATING_RANGE_FROM, mRatingRangeFrom);
+            state.putFloat(STATE_KEY_RATING_RANGE_TO, mRatingRangeTo);
+        }
         return state;
     }
 
@@ -246,6 +399,18 @@ public class AdvanceSearchTable extends LinearLayout {
             setMinRating(savedState.getInt(STATE_KEY_MIN_RATING));
             setPageFrom(savedState.getInt(STATE_KEY_PAGE_FROM));
             setPageTo(savedState.getInt(STATE_KEY_PAGE_TO));
+            if (mEnableRatingRange != null && savedState.containsKey(STATE_KEY_RATING_RANGE_ENABLED)) {
+                mEnableRatingRange.setChecked(savedState.getBoolean(STATE_KEY_RATING_RANGE_ENABLED));
+                mRatingRangeFrom = savedState.getFloat(STATE_KEY_RATING_RANGE_FROM, 0f);
+                mRatingRangeTo = savedState.getFloat(STATE_KEY_RATING_RANGE_TO, 5f);
+                if (mRatingFromBar != null) {
+                    mRatingFromBar.setRating(mRatingRangeFrom * 2);
+                }
+                if (mRatingToBar != null) {
+                    mRatingToBar.setRating(mRatingRangeTo * 2);
+                }
+                updateRatingBarsEnabled();
+            }
         }
     }
 }

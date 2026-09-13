@@ -243,4 +243,61 @@
             android:layout_gravity="center_vertical"
             android:text="@string/search_sft"/>
     </LinearLayout>
+
+    <!-- Rating Range Filter -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/advance_search_table_item_margin"
+        android:orientation="vertical">
+
+        <CheckBox
+            android:id="@+id/enable_rating_range_filter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/rating_range_enable"/>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginRight="8dp"
+                android:text="@string/rating_range_from"
+                android:textColor="?android:attr/textColorPrimary"/>
+
+            <RatingBar
+                android:id="@+id/rating_range_from_bar"
+                style="?android:attr/ratingBarStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:numStars="5"
+                android:max="10"
+                android:stepSize="1"
+                android:rating="0"/>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginLeft="16dp"
+                android:layout_marginRight="8dp"
+                android:text="@string/rating_range_to"
+                android:textColor="?android:attr/textColorPrimary"/>
+
+            <RatingBar
+                android:id="@+id/rating_range_to_bar"
+                style="?android:attr/ratingBarStyleSmall"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:numStars="5"
+                android:max="10"
+                android:stepSize="1"
+                android:rating="10"/>
+        </LinearLayout>
+    </LinearLayout>
 </merge>

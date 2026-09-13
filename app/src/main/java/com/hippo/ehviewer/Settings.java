@@ -1144,6 +1144,27 @@ public class Settings {
     public static final String KEY_LOCAL_GALLERY_CACHE_EXPIRE_DAYS = "local_gallery_cache_expire_days";
     private static final int DEFAULT_LOCAL_GALLERY_CACHE_EXPIRE_DAYS = 3;
 
+    // Download History Scan Settings
+    public static final String KEY_DOWNLOAD_HISTORY_SCAN_ON_START = "download_history_scan_on_start";
+    private static final boolean DEFAULT_DOWNLOAD_HISTORY_SCAN_ON_START = false;
+    public static final String KEY_DOWNLOAD_HISTORY_LAST_SCAN_TIME = "download_history_last_scan_time";
+
+    public static boolean getDownloadHistoryScanOnStart() {
+        return getBoolean(KEY_DOWNLOAD_HISTORY_SCAN_ON_START, DEFAULT_DOWNLOAD_HISTORY_SCAN_ON_START);
+    }
+
+    public static void putDownloadHistoryScanOnStart(boolean value) {
+        putBoolean(KEY_DOWNLOAD_HISTORY_SCAN_ON_START, value);
+    }
+
+    public static long getDownloadHistoryLastScanTime() {
+        return getLong(KEY_DOWNLOAD_HISTORY_LAST_SCAN_TIME, 0L);
+    }
+
+    public static void putDownloadHistoryLastScanTime(long value) {
+        putLong(KEY_DOWNLOAD_HISTORY_LAST_SCAN_TIME, value);
+    }
+
     public static final String KEY_ENABLE_MIN_DOWNLOAD_SPEED = "enable_min_download_speed";
     private static final boolean DEFAULT_ENABLE_MIN_DOWNLOAD_SPEED = false;
 
@@ -1295,6 +1316,28 @@ public class Settings {
         putBoolean(KEY_SHOW_DOWNLOAD_CARD_FOLDER_SIZE, value);
     }
 
+    // ========== 下载ETA显示设置 ==========
+    public static final String KEY_SHOW_DOWNLOAD_ETA = "show_download_eta";
+
+    public static boolean getShowDownloadEta() {
+        return getBoolean(KEY_SHOW_DOWNLOAD_ETA, false);
+    }
+
+    public static void putShowDownloadEta(boolean value) {
+        putBoolean(KEY_SHOW_DOWNLOAD_ETA, value);
+    }
+
+    // ========== 从下载历史恢复设置 ==========
+    public static final String KEY_AUTO_RESUME_FROM_HISTORY = "auto_resume_from_history";
+
+    public static boolean getAutoResumeFromHistory() {
+        return getBoolean(KEY_AUTO_RESUME_FROM_HISTORY, false);
+    }
+
+    public static void putAutoResumeFromHistory(boolean value) {
+        putBoolean(KEY_AUTO_RESUME_FROM_HISTORY, value);
+    }
+
     private static final String KEY_MULTI_THREAD_DOWNLOAD = "download_thread";
     private static final int DEFAULT_MULTI_THREAD_DOWNLOAD = 3;
 
@@ -1316,6 +1359,21 @@ public class Settings {
 
     public static void putBackgroundConcurrentTasks(int value) {
         putIntToStr(KEY_BACKGROUND_CONCURRENT_TASKS, MathUtils.clamp(value, 1, 32));
+    }
+
+    // 全局网络并发上限：限制 EhEngine 同步请求的总在飞数量。
+    // 同步 execute() 不受 OkHttp Dispatcher（仅约束异步）限制，大规模任务时
+    // 曾观测到单主机 161 个在飞请求；默认 64，可在高级设置调整并即时生效。
+    private static final String KEY_NETWORK_GLOBAL_CONCURRENCY = "network_global_concurrency";
+    private static final int DEFAULT_NETWORK_GLOBAL_CONCURRENCY = 64;
+
+    public static int getNetworkGlobalConcurrency() {
+        int value = getIntFromStr(KEY_NETWORK_GLOBAL_CONCURRENCY, DEFAULT_NETWORK_GLOBAL_CONCURRENCY);
+        return MathUtils.clamp(value, 8, 256);
+    }
+
+    public static void putNetworkGlobalConcurrency(int value) {
+        putIntToStr(KEY_NETWORK_GLOBAL_CONCURRENCY, MathUtils.clamp(value, 8, 256));
     }
 
     // 互斥任务死锁检测间隔（秒），默认 30 秒
@@ -1365,6 +1423,19 @@ public class Settings {
 
     public static void putWatchdogLogRetentionMinutes(int value) {
         putInt(KEY_WATCHDOG_LOG_RETENTION_MINUTES, Math.max(1, value));
+    }
+
+    // ANR 弹窗自动清除：主线程阻塞期间由看门狗定时触发无障碍服务点击"等待"，
+    // 仅在存在活跃后台任务时生效。需要用户在系统设置中开启无障碍服务。
+    private static final String KEY_ANR_AUTO_DISMISS_ENABLED = "anr_auto_dismiss_enabled";
+    private static final boolean DEFAULT_ANR_AUTO_DISMISS_ENABLED = true;
+
+    public static boolean isAnrAutoDismissEnabled() {
+        return getBoolean(KEY_ANR_AUTO_DISMISS_ENABLED, DEFAULT_ANR_AUTO_DISMISS_ENABLED);
+    }
+
+    public static void putAnrAutoDismissEnabled(boolean value) {
+        putBoolean(KEY_ANR_AUTO_DISMISS_ENABLED, value);
     }
 
     // 网络流量抓包
@@ -2148,6 +2219,17 @@ public class Settings {
 
     public static void setDownloadTreatRemovedAsComplete(boolean value) {
         putBoolean(KEY_DOWNLOAD_TREAT_REMOVED_AS_COMPLETE, value);
+    }
+
+    // 使用剩余图片数量作为排序依据（总数-已下载），代替仅使用总数排序
+    public static final String KEY_DOWNLOAD_SORT_BY_REMAINING = "download_sort_by_remaining";
+
+    public static boolean getDownloadSortByRemaining() {
+        return getBoolean(KEY_DOWNLOAD_SORT_BY_REMAINING, false);
+    }
+
+    public static void setDownloadSortByRemaining(boolean value) {
+        putBoolean(KEY_DOWNLOAD_SORT_BY_REMAINING, value);
     }
 
     public static final String KEY_DOWNLOAD_ALWAYS_COMPLETE = "download_always_complete";

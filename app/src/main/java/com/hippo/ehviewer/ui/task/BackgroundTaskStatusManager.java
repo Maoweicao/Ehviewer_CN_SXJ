@@ -4,6 +4,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import android.content.Context;
+import android.os.SystemClock;
 
 import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.task.BackgroundTask;
@@ -298,6 +299,14 @@ public class BackgroundTaskStatusManager {
     private final Object mPersistLock = new Object();
     private boolean mPersistDirty = false;
 
+    // 进度副作用节流间隔：通知重建/提交与 UI 监听器广播合并的最小间隔。
+    // 大规模任务（上千文件的扫描/压缩、大量并发下载）会以极高频率回调进度，
+    // 若每次都重建并提交通知、广播 UI 变更，会淹没主线程与系统通知服务，
+    // 是后台任务运行期间 ANR 与前台服务超时崩溃（ForegroundServiceDidNotStartInTimeException）
+    // 的直接诱因之一。
+    private static final long PROGRESS_FLUSH_INTERVAL_MS = 300L;
+    private final ConcurrentHashMap<String, Long> mLastProgressFlushMs = new ConcurrentHashMap<>();
+
     private BackgroundTaskStatusManager(Context context) {
         File filesDir = context.getFilesDir();
         mStatusFile = new File(filesDir, STATUS_FILE_NAME);
@@ -354,13 +363,16 @@ public class BackgroundTaskStatusManager {
     public String addTask(@NonNull String taskId, @NonNull String taskName, @Nullable String taskDescription,
                           @Nullable Future<?> future, @NonNull BackgroundTask.TaskType taskType, boolean uniqueTask,
                           @NonNull String taskClassName, @Nullable String taskPersistData, @Nullable String mutexGroup) {
-        if (uniqueTask && taskType != BackgroundTask.TaskType.DOWNLOAD) {
-            BackgroundTaskInfo activeUnique = getActiveUniqueNonDownloadTask();
-            if (activeUnique != null) {
-                return null;
-            }
-        }
-
+        // 注意：此处不再做"全局同时只允许一个 unique 非 DOWNLOAD 任务"的限制。
+        // 同互斥组的串行由 submitBackgroundTask 的冲突检查 + 等待队列负责；
+        // 不同互斥组之间按设计并行（见 BackgroundTask#getMutexGroup 的注释）。
+        // 移除原因：旧的全局检查存在两个致命缺陷：
+        //  1. promote 自锁：等待队列中的任务被接力启动时，pollNextUniqueWaitingTask
+        //     会先把自己在 mActiveTasks 中的占位条目置为非 queued；随后 addTask 的
+        //     全局检查恰好匹配到这条占位记录，返回 null，导致 FutureTask 永远不会
+        //     被提交执行 —— 任务永久滞留活跃列表，无日志、无进度、无法完成。
+        //  2. 跨组静默丢弃：不同组的 unique 任务通过 submitBackgroundTask 的组冲突
+        //     检查后，却在这里被静默拒绝（返回 null），UI 上毫无痕迹。
         BackgroundTaskInfo taskInfo = new BackgroundTaskInfo(taskId, taskName, taskDescription, future, taskType,
                 uniqueTask, taskClassName, taskPersistData, mutexGroup, System.currentTimeMillis());
         taskInfo.setQueued(future != null);
@@ -378,9 +390,10 @@ public class BackgroundTaskStatusManager {
      * 查找与指定 mutexGroup 冲突的活跃任务（同组且 unique 且非 DOWNLOAD）。
      * mutexGroup 为 null 时始终返回 null（不参与互斥）。
      * 注意：已排队的任务（isQueued=true）不算作正在运行的冲突。
+     * 加 synchronized：避免两个同组任务并发提交时同时通过检查、双双并行执行。
      */
     @Nullable
-    public BackgroundTaskInfo getActiveConflictTask(@Nullable String mutexGroup) {
+    public synchronized BackgroundTaskInfo getActiveConflictTask(@Nullable String mutexGroup) {
         if (mutexGroup == null) return null;
         for (BackgroundTaskInfo info : mActiveTasks.values()) {
             // 已排队的任务不算正在运行的冲突
@@ -417,10 +430,26 @@ public class BackgroundTaskStatusManager {
     public void updateTaskProgress(@NonNull String taskId, int current, int total, @Nullable String detail) {
         BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
         if (taskInfo != null) {
+            // 数据模型始终更新到最新（UI 主动拉取时看到的是最新值），
+            // 仅对"通知刷新 + 监听器广播"两路副作用做 300ms 合并节流。
             taskInfo.setCurrentProgress(current);
             taskInfo.setTotalProgress(total);
             taskInfo.setProgressDetail(detail);
-            
+
+            // 进度到达终点（current >= total）强制刷新并清理节流记录，
+            // 保证任务的最终进度状态不被节流吞掉。
+            boolean isFinal = total > 0 && current >= total;
+            long now = SystemClock.uptimeMillis();
+            if (isFinal) {
+                mLastProgressFlushMs.remove(taskId);
+            } else {
+                Long last = mLastProgressFlushMs.get(taskId);
+                if (last != null && now - last < PROGRESS_FLUSH_INTERVAL_MS) {
+                    return;
+                }
+                mLastProgressFlushMs.put(taskId, now);
+            }
+
             // 更新通知栏进度
             BackgroundTaskManager.getInstance().updateTaskProgress(
                 taskInfo.getTaskName(), 
@@ -431,6 +460,13 @@ public class BackgroundTaskStatusManager {
             savePersistedTasksAsync();
             notifyTaskProgressChanged(taskId);
         }
+    }
+
+    /**
+     * 清理指定任务的进度节流记录（任务终止/移除时调用，防止 map 无界增长）。
+     */
+    private void clearProgressThrottle(@NonNull String taskId) {
+        mLastProgressFlushMs.remove(taskId);
     }
 
     public void updateTaskLogFile(@NonNull String taskId, @Nullable File logFile) {
@@ -446,6 +482,10 @@ public class BackgroundTaskStatusManager {
             taskInfo.appendLog(message);
             savePersistedTasksAsync();
             notifyTaskProgressChanged(taskId);
+        } else {
+            // 找不到活跃任务（任务已结束/被清理/尚未注册）时落到 logcat，
+            // 避免日志被静默吞掉导致"任务没有日志"的假象难以排查
+            android.util.Log.w(TAG, "appendTaskLog: no active task for id=" + taskId + ", message: " + message);
         }
     }
     
@@ -457,6 +497,7 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.setQueued(false);
             taskInfo.setCompleted(true);
+            clearProgressThrottle(taskId);
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
@@ -476,6 +517,7 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.setQueued(false);
             taskInfo.setCancelled(true);
+            clearProgressThrottle(taskId);
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
@@ -495,6 +537,7 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.setQueued(false);
             taskInfo.setErrorMessage(errorMessage);
+            clearProgressThrottle(taskId);
 
             // 添加到已完成任务列表
             mCompletedTasks.put(taskId, taskInfo);
@@ -775,6 +818,7 @@ public class BackgroundTaskStatusManager {
     public void removeTask(@NonNull String taskId) {
         mActiveTasks.remove(taskId);
         mCompletedTasks.remove(taskId);
+        clearProgressThrottle(taskId);
         savePersistedTasksAsync();
         notifyTaskRemoved(taskId);
     }
@@ -799,6 +843,12 @@ public class BackgroundTaskStatusManager {
             }
         }
         if (removed) {
+            Iterator<String> throttleIt = mLastProgressFlushMs.keySet().iterator();
+            while (throttleIt.hasNext()) {
+                if (throttleIt.next().startsWith(prefix)) {
+                    throttleIt.remove();
+                }
+            }
             savePersistedTasksAsync();
             notifyTaskRemoved(prefix);
         }

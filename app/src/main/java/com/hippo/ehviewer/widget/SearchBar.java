@@ -33,6 +33,7 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.AttributeSet;
 import android.util.Pair;
+import android.util.TypedValue;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -56,8 +57,11 @@ import androidx.appcompat.app.AlertDialog;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.EhDB;
+import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.android.resource.AttrResources;
 import com.hippo.ehviewer.client.EhTagDatabase;
+import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.view.ViewTransition;
 import com.hippo.lib.yorozuya.AnimationUtils;
 import com.hippo.lib.yorozuya.MathUtils;
@@ -79,6 +83,13 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
     private static final String STATE_KEY_SUPER = "super";
     private static final String STATE_KEY_STATE = "state";
+
+    private static final String STATE_KEY_EDITOR_TEXTS = "keyword_editor_texts";
+    private static final String STATE_KEY_EDITOR_GROUPS = "keyword_editor_groups";
+    private static final String STATE_KEY_EDITOR_EXCLUDED = "keyword_editor_excluded";
+    private static final String STATE_KEY_EDITOR_GROUP_EXCLUDED = "keyword_editor_group_excluded";
+    private static final String STATE_KEY_EDITOR_GROUP_OR = "keyword_editor_group_or";
+    private static final String STATE_KEY_EDITOR_LAST_QUERY = "keyword_editor_last_query";
 
     private static final long ANIMATE_TIME = 300L;
 
@@ -124,6 +135,9 @@ public class SearchBar extends CardView implements View.OnClickListener,
     // 标志位：建议列表是否被手动控制
     private boolean mSuggestionsListManuallyControlled = false;
 
+    // 标志位：左键功能固定为“搜索历史”（按钮功能恒定原则）
+    private boolean mLeftButtonHistory = false;
+
     private static final int[] KEYWORD_GROUP_COLORS = {
             0xff3f51b5, 0xff008577, 0xff7b1fa2, 0xffef6c00, 0xff2e7d32
     };
@@ -131,6 +145,11 @@ public class SearchBar extends CardView implements View.OnClickListener,
     // Tag chip container and data
     private AutoWrapLayout mTagContainer;
     private final List<SearchTagChip> mTagChips = new ArrayList<>();
+
+    // 关键字编辑器模型：重开编辑器时恢复分组结构（仅当当前文本与上次生成结果一致时启用）
+    private List<KeywordItem> mKeywordEditorItems;
+    private boolean mKeywordEditorGroupOr;
+    private String mKeywordEditorLastQuery;
 
     public SearchBar(Context context) {
         super(context);
@@ -169,6 +188,11 @@ public class SearchBar extends CardView implements View.OnClickListener,
         mMenuButton.setOnClickListener(this);
         mActionButton.setOnClickListener(this);
         mAdvanceButton.setOnClickListener(this);
+        // 长按高级搜索按钮直接打开关键字编辑器
+        mAdvanceButton.setOnLongClickListener(v -> {
+            showKeywordEditor();
+            return true;
+        });
         mEditText.setSearchEditTextListener(this);
         mEditText.setOnEditorActionListener(this);
         mEditText.addTextChangedListener(this);
@@ -209,6 +233,10 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
     private void updateSuggestionsToggleVisual() {
         if (mMenuButton == null || (mState != STATE_SEARCH && mState != STATE_SEARCH_LIST)) {
+            return;
+        }
+        // 历史模式下左键图标固定为历史图标，不随列表显示状态旋转
+        if (mLeftButtonHistory) {
             return;
         }
         boolean visible = mListContainer.getVisibility() == View.VISIBLE;
@@ -267,6 +295,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
                 if(!keyword.isEmpty()) 
                 {
                     List<Pair<String, String>> searchHints = ehTagDatabase.suggest(keyword);
+                    SearchDebugLog.d("SearchBar", "last-token suggest('" + keyword + "') -> " + searchHints.size()
+                            + " (full query: '" + text + "')");
 
                     for (Pair<String, String> searchHint : searchHints) {
                         if (isTagAlreadyAdded(searchHint.second)) {
@@ -384,6 +414,37 @@ public class SearchBar extends CardView implements View.OnClickListener,
         this.isComeFromDownload = isComeFromDownload;
     }
 
+    /**
+     * 设置左键是否恒定展示/切换搜索历史列表。
+     * 开启后：普通态点击左键进入搜索历史列表，搜索态点击左键切换历史/建议列表的显示与隐藏。
+     */
+    public void setLeftButtonHistory(boolean leftButtonHistory) {
+        mLeftButtonHistory = leftButtonHistory;
+    }
+
+    public boolean isLeftButtonHistory() {
+        return mLeftButtonHistory;
+    }
+
+    /**
+     * 切换搜索历史列表的显示/隐藏。入口为左键（恒定功能），不受页面上下文的搜索状态影响。
+     */
+    public void toggleSearchHistory() {
+        if (mState == STATE_NORMAL) {
+            // 标题态：先进入搜索列表态再展示历史（编辑框为空时列表即历史）
+            setState(STATE_SEARCH_LIST, true);
+            showImeAndSuggestionsList(true);
+            mSuggestionsListManuallyControlled = true;
+        } else if (mState == STATE_SEARCH || mState == STATE_SEARCH_LIST) {
+            mSuggestionsListManuallyControlled = true;
+            if (mListContainer.getVisibility() == View.VISIBLE) {
+                hideImeAndSuggestionsList(false);
+            } else {
+                showImeAndSuggestionsList(true);
+            }
+        }
+    }
+
     private void applySearch() {
         String query = buildCombinedQuery();
         if (query.isEmpty()) {
@@ -414,14 +475,61 @@ public class SearchBar extends CardView implements View.OnClickListener,
         }
     }
 
+    /**
+     * 关键字输入的自动完成适配器。
+     * 数据项为英文 tag key（如 {@code other:ai+generated}），显示时按 search_suggestion_item.xml
+     * 两行渲染：第一行主文字（英文 key，正常大小加粗），第二行注释（中文翻译，更小更浅），
+     * 无中文翻译时隐藏第二行。
+     */
     private static class KeywordSuggestionAdapter extends ArrayAdapter<String> {
+        private final List<String> mChineseList = new ArrayList<>();
+        private final LayoutInflater mInflater;
+
         KeywordSuggestionAdapter(Context context) {
-            super(context, android.R.layout.simple_dropdown_item_1line);
+            super(context, 0);
+            mInflater = LayoutInflater.from(context);
+        }
+
+        public void setData(List<Pair<String, String>> data) {
+            clear();
+            mChineseList.clear();
+            for (Pair<String, String> pair : data) {
+                add(pair.first);
+                mChineseList.add(pair.second);
+            }
+        }
+
+        @Override
+        public View getView(int position, View convertView, ViewGroup parent) {
+            if (convertView == null) {
+                convertView = mInflater.inflate(R.layout.search_suggestion_item, parent, false);
+            }
+            TextView hintView = convertView.findViewById(R.id.hintView);
+            TextView textView = convertView.findViewById(R.id.textView);
+            hintView.setText(getItem(position));
+            String chinese = position < mChineseList.size() ? mChineseList.get(position) : null;
+            if (chinese != null && !chinese.isEmpty()) {
+                textView.setVisibility(View.VISIBLE);
+                textView.setText(chinese);
+            } else {
+                textView.setVisibility(View.GONE);
+            }
+            return convertView;
         }
     }
 
-    private void showKeywordEditor() {
-        final List<KeywordItem> items = parseKeywords(buildCombinedQuery());
+    public void showKeywordEditor() {
+        final List<KeywordItem> items;
+        String current = buildCombinedQuery();
+        if (mKeywordEditorItems != null && mKeywordEditorLastQuery != null
+                && mKeywordEditorLastQuery.equals(current)) {
+            // 上次由编辑器生成的查询原样保留，恢复其分组结构
+            items = copyItems(mKeywordEditorItems);
+        } else {
+            items = parseKeywords(current);
+        }
+        // 组间关系（AND / OR）初始值取自上次保存的模型
+        final boolean[] groupOr = {mKeywordEditorGroupOr};
         final LinearLayout root = new LinearLayout(getContext());
         root.setOrientation(LinearLayout.VERTICAL);
         int padding = (int) (getResources().getDisplayMetrics().density * 16);
@@ -438,10 +546,27 @@ public class SearchBar extends CardView implements View.OnClickListener,
         addRow.addView(addButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         root.addView(addRow);
 
-        TextView relationHint = new TextView(getContext());
-        relationHint.setText(R.string.search_keyword_relation_hint);
-        relationHint.setPadding(0, padding / 2, 0, padding / 2);
-        root.addView(relationHint);
+        // 组与组关系切换 + 表达式预览
+        LinearLayout relationRow = new LinearLayout(getContext());
+        relationRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+        relationRow.setPadding(0, padding / 2, 0, padding / 2);
+        final Button relationBtn = new Button(getContext());
+        relationBtn.setAllCaps(false);
+        updateGroupRelationButton(relationBtn, groupOr);
+        relationBtn.setOnClickListener(v -> {
+            groupOr[0] = !groupOr[0];
+            updateGroupRelationButton(relationBtn, groupOr);
+            SearchDebugLog.d("SearchBar", "keyword-editor group relation -> " + (groupOr[0] ? "OR" : "AND"));
+        });
+        relationRow.addView(relationBtn, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        Button previewBtn = new Button(getContext());
+        previewBtn.setAllCaps(false);
+        previewBtn.setText(R.string.search_group_preview);
+        previewBtn.setOnClickListener(v -> showKeywordEditorPreview(items, groupOr[0]));
+        relationRow.addView(previewBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        root.addView(relationRow);
 
         final LinearLayout list = new LinearLayout(getContext());
         list.setOrientation(LinearLayout.VERTICAL);
@@ -454,6 +579,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
         scrollParams.weight = 0;
         root.addView(scroll, scrollParams);
 
+        // 列表刷新回调（在语言/书签区前声明，供快捷书签点击等复用）
         final Runnable[] refresh = new Runnable[1];
         refresh[0] = () -> {
             list.removeAllViews();
@@ -470,6 +596,51 @@ public class SearchBar extends CardView implements View.OnClickListener,
                 list.addView(empty);
             }
         };
+
+        // --- 语言快捷标签 ---
+        final String[] selectedLanguage = {null};
+        final Map<String, TextView> langChips = new HashMap<>();
+        TextView langLabel = new TextView(getContext());
+        langLabel.setText(R.string.search_language_label);
+        langLabel.setPadding(0, padding / 2, 0, 2);
+        root.addView(langLabel);
+        AutoWrapLayout langWrap = new AutoWrapLayout(getContext());
+        addLanguageChip(langWrap, getResources().getString(R.string.search_language_clear), null,
+                selectedLanguage, langChips);
+        for (String[] lang : SearchLayout.LANGUAGE_TAGS) {
+            addLanguageChip(langWrap, lang[0], lang[1], selectedLanguage, langChips);
+        }
+        root.addView(langWrap);
+
+        // --- 快捷搜索书签（全部显示；内容长时由外层 ScrollView 整体滚动，小屏不会溢出） ---
+        final List<QuickSearch> quickSearches = EhDB.getAllQuickSearch();
+        if (quickSearches != null && !quickSearches.isEmpty()) {
+            TextView quickLabel = new TextView(getContext());
+            quickLabel.setText(R.string.search_quick_search_label);
+            quickLabel.setPadding(0, padding / 2, 0, 2);
+            root.addView(quickLabel);
+            AutoWrapLayout quickWrap = new AutoWrapLayout(getContext());
+            quickWrap.setLayoutParams(new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            for (final QuickSearch quickSearch : quickSearches) {
+                final String name = (quickSearch.getName() != null && !quickSearch.getName().isEmpty())
+                        ? quickSearch.getName() : quickSearch.getKeyword();
+                TextView qs = makeTagChipText(name);
+                qs.setOnClickListener(v -> {
+                    String kw = quickSearch.getKeyword();
+                    if (kw != null && !kw.isEmpty()) {
+                        boolean excluded = kw.startsWith("-");
+                        String clean = excluded ? kw.substring(1) : kw;
+                        items.add(new KeywordItem(clean,
+                                items.isEmpty() ? 0 : items.get(items.size() - 1).group, excluded));
+                        refresh[0].run();
+                    }
+                });
+                quickWrap.addView(qs);
+            }
+            root.addView(quickWrap);
+        }
+
         addButton.setOnClickListener(v -> {
             String text = normalizeKeyword(input.getText().toString());
             if (isValidKeyword(text)) {
@@ -480,23 +651,95 @@ public class SearchBar extends CardView implements View.OnClickListener,
         });
         refresh[0].run();
 
+        // 整个编辑器内容包一层外层 ScrollView：书签/语言标签等超出屏幕时整页可滚动
+        ScrollView outerScroll = new ScrollView(getContext());
+        outerScroll.setVerticalScrollBarEnabled(false);
+        outerScroll.addView(root);
         AlertDialog dialog = new AlertDialog.Builder(getContext())
                 .setTitle(R.string.search_keyword_editor)
-                .setView(root)
+                .setView(outerScroll)
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton(android.R.string.ok, null)
                 .create();
         dialog.setOnShowListener(v -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
-            String query = buildKeywordQuery(items);
+            String query = buildKeywordQuery(items, groupOr[0]);
+            if (selectedLanguage[0] != null && !selectedLanguage[0].isEmpty()) {
+                query = query.isEmpty() ? "language:" + selectedLanguage[0]
+                        : query + " language:" + selectedLanguage[0];
+            }
             if (query.isEmpty()) {
                 return;
             }
+            // 保存分组模型，重开编辑器时可恢复组结构
+            mKeywordEditorItems = copyItems(items);
+            mKeywordEditorGroupOr = groupOr[0];
+            mKeywordEditorLastQuery = query;
             clearTagChips();
             setText(query);
             dialog.dismiss();
             applySearch(true);
         }));
         dialog.show();
+    }
+
+    private void addLanguageChip(AutoWrapLayout parent, String display, String tag,
+                                 String[] selected, Map<String, TextView> views) {
+        TextView tv = makeTagChipText(display);
+        tv.setOnClickListener(v -> {
+            if (tag == null) {
+                selected[0] = null;
+            } else if (tag.equals(selected[0])) {
+                selected[0] = null;
+            } else {
+                selected[0] = tag;
+            }
+            refreshLanguageChipStyles(views, selected[0]);
+        });
+        views.put(tag == null ? "" : tag, tv);
+        parent.addView(tv);
+    }
+
+    private void refreshLanguageChipStyles(Map<String, TextView> views, String selected) {
+        int accent = AttrResources.getAttrColor(getContext(), R.attr.widgetColorThemeAccent);
+        int density = (int) getResources().getDisplayMetrics().density;
+        int strokeColor = AttrResources.getAttrColor(getContext(), R.attr.drawableColorSecondary);
+        int unselectedColor = AttrResources.getAttrColor(getContext(), R.attr.drawableColorPrimary);
+        for (Map.Entry<String, TextView> entry : views.entrySet()) {
+            boolean isSelected = !entry.getKey().isEmpty() && entry.getKey().equals(selected);
+            TextView tv = entry.getValue();
+            tv.setTextColor(isSelected ? android.graphics.Color.WHITE : unselectedColor);
+            GradientDrawable bg = new GradientDrawable();
+            bg.setCornerRadius(density * 4);
+            bg.setStroke(density, strokeColor);
+            bg.setColor(isSelected ? accent : getUnselectedChipColor());
+            tv.setBackground(bg);
+        }
+    }
+
+    private int getUnselectedChipColor() {
+        if (AttrResources.getAttrBoolean(getContext(), androidx.appcompat.R.attr.isLightTheme)) {
+            return 0x14000000;
+        } else {
+            return 0x14FFFFFF;
+        }
+    }
+
+    private TextView makeTagChipText(String text) {
+        TextView tv = new TextView(getContext());
+        tv.setText(text);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        int density = (int) getResources().getDisplayMetrics().density;
+        tv.setPadding(density * 8, density * 4, density * 8, density * 4);
+        tv.setClickable(true);
+        tv.setFocusable(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(density * 4);
+        int strokeColor = AttrResources.getAttrColor(getContext(), R.attr.drawableColorSecondary);
+        bg.setStroke(density, strokeColor);
+        bg.setColor(getUnselectedChipColor());
+        tv.setBackground(bg);
+        tv.setTextColor(AttrResources.getAttrColor(getContext(), R.attr.drawableColorPrimary));
+        return tv;
     }
 
     private void addKeywordRow(LinearLayout list, List<KeywordItem> items, int index, Runnable refresh) {
@@ -633,17 +876,25 @@ public class SearchBar extends CardView implements View.OnClickListener,
     private void updateKeywordSuggestions(AutoCompleteTextView input, KeywordSuggestionAdapter adapter) {
         String text = input.getText() == null ? "" : input.getText().toString().trim();
         String lookup = text.startsWith("-") ? text.substring(1) : text;
-        adapter.clear();
+        List<Pair<String, String>> data = new ArrayList<>();
         EhTagDatabase database = EhTagDatabase.getInstance(getContext());
         if (database != null && !lookup.isEmpty()) {
+            String prefix = text.startsWith("-") ? "-" : "";
             List<Pair<String, String>> suggestions = database.suggest(lookup);
             for (Pair<String, String> suggestion : suggestions) {
-                if (suggestion.second != null && !suggestion.second.equals(lookup)) {
-                    adapter.add((text.startsWith("-") ? "-" : "") + suggestion.second);
+                // suggest() 返回 Pair(中文翻译, 英文key)
+                String key = suggestion.second;
+                String chinese = suggestion.first;
+                if (key != null && !key.isEmpty() && !key.equals(lookup)) {
+                    if (chinese == null || "null".equals(chinese)) {
+                        chinese = "";
+                    }
+                    data.add(new Pair<>(prefix + key, chinese));
                 }
             }
         }
-        adapter.notifyDataSetChanged();
+        adapter.setData(data);
+        SearchDebugLog.d("SearchBar", "keyword-editor suggest('" + lookup + "') -> " + data.size() + " suggestions");
         if (adapter.getCount() > 0 && input.hasFocus()) input.showDropDown();
     }
 
@@ -683,23 +934,206 @@ public class SearchBar extends CardView implements View.OnClickListener,
         return quotes % 2 == 0;
     }
 
-    private String buildKeywordQuery(List<KeywordItem> items) {
+    /**
+     * 按组生成最终搜索表达式。
+     * 组内：空格=AND，排除词带 - 前缀；含空格的词自动加引号（短语）。
+     * 组间：AND 模式直接空格连接；OR 模式每组用括号包裹并用 OR 连接。
+     */
+    private String buildKeywordQuery(List<KeywordItem> items, boolean groupOr) {
+        List<String> groupStrings = groupRender(items);
+        if (groupStrings.isEmpty()) {
+            return "";
+        }
         StringBuilder result = new StringBuilder();
+        if (groupOr && groupStrings.size() > 1) {
+            for (int i = 0; i < groupStrings.size(); i++) {
+                if (result.length() > 0) {
+                    result.append(" OR ");
+                }
+                result.append('(').append(groupStrings.get(i)).append(')');
+            }
+        } else {
+            for (int i = 0; i < groupStrings.size(); i++) {
+                if (result.length() > 0) {
+                    result.append(' ');
+                }
+                result.append(groupStrings.get(i));
+            }
+        }
+        SearchDebugLog.d("SearchBar", "keyword-editor buildKeywordQuery(groupOr=" + groupOr
+                + ") -> '" + result + "'");
+        return result.toString();
+    }
+
+    /** 把条目按组（保持首次出现顺序）渲染成字符串列表。 */
+    private List<String> groupRender(List<KeywordItem> items) {
+        List<String> groups = new ArrayList<>();
         Map<Integer, Boolean> excludedGroups = new HashMap<>();
         for (KeywordItem item : items) {
             if (!excludedGroups.containsKey(item.group)) {
                 excludedGroups.put(item.group, item.groupExcluded);
             }
         }
+        List<Integer> groupOrder = new ArrayList<>();
         for (KeywordItem item : items) {
-            String keyword = normalizeKeyword(item.text);
-            if (!isValidKeyword(keyword)) continue;
-            if (result.length() > 0) result.append(' ');
-            if ((item.excluded || Boolean.TRUE.equals(excludedGroups.get(item.group)))
-                    && !keyword.startsWith("-")) result.append('-');
-            result.append(keyword.startsWith("-") ? keyword.substring(1) : keyword);
+            if (!groupOrder.contains(item.group)) {
+                groupOrder.add(item.group);
+            }
         }
-        return result.toString();
+        for (int g : groupOrder) {
+            StringBuilder gb = new StringBuilder();
+            for (KeywordItem item : items) {
+                if (item.group != g) {
+                    continue;
+                }
+                String keyword = normalizeKeyword(item.text);
+                if (!isValidKeyword(keyword)) {
+                    continue;
+                }
+                String clean = keyword.startsWith("-") ? keyword.substring(1) : keyword;
+                clean = translateCjkTag(clean);
+                clean = quoteIfNeeded(clean);
+                if (gb.length() > 0) {
+                    gb.append(' ');
+                }
+                if ((item.excluded || Boolean.TRUE.equals(excludedGroups.get(g)))) {
+                    gb.append('-');
+                }
+                gb.append(clean);
+            }
+            if (gb.length() > 0) {
+                groups.add(gb.toString());
+            }
+        }
+        return groups;
+    }
+
+    /** 中文/日文（CJK 或假名/谚文）词自动翻译成规范英文标签，如 明日方舟 -> parody:arknights。 */
+    private String translateCjkTag(String keyword) {
+        if (keyword == null || keyword.isEmpty() || !containsCjk(keyword)) {
+            return keyword;
+        }
+        EhTagDatabase db = EhTagDatabase.getInstance(getContext());
+        if (db == null) {
+            return keyword;
+        }
+        String resolved = db.resolveTagTerm(keyword);
+        if (resolved != null && !resolved.isEmpty()) {
+            SearchDebugLog.d("SearchBar", "keyword-editor CJK translate '" + keyword + "' -> '" + resolved + "'");
+            return resolved;
+        }
+        return keyword;
+    }
+
+    private static boolean containsCjk(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if ((c >= '\u4e00' && c <= '\u9fff')
+                    || (c >= '\u3400' && c <= '\u4dbf')
+                    || (c >= '\u3040' && c <= '\u30ff')
+                    || (c >= '\uac00' && c <= '\ud7af')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 含空格且未被引号包裹的词补上双引号，保证短语语义两端一致。 */
+    private String quoteIfNeeded(String s) {
+        if (s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"")) {
+            return s;
+        }
+        if (s.contains(" ")) {
+            return "\"" + s + "\"";
+        }
+        return s;
+    }
+
+    private List<KeywordItem> copyItems(List<KeywordItem> src) {
+        List<KeywordItem> dst = new ArrayList<>();
+        if (src != null) {
+            for (KeywordItem item : src) {
+                KeywordItem copy = new KeywordItem(item.text, item.group, item.excluded);
+                copy.groupExcluded = item.groupExcluded;
+                dst.add(copy);
+            }
+        }
+        return dst;
+    }
+
+    private void updateGroupRelationButton(Button btn, boolean[] groupOr) {
+        btn.setText(getResources().getString(R.string.search_group_relation,
+                getResources().getString(groupOr[0] ? R.string.search_group_or : R.string.search_group_and)));
+    }
+
+    /** 人可读的分组解释：每组列出 + / - 词条并翻译为中文（如可解析）。 */
+    private String buildKeywordExplanation(List<KeywordItem> items, boolean groupOr) {
+        if (items == null || items.isEmpty()) {
+            return "";
+        }
+        List<Integer> groupOrder = new ArrayList<>();
+        for (KeywordItem item : items) {
+            if (!groupOrder.contains(item.group)) {
+                groupOrder.add(item.group);
+            }
+        }
+        Map<Integer, Boolean> excludedGroups = new HashMap<>();
+        for (KeywordItem item : items) {
+            if (!excludedGroups.containsKey(item.group)) {
+                excludedGroups.put(item.group, item.groupExcluded);
+            }
+        }
+        EhTagDatabase db = EhTagDatabase.getInstance(getContext());
+        StringBuilder sb = new StringBuilder();
+        for (int g : groupOrder) {
+            boolean gExcluded = Boolean.TRUE.equals(excludedGroups.get(g));
+            sb.append(getResources().getString(R.string.search_group_label, g + 1)).append(": ")
+                    .append(getResources().getString(gExcluded ? R.string.search_keyword_not
+                            : R.string.search_keyword_and)).append('\n');
+            for (KeywordItem item : items) {
+                if (item.group != g) {
+                    continue;
+                }
+                boolean excluded = item.excluded || gExcluded;
+                String text = normalizeKeyword(item.text);
+                String resolved = db != null ? db.resolveTagTerm(text) : null;
+                String chinese = null;
+                if (resolved != null && db != null) {
+                    chinese = db.getTranslation(resolved);
+                    if (chinese == null || "null".equals(chinese)) {
+                        chinese = null;
+                    }
+                }
+                sb.append(excluded ? "  - " : "  + ");
+                if (chinese != null && !chinese.isEmpty() && resolved != null) {
+                    sb.append(chinese).append(" (").append(resolved).append(')');
+                } else {
+                    sb.append(quoteIfNeeded(text));
+                }
+                sb.append('\n');
+            }
+        }
+        sb.append(getResources().getString(R.string.search_group_relation)).append(' ')
+                .append(getResources().getString(groupOr ? R.string.search_group_or : R.string.search_group_and));
+        return sb.toString();
+    }
+
+    private void showKeywordEditorPreview(List<KeywordItem> items, boolean groupOr) {
+        String expr = buildKeywordQuery(items, groupOr);
+        String explanation = buildKeywordExplanation(items, groupOr);
+        String message;
+        if (items == null || items.isEmpty()) {
+            message = getResources().getString(R.string.search_group_none);
+        } else {
+            message = getResources().getString(R.string.search_group_expression_title) + "\n" + expr
+                    + "\n\n" + getResources().getString(R.string.search_group_explanation_title) + "\n" + explanation;
+        }
+        new AlertDialog.Builder(getContext())
+                .setTitle(R.string.search_group_preview_title)
+                .setMessage(message)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
+        SearchDebugLog.d("SearchBar", "keyword-editor preview:\n" + expr + "\n" + explanation);
     }
 
     public void applySearch(boolean hideKeyboard) {
@@ -719,8 +1153,11 @@ public class SearchBar extends CardView implements View.OnClickListener,
         if (v == mTitleTextView) {
             mHelper.onClickTitle();
         } else if (v == mMenuButton) {
-            // 在搜索状态下，点击菜单按钮切换建议列表的显示/隐藏
-            if (mState == STATE_SEARCH || mState == STATE_SEARCH_LIST) {
+            if (mLeftButtonHistory) {
+                // 恒定功能：左键切换搜索历史列表
+                toggleSearchHistory();
+            } else if (mState == STATE_SEARCH || mState == STATE_SEARCH_LIST) {
+                // 在搜索状态下，点击菜单按钮切换建议列表的显示/隐藏
                 toggleSuggestionsList();
             } else {
                 mHelper.onClickLeftIcon();
@@ -728,7 +1165,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
         } else if (v == mActionButton) {
             mHelper.onClickRightIcon();
         } else if (v == mAdvanceButton) {
-            showKeywordEditor();
+            // 恒定功能：跳转到高级搜索面板
+            mHelper.onClickAdvance();
         }
     }
 
@@ -971,6 +1409,26 @@ public class SearchBar extends CardView implements View.OnClickListener,
         final Bundle state = new Bundle();
         state.putParcelable(STATE_KEY_SUPER, super.onSaveInstanceState());
         state.putInt(STATE_KEY_STATE, mState);
+        if (mKeywordEditorItems != null) {
+            int size = mKeywordEditorItems.size();
+            String[] texts = new String[size];
+            int[] groups = new int[size];
+            boolean[] excluded = new boolean[size];
+            boolean[] groupExcluded = new boolean[size];
+            for (int i = 0; i < size; i++) {
+                KeywordItem item = mKeywordEditorItems.get(i);
+                texts[i] = item.text;
+                groups[i] = item.group;
+                excluded[i] = item.excluded;
+                groupExcluded[i] = item.groupExcluded;
+            }
+            state.putStringArray(STATE_KEY_EDITOR_TEXTS, texts);
+            state.putIntArray(STATE_KEY_EDITOR_GROUPS, groups);
+            state.putBooleanArray(STATE_KEY_EDITOR_EXCLUDED, excluded);
+            state.putBooleanArray(STATE_KEY_EDITOR_GROUP_EXCLUDED, groupExcluded);
+            state.putBoolean(STATE_KEY_EDITOR_GROUP_OR, mKeywordEditorGroupOr);
+            state.putString(STATE_KEY_EDITOR_LAST_QUERY, mKeywordEditorLastQuery);
+        }
         return state;
     }
 
@@ -980,6 +1438,25 @@ public class SearchBar extends CardView implements View.OnClickListener,
             final Bundle savedState = (Bundle) state;
             super.onRestoreInstanceState(savedState.getParcelable(STATE_KEY_SUPER));
             setState(savedState.getInt(STATE_KEY_STATE), false);
+            if (savedState.containsKey(STATE_KEY_EDITOR_TEXTS)) {
+                String[] texts = savedState.getStringArray(STATE_KEY_EDITOR_TEXTS);
+                int[] groups = savedState.getIntArray(STATE_KEY_EDITOR_GROUPS);
+                boolean[] excluded = savedState.getBooleanArray(STATE_KEY_EDITOR_EXCLUDED);
+                boolean[] groupExcluded = savedState.getBooleanArray(STATE_KEY_EDITOR_GROUP_EXCLUDED);
+                if (texts != null) {
+                    mKeywordEditorItems = new ArrayList<>();
+                    for (int i = 0; i < texts.length; i++) {
+                        KeywordItem item = new KeywordItem(texts[i],
+                                groups != null && i < groups.length ? groups[i] : 0,
+                                excluded != null && i < excluded.length && excluded[i]);
+                        item.groupExcluded = groupExcluded != null && i < groupExcluded.length
+                                && groupExcluded[i];
+                        mKeywordEditorItems.add(item);
+                    }
+                    mKeywordEditorGroupOr = savedState.getBoolean(STATE_KEY_EDITOR_GROUP_OR, false);
+                    mKeywordEditorLastQuery = savedState.getString(STATE_KEY_EDITOR_LAST_QUERY);
+                }
+            }
         }
     }
 

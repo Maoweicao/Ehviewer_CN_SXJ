@@ -52,6 +52,8 @@
     <item name="sort_by_rating_desc" type="id"/>
     <item name="sort_by_name_asc" type="id"/>
     <item name="sort_by_name_desc" type="id"/>
+    <item name="sort_by_remaining_pages_asc" type="id"/>
+    <item name="sort_by_remaining_pages_desc" type="id"/>
 
     <item name="navigation_bar_padding_applied" type="id"/>
     <item name="navigation_bar_padding_origin_bottom" type="id"/>

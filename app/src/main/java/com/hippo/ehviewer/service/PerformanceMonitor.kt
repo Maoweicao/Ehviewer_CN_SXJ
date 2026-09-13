@@ -5,6 +5,7 @@ import android.os.Debug
 import android.util.Log
 import com.hippo.ehviewer.AppConfig
 import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.network.NetworkHealthTracker
 import java.io.File
 import java.io.FileWriter
@@ -147,8 +148,13 @@ object PerformanceMonitor {
 
     /**
      * 将快照追加写入磁盘滚动日志（按天轮转 + 自动清理旧文件），确保进程死亡不丢历史。
+     *
+     * 性能监控开关关闭时跳过磁盘写入：看门狗会持续周期性采集快照填充内存环形
+     * 缓冲（性能日志页/资源查看器不受影响），但默认关闭状态下没必要每 10 秒
+     * 产生一次落盘 I/O，以降低后台资源占用。
      */
     private fun writeRollingLog(snapshot: Snapshot) {
+        if (!Settings.getPerformanceMonitorEnabled()) return
         diskExecutor.execute {
             try {
                 val dir = AppConfig.getExternalPerformanceDir() ?: return@execute

@@ -257,4 +257,28 @@
         <attr name="sliderEntryValues" format="reference" />
     </declare-styleable>
 
+    <declare-styleable name="RatingRangeView">
+        <attr name="ratingRangeEnabled" format="boolean" />
+        <attr name="ratingFrom" format="float" />
+        <attr name="ratingTo" format="float" />
+    </declare-styleable>
+
+    <declare-styleable name="FilterSectionCard">
+        <attr name="sectionTitle" format="string" />
+        <attr name="sectionExpanded" format="boolean" />
+        <attr name="sectionCollapsible" format="boolean" />
+    </declare-styleable>
+
+    <declare-styleable name="RangeInputView">
+        <attr name="rangeLabel" format="string" />
+        <attr name="rangeHint" format="string" />
+        <attr name="rangeUnit" format="string" />
+        <attr name="rangeInputType">
+            <enum name="text" value="0" />
+            <enum name="number" value="1" />
+            <enum name="date" value="2" />
+            <enum name="size" value="3" />
+        </attr>
+    </declare-styleable>
+
 </resources>

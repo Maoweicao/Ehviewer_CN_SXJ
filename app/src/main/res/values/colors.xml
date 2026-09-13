@@ -87,6 +87,8 @@
     <color name="deep_green_600">#ff31B404</color>
     <color name="yellow_800">#fff9a825</color>
     <color name="deep_orange_400">#ffff7043</color>
+    <color name="merged_banner_background">#ff8d6e63</color>
+    <color name="merged_banner_foreground">#ffffffff</color>
     <color name="black">#ff000000</color>
     <color name="grey_975">#ff080808</color>
     <color name="grey_950">#ff111111</color>
@@ -228,5 +230,20 @@
 
     <!-- Warning color -->
     <color name="warning_color">#FFFF9800</color>
+
+    <!-- Multi-device relay peer status -->
+    <color name="peer_online">#FF2E7D32</color>
+    <color name="peer_offline">#FF757575</color>
+
+    <!-- Filter section card colors -->
+    <color name="card_background_light">#fff5f5f5</color>
+    <color name="card_background_dark">#ff2a2a2a</color>
+    <color name="card_background_black">#ff1a1a1a</color>
+    <color name="ripple_light">#1f000000</color>
+    <color name="ripple_dark">#1fffffff</color>
+    <color name="ripple_color">#1f000000</color>
+    <color name="edit_text_background">@android:color/transparent</color>
+    <color name="edit_text_background_focused">#1f000000</color>
+    <color name="edit_text_underline">#4d000000</color>
 
 </resources>

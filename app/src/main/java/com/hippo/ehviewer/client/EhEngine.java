@@ -110,8 +110,46 @@ public class EhEngine {
 
     public static EhFilter sEhFilter;
 
+    // ==================== 全局网络并发限流 ====================
+    // EhEngine 的请求全部是同步 call.execute()，不受 OkHttp Dispatcher（仅约束
+    // 异步 enqueue）限制；大规模任务时曾观测到单主机 161 个在飞请求。
+    // 此限流器为同步请求加上全局在飞上限；图片加载（Conaco，异步）与
+    // HATH 直连不受影响。上限可在高级设置中调整并即时生效。
+    private static final int DEFAULT_NETWORK_CONCURRENCY = 64;
+    private static final DynamicNetworkLimiter NETWORK_LIMITER = new DynamicNetworkLimiter(DEFAULT_NETWORK_CONCURRENCY);
+
+    /** 应用启动时按持久化设置初始化限流器 */
     public static void initialize() {
         sEhFilter = EhFilter.getInstance();
+        NETWORK_LIMITER.resize(Settings.getNetworkGlobalConcurrency());
+    }
+
+    /** 全局网络并发上限即时生效（设置页变更时调用） */
+    public static void updateNetworkConcurrencyLimit(int limit) {
+        NETWORK_LIMITER.resize(limit);
+    }
+
+    /** 当前生效的全局网络并发上限（供资源查看器展示） */
+    public static int getNetworkConcurrencyLimit() {
+        return NETWORK_LIMITER.currentLimit();
+    }
+
+    /** 当前许可占用数（在飞 + 等待），供资源查看器展示 */
+    public static int getNetworkLimiterActive() {
+        return NETWORK_LIMITER.activeCount();
+    }
+
+    /**
+     * 在全局并发限流内执行同步请求。
+     * 同步 execute() 本身不可中断，acquire 也使用不可中断语义保持一致。
+     */
+    private static Response executeCallWithLimit(Call call) throws IOException {
+        NETWORK_LIMITER.acquire();
+        try {
+            return call.execute();
+        } finally {
+            NETWORK_LIMITER.release();
+        }
     }
 
     private static void doThrowException(Call call, int code, @Nullable Headers headers,
@@ -200,7 +238,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -283,7 +321,7 @@ public class EhEngine {
         GalleryListParser.Result result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -351,7 +389,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -380,7 +418,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -414,7 +452,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -457,7 +495,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -495,7 +533,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -544,7 +582,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -582,7 +620,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -607,7 +645,7 @@ public class EhEngine {
         int code = -1;
 
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -639,7 +677,7 @@ public class EhEngine {
         FavoritesParser.Result result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -691,7 +729,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -748,7 +786,7 @@ public class EhEngine {
         FavoritesParser.Result result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -782,7 +820,7 @@ public class EhEngine {
         TorrentInfo[] result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -817,7 +855,7 @@ public class EhEngine {
         EhTopListDetail result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -853,7 +891,7 @@ public class EhEngine {
         Pair<String, Pair<String, String>[]> result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -885,7 +923,7 @@ public class EhEngine {
         ArchiverData result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -928,7 +966,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -977,7 +1015,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -992,7 +1030,7 @@ public class EhEngine {
             Request requestContinue = new EhRequestBuilder(continueUrl, origin, null)
                     .build();
             Call callContinue = okHttpClient.newCall(requestContinue);
-            Response responseC = callContinue.execute();
+            Response responseC = executeCallWithLimit(callContinue);
             if (responseC.body() == null) {
                 return null;
             }
@@ -1022,7 +1060,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1051,7 +1089,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1093,7 +1131,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1171,7 +1209,7 @@ public class EhEngine {
         GalleryListParser.Result result;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
 
             Log.d(TAG, "" + response.request().url().toString());
 
@@ -1180,7 +1218,7 @@ public class EhEngine {
                 request = new EhRequestBuilder(response.headers().get("Location"), referer).build();
                 call = okHttpClient.newCall(request);
                 try {
-                    response = call.execute();
+                    response = executeCallWithLimit(call);
                 } catch (Throwable e) {
                     ExceptionUtils.throwIfFatal(e);
                     throwException(call, code, null, null, e);
@@ -1223,7 +1261,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1268,7 +1306,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1296,7 +1334,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1328,7 +1366,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1365,7 +1403,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1393,7 +1431,7 @@ public class EhEngine {
         String body;
         Headers headers = null;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             if (response.body() == null) {
@@ -1426,7 +1464,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;
@@ -1462,7 +1500,7 @@ public class EhEngine {
         Headers headers = null;
         int code = -1;
         try {
-            Response response = call.execute();
+            Response response = executeCallWithLimit(call);
             code = response.code();
             headers = response.headers();
             assert response.body() != null;

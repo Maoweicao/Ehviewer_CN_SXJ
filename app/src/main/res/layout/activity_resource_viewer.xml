@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <!-- 顶部实时资源指标卡 -->
+    <LinearLayout
+        android:id="@+id/resource_summary_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="12dp"
+        android:layout_margin="12dp"
+        android:background="?attr/contentColorPrimary"
+        android:elevation="2dp">
+
+        <TextView
+            android:id="@+id/resource_summary_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp" />
+
+        <TextView
+            android:id="@+id/resource_summary_jvm"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="13sp"
+            android:fontFamily="monospace" />
+
+        <ProgressBar
+            android:id="@+id/resource_summary_jvm_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="100"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="4dp" />
+
+        <TextView
+            android:id="@+id/resource_summary_row1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginTop="2dp" />
+
+        <TextView
+            android:id="@+id/resource_summary_row2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginTop="2dp" />
+
+        <TextView
+            android:id="@+id/resource_summary_network"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginTop="2dp" />
+
+        <TextView
+            android:id="@+id/resource_summary_pools"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:fontFamily="monospace"
+            android:layout_marginTop="2dp" />
+    </LinearLayout>
+
+    <!-- 线程过滤输入框 -->
+    <EditText
+        android:id="@+id/resource_thread_filter"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="12dp"
+        android:hint="@string/resource_viewer_filter_hint"
+        android:inputType="text"
+        android:maxLines="1"
+        android:imeOptions="actionDone"
+        android:textSize="13sp" />
+
+    <!-- 线程计数摘要 -->
+    <TextView
+        android:id="@+id/resource_thread_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="4dp"
+        android:textSize="12sp"
+        android:textColor="?android:textColorSecondary" />
+
+    <!-- 线程列表 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/resource_thread_recycler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingHorizontal="12dp"
+        android:paddingBottom="12dp" />
+
+    <!-- 空态提示 -->
+    <TextView
+        android:id="@+id/resource_empty_hint"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
+        android:text="@string/resource_viewer_no_threads"
+        android:textSize="14sp"
+        android:textColor="?android:textColorSecondary"
+        android:visibility="gone" />
+
+</LinearLayout>

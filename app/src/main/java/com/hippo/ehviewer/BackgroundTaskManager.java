@@ -76,14 +76,14 @@ public class BackgroundTaskManager {
     private final ThreadPoolExecutor mCpuExecutor;
     
     // 数据库操作单线程执行器（确保数据库操作串行化）
-    private final ExecutorService mDbExecutor;
-    
+    private final ThreadPoolExecutor mDbExecutor;
+
     // IO密集型任务线程池（用于网络或文件IO）
     private final ThreadPoolExecutor mIoExecutor;
     private volatile int mBackgroundConcurrentTasks;
-    
+
     // 网络线程池（专门用于与Eh交互）
-    private final ExecutorService mNetworkExecutor;
+    private final ThreadPoolExecutor mNetworkExecutor;
     
     private NotificationManager mNotificationManager;
     private boolean mForegroundServiceRunning = false;
@@ -202,14 +202,19 @@ public class BackgroundTaskManager {
                 new LinkedBlockingQueue<>(),
                 new PriorityThreadFactory("BgTask-CPU", Process.THREAD_PRIORITY_DEFAULT)
         );
-        
+
         // 数据库执行器：单线程确保数据库操作串行化
-        mDbExecutor = Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "BackgroundTaskManager-DB");
-            thread.setPriority(Thread.MIN_PRIORITY);
-            return thread;
-        });
-        
+        mDbExecutor = new ThreadPoolExecutor(
+                1, 1,
+                60L, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(),
+                r -> {
+                    Thread thread = new Thread(r, "BackgroundTaskManager-DB");
+                    thread.setPriority(Thread.MIN_PRIORITY);
+                    return thread;
+                }
+        );
+
         // IO密集型任务线程池（用于文件IO、网络请求等）
         // 使用可配置并发和有界队列，避免后台任务无限堆积导致资源耗尽
         mBackgroundConcurrentTasks = Settings.getBackgroundConcurrentTasks();
@@ -224,7 +229,7 @@ public class BackgroundTaskManager {
                     return thread;
                 }
         );
-        
+
         // 网络线程池：专门用于与Eh交互
         int networkCorePoolSize = Math.max(2, cpuCount / 2);
         int networkMaxPoolSize = cpuCount;
@@ -239,6 +244,15 @@ public class BackgroundTaskManager {
                     return thread;
                 }
         );
+
+        // 线程池空闲回收：核心线程也纳入 keepAlive（60s）管理。
+        // 此前三池核心线程永不销毁，空闲时也常驻 max(2,cpuCount)+并发数+网络池
+        // 级别的线程（每线程约 1MB 栈预留 + 调度开销）；开启后空闲 60 秒自动
+        // 回收，来任务时按需重建，显著降低后台资源占用。
+        // DB 单线程池保持核心线程常驻（高频使用，避免反复重建）。
+        mCpuExecutor.allowCoreThreadTimeOut(true);
+        mIoExecutor.allowCoreThreadTimeOut(true);
+        mNetworkExecutor.allowCoreThreadTimeOut(true);
         
         // 初始化通知通道
         initNotificationChannel();
@@ -808,6 +822,28 @@ public class BackgroundTaskManager {
     }
 
     /**
+     * 描述各线程池当前状态（active/pool/queue/completed），
+     * 供资源查看器实时展示与线程列表导出使用，方便后续进行资源优化。
+     */
+    public String describeExecutorStats() {
+        StringBuilder sb = new StringBuilder();
+        appendExecutorStats(sb, "CPU", mCpuExecutor);
+        appendExecutorStats(sb, "IO", mIoExecutor);
+        appendExecutorStats(sb, "DB", mDbExecutor);
+        appendExecutorStats(sb, "NET", mNetworkExecutor);
+        return sb.toString().trim();
+    }
+
+    private static void appendExecutorStats(@NonNull StringBuilder sb, @NonNull String name,
+                                            @NonNull ThreadPoolExecutor pool) {
+        sb.append(name).append("[active=").append(pool.getActiveCount())
+                .append(",pool=").append(pool.getPoolSize())
+                .append(",queue=").append(pool.getQueue().size())
+                .append(",completed=").append(pool.getCompletedTaskCount())
+                .append("] ");
+    }
+
+    /**
      * 暂停指定任务
      */
     public boolean pauseTask(@NonNull String taskId) {
@@ -925,7 +961,15 @@ public class BackgroundTaskManager {
                 if (params.containsKey("deleteFiles")) {
                     deleteFiles = params.getBooleanValue("deleteFiles");
                 }
-                return new com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask(mContext, dm, gidList, deleteFiles, null);
+                // 从数据库加载 DownloadInfo（恢复任务时内存中可能已无）
+                List<DownloadInfo> infoList = new ArrayList<>();
+                for (int i = 0; i < gidList.size(); i++) {
+                    DownloadInfo info = EhDB.getDownloadInfo(gidList.get(i));
+                    if (info != null) {
+                        infoList.add(info);
+                    }
+                }
+                return new com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask(mContext, dm, infoList, deleteFiles, null);
             }
             if ("com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask".equals(className)) {
                 List<DownloadInfo> infos = new ArrayList<>();
@@ -988,13 +1032,25 @@ public class BackgroundTaskManager {
             try {
                 DownloadedFileManager manager = DownloadedFileManager.getInstance();
                 manager.scanDownloadDirectories(new DownloadedFileManagerScanListener() {
+                    // UI 进度回调节流间隔：文件很多时每个文件回调一次，
+                    // 全部转发主线程会洪泛 UI 线程（ANR 诱因）。
+                    private final long UI_PROGRESS_INTERVAL_MS = 300L;
+                    private long mLastUiProgressAt = 0L;
+
                     @Override
                     public void onProgress(final int current, final int total) {
                         mDownloadLogger.logBackgroundTaskProgress("ScanDownload", "扫描下载文件", current, total);
                         
-                        // 更新任务进度
+                        // 更新任务进度（BackgroundTaskStatusManager 内部已做通知/UI 节流）
                         mTaskStatusManager.updateTaskProgress(taskId, current, total);
                         
+                        // 到达终点时必发，保证最终回调不丢
+                        boolean isFinal = total > 0 && current >= total;
+                        long now = android.os.SystemClock.uptimeMillis();
+                        if (!isFinal && now - mLastUiProgressAt < UI_PROGRESS_INTERVAL_MS) {
+                            return;
+                        }
+                        mLastUiProgressAt = now;
                         runOnUiThread(() -> {
                             if (progressListener != null) {
                                 progressListener.onProgress(current, total);

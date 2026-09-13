@@ -14,10 +14,13 @@
         android:id="@+id/hintView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"
+        android:layout_marginBottom="2dp"
         android:textAppearance="?attr/textAppearanceListItemSmall"
         android:textColor="?android:attr/textColorPrimary"
-        android:textSize="@dimen/text_little_small" />
+        android:textSize="@dimen/text_little_small"
+        android:textStyle="bold"
+        android:singleLine="true"
+        android:maxLines="1" />
 
     <TextView
         android:id="@+id/textView"
@@ -25,6 +28,8 @@
         android:layout_height="wrap_content"
         android:textAppearance="?attr/textAppearanceListItemSmall"
         android:textColor="?android:attr/textColorSecondary"
-        android:textSize="@dimen/text_small" />
+        android:textSize="@dimen/text_super_small"
+        android:singleLine="true"
+        android:maxLines="1" />
 
 </LinearLayout>

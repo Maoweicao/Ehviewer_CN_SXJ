@@ -27,6 +27,7 @@ import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.client.data.Tag;
+import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.util.ExceptionUtils;
 import com.hippo.util.IoThreadPoolExecutor;
 import com.hippo.util.TextUrl;
@@ -44,9 +45,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -77,7 +80,12 @@ public class EhTagDatabase {
     }
 
     public String getTranslation(String tag) {
-        return search(tags, tag.getBytes(TextUrl.UTF_8));
+        long start = System.nanoTime();
+        String result = search(tags, tag.getBytes(TextUrl.UTF_8));
+        long ms = (System.nanoTime() - start) / 1_000_000L;
+        SearchDebugLog.d("EhTagDB", "getTranslation('" + tag + "') -> '" + result + "' (" + ms + "ms)"
+                + "  Pseudo-SQL: SELECT translation FROM tags WHERE english = '" + tag + "' LIMIT 1");
+        return result;
     }
 
     private List<Tag> initTagList(String sourceString) {
@@ -436,7 +444,14 @@ public class EhTagDatabase {
     }
 
     public List<Pair<String, String>> suggest(String keyword) {
-        return searchTag(tagList, keyword);
+        long start = System.nanoTime();
+        List<Pair<String, String>> result = searchTag(tagList, keyword);
+        long ms = (System.nanoTime() - start) / 1_000_000L;
+        SearchDebugLog.d("EhTagDB", "suggest('" + keyword + "') -> " + result.size() + " matches in " + ms + "ms"
+                + "  Pseudo-SQL: SELECT english, chinese FROM tags"
+                + " WHERE LOWER(english) LIKE '%" + keyword.toLowerCase(Locale.ROOT) + "%'"
+                + " OR chinese LIKE '%" + keyword + "%' LIMIT 40");
+        return result;
     }
 
     private boolean containsCJK(String s) {
@@ -480,41 +495,149 @@ public class EhTagDatabase {
                 || block == Character.UnicodeBlock.ENCLOSED_CJK_LETTERS_AND_MONTHS;
     }
 
+    /**
+     * 全表扫描匹配。
+     *
+     * <p>匹配规则（不再只是前缀）：</p>
+     * <ul>
+     *   <li>英文（不区分大小写）：精确 &gt; 前缀 &gt; 子串</li>
+     *   <li>中文（翻译列）：精确 &gt; 前缀 &gt; 子串</li>
+     *   <li>CJK 输入（中文/日文/韩文）时中文翻译优先，否则英文优先</li>
+     * </ul>
+     *
+     * <p>结果按优先级分桶排序，最多返回 40 条。翻译列为 "null" 的（无翻译）不参与中文匹配。</p>
+     */
     private List<Pair<String, String>> searchTag(List<Tag> tags, String keyword) {
+        if (keyword == null || keyword.isEmpty()) {
+            return new ArrayList<>();
+        }
         boolean isCJK = containsCJK(keyword);
-        List<Pair<String, String>> chineseMatchList = new ArrayList<>();
-        List<Pair<String, String>> englishMatchList = new ArrayList<>();
-        int total = 0;
+        String lowerKw = keyword.toLowerCase(Locale.ROOT);
+
+        List<Pair<String, String>> exactEn = new ArrayList<>();
+        List<Pair<String, String>> exactZh = new ArrayList<>();
+        List<Pair<String, String>> prefixEn = new ArrayList<>();
+        List<Pair<String, String>> prefixZh = new ArrayList<>();
+        List<Pair<String, String>> subEn = new ArrayList<>();
+        List<Pair<String, String>> subZh = new ArrayList<>();
+
+        int scanned = 0;
         for (Tag tag : tags) {
-            if (total >= 80) {
-                break;
-            }
-            // Tag.involve() is "english contains OR chinese contains", so if it returns
-            // true at least one of chineseMatch / englishMatch will also be true.
-            if (tag.involve(keyword)) {
-                boolean chineseMatch = tag.chinese.contains(keyword);
-                boolean englishMatch = tag.english.contains(keyword);
-                if (chineseMatch && !"null".equals(tag.chinese)) {
-                    chineseMatchList.add(new Pair<>(tag.chinese, tag.english));
-                } else if (englishMatch) {
-                    englishMatchList.add(new Pair<>(tag.chinese, tag.english));
-                }
-                total++;
+            scanned++;
+            String english = tag.english == null ? "" : tag.english;
+            String chinese = (tag.chinese == null || "null".equals(tag.chinese)) ? "" : tag.chinese;
+            String englishLower = english.toLowerCase(Locale.ROOT);
+
+            Pair<String, String> p = new Pair<>(chinese, english);
+            if (englishLower.equals(lowerKw)) {
+                exactEn.add(p);
+            } else if (!chinese.isEmpty() && chinese.equals(keyword)) {
+                exactZh.add(p);
+            } else if (!englishLower.isEmpty() && englishLower.startsWith(lowerKw)) {
+                prefixEn.add(p);
+            } else if (!chinese.isEmpty() && chinese.startsWith(keyword)) {
+                prefixZh.add(p);
+            } else if (!englishLower.isEmpty() && englishLower.contains(lowerKw)) {
+                subEn.add(p);
+            } else if (!chinese.isEmpty() && chinese.contains(keyword)) {
+                subZh.add(p);
             }
         }
-        // For CJK queries we surface Chinese-translation matches first, followed by
-        // English fallbacks. For non-CJK we still want Chinese translations that happen
-        // to contain the ASCII keyword to lead (rare but useful, e.g. "scanlation").
-        List<Pair<String, String>> searchList = new ArrayList<>(chineseMatchList.size() + englishMatchList.size());
+
+        // 按输入类型决定优先级：CJK -> 中文翻译优先；否则英文优先
+        List<Pair<String, String>> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
         if (isCJK) {
-            searchList.addAll(chineseMatchList);
-            searchList.addAll(englishMatchList);
+            appendBucket(result, seen, exactZh, 40);
+            appendBucket(result, seen, exactEn, 40);
+            appendBucket(result, seen, prefixZh, 40);
+            appendBucket(result, seen, prefixEn, 40);
+            appendBucket(result, seen, subZh, 40);
+            appendBucket(result, seen, subEn, 40);
         } else {
-            searchList.addAll(chineseMatchList);
-            searchList.addAll(englishMatchList);
+            appendBucket(result, seen, exactEn, 40);
+            appendBucket(result, seen, exactZh, 40);
+            appendBucket(result, seen, prefixEn, 40);
+            appendBucket(result, seen, prefixZh, 40);
+            appendBucket(result, seen, subEn, 40);
+            appendBucket(result, seen, subZh, 40);
         }
-        return searchList.subList(0, Math.min(searchList.size(), 40));
+
+        SearchDebugLog.d("EhTagDB", "searchTag() scanned=" + scanned
+                + " exactEn=" + exactEn.size() + " exactZh=" + exactZh.size()
+                + " prefixEn=" + prefixEn.size() + " prefixZh=" + prefixZh.size()
+                + " subEn=" + subEn.size() + " subZh=" + subZh.size()
+                + " -> returned " + result.size());
+        return result;
     }
+
+    private static void appendBucket(List<Pair<String, String>> out, Set<String> seen,
+            List<Pair<String, String>> bucket, int cap) {
+        for (Pair<String, String> p : bucket) {
+            if (out.size() >= cap) {
+                return;
+            }
+            if (seen.contains(p.second)) {
+                continue;
+            }
+            seen.add(p.second);
+            out.add(p);
+        }
+    }
+
+    /**
+     * 高级搜索标签组用：把用户输入（可能是中文翻译、英文全名或前缀）解析成规范英文 tag key。
+     *
+     * <p>匹配顺序：英文精确 &gt; 中文精确 &gt; 英文子串 &gt; 中文子串。
+     * 找到则返回英文 key（如 {@code parody:arknights}），否则返回 {@code null} 表示按原文使用。</p>
+     *
+     * @param term 用户输入的一个词（不含空格，可能带 namespace 前缀）
+     */
+    @Nullable
+    public String resolveTagTerm(String term) {
+        if (term == null) {
+            return null;
+        }
+        String t = term.trim();
+        if (t.isEmpty()) {
+            return null;
+        }
+        String lower = t.toLowerCase(Locale.ROOT);
+        long start = System.nanoTime();
+
+        for (Tag tag : tagList) {
+            String english = tag.english == null ? "" : tag.english;
+            if (english.toLowerCase(Locale.ROOT).equals(lower)) {
+                SearchDebugLog.d("EhTagDB", "resolveTagTerm('" + t + "') -> exactEn '" + english + "'");
+                return english;
+            }
+        }
+        for (Tag tag : tagList) {
+            String chinese = (tag.chinese == null || "null".equals(tag.chinese)) ? "" : tag.chinese;
+            if (chinese.equals(t)) {
+                SearchDebugLog.d("EhTagDB", "resolveTagTerm('" + t + "') -> exactZh '" + tag.english + "'");
+                return tag.english;
+            }
+        }
+        for (Tag tag : tagList) {
+            String english = tag.english == null ? "" : tag.english;
+            if (english.toLowerCase(Locale.ROOT).contains(lower)) {
+                SearchDebugLog.d("EhTagDB", "resolveTagTerm('" + t + "') -> english substring '" + english + "'");
+                return english;
+            }
+        }
+        for (Tag tag : tagList) {
+            String chinese = (tag.chinese == null || "null".equals(tag.chinese)) ? "" : tag.chinese;
+            if (chinese.contains(t)) {
+                SearchDebugLog.d("EhTagDB", "resolveTagTerm('" + t + "') -> chinese substring '" + tag.english + "'");
+                return tag.english;
+            }
+        }
+        long ms = (System.nanoTime() - start) / 1_000_000L;
+        SearchDebugLog.d("EhTagDB", "resolveTagTerm('" + t + "') -> no match (" + ms + "ms), will keep raw text");
+        return null;
+    }
+
     public List<Tag> getTagList() {
         return tagList;
     }

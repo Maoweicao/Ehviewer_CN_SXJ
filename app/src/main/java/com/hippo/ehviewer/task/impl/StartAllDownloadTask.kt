@@ -51,8 +51,6 @@ class StartAllDownloadTask(context: Context) : BaseBackgroundTask(context) {
             updateProgress(5, context.getString(R.string.start_all_download_starting, totalCount))
             delay(500)
             
-            DownloadService.startAllDownloads(context)
-
             // 使用 DownloadManager 的 startAllDownload 方法
             downloadManager.startAllDownload()
             

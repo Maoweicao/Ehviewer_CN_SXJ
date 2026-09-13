@@ -8,19 +8,22 @@ import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.data.GalleryInfo;
+import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask;
 import com.hippo.lib.yorozuya.collect.LongList;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 下载画廊删除的统一入口。
  *
- * 前台删除只提交后台任务（DeleteRangeDownloadTask），由后台任务依次完成：
- *  1. 写入 Download_history 表
- *  2. 删除数据库记录
- *  3. 清理本地文件（deleteFiles=true 复用清理冗余逻辑永久删除；
- *     deleteFiles=false 将画廊目录移入回收站 .recycle_bin）
+ * 删除流程全部由后台任务（DeleteRangeDownloadTask）完成：
+ *  1. 确认被移除的画廊是否存在于下载历史中，如果不存在补充下载历史表
+ *  2. 从数据库中的下载表中移除对应条目
+ *  3. 如果勾选了删除图像文件直接删除，否则移动文件夹到回收站中
+ *
+ * 前台仅负责：收集 DownloadInfo、从内存列表移除（即时刷新 UI）、提交后台任务。
  */
 public final class DownloadDeleteHelper {
 
@@ -94,12 +97,31 @@ public final class DownloadDeleteHelper {
         submitDeleteTask(context, dm, gidList, deleteFiles);
     }
 
+    /**
+     * 提交删除后台任务。
+     *
+     * 流程：
+     *  1. 先收集 DownloadInfo 对象（此时仍在 DownloadManager 内存中）
+     *  2. 从 DownloadManager 内存列表中移除（即时刷新 UI，不再显示在下载列表中）
+     *  3. 提交后台任务，由后台依次完成：补充下载历史 → 删除数据库记录 → 清理本地文件
+     */
     private static void submitDeleteTask(Context context, DownloadManager dm, LongList gidList, boolean deleteFiles) {
-        // 立即从内存列表和数据库中移除画廊，让用户能即时看到效果
-        // 后台任务将负责写入下载历史和清理本地文件
-        dm.deleteRangeDownload(gidList);
+        // 第 1 步：收集 DownloadInfo 对象（必须在移除前完成）
+        List<DownloadInfo> infoList = new ArrayList<>(gidList.size());
+        for (int i = 0, n = gidList.size(); i < n; i++) {
+            long gid = gidList.get(i);
+            DownloadInfo info = dm.getDownloadInfo(gid);
+            if (info != null) {
+                infoList.add(info);
+            }
+        }
 
-        DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(context, dm, gidList, deleteFiles, null);
+        // 第 2 步：从 DownloadManager 内存列表中移除（即时刷新 UI）
+        // 不调用 deleteRangeDownload，因为数据库记录由后台任务按步骤删除
+        dm.removeFromMemoryRange(gidList);
+
+        // 第 3 步：提交后台任务（携带 DownloadInfo 列表，后台任务可正常访问）
+        DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(context, dm, infoList, deleteFiles, null);
         BackgroundTaskManager.getInstance().submitBackgroundTask(task);
     }
 }

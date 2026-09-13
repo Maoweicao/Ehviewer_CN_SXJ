@@ -100,6 +100,35 @@
 
     </LinearLayout>
 
+    <LinearLayout
+        android:id="@+id/scanning_panel"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <ImageView
+            android:id="@+id/scan_animation"
+            android:layout_width="140dp"
+            android:layout_height="140dp"
+            android:src="@drawable/progressive_scan_sweep_anim"
+            android:tint="?attr/colorPrimary"
+            android:alpha="0.7"
+            android:contentDescription="@string/progressive_scan_animation_label" />
+
+        <TextView
+            android:id="@+id/scan_animation_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/progressive_scan_animation_label"
+            android:textSize="15sp"
+            android:textColor="?android:attr/textColorSecondary" />
+
+    </LinearLayout>
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_view"
         android:layout_width="match_parent"

@@ -52,7 +52,7 @@ import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.data.EhNewsDetail;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
-import com.hippo.ehviewer.download.ArchiverDownloader;
+import com.hippo.ehviewer.download.ArchiverDownloadCompleter;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
@@ -177,7 +177,7 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
-        ArchiverDownloader.resumePending(this);
+        ArchiverDownloadCompleter.resumePendingDownloads(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
         AppConfig.initialize(this);
@@ -283,6 +283,33 @@ public class EhApplication extends RecordingApplication {
         }
         if (null != mGalleryDetailCache) {
             mGalleryDetailCache.evictAll();
+        }
+    }
+
+    /**
+     * 包装版 [clearMemoryCache]：出错时不抛异常，确保调用方逻辑顺畅。
+     * 供后台线程在 OOM 风险高时调用。
+     */
+    public static void clearMemoryCacheSafely() {
+        try {
+            if (instance != null) {
+                instance.clearMemoryCache();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * Called when network changes to flush connections and DNS cache.
+     */
+    public static void onNetworkChanged() {
+        try {
+            OkHttpClient client = getOkHttpClient(instance);
+            if (client != null) {
+                client.connectionPool().evictAll();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to flush connections on network change", e);
         }
     }
 
@@ -609,6 +636,29 @@ public class EhApplication extends RecordingApplication {
             application.mDownloadManager = new DownloadManager(application);
         }
         return application.mDownloadManager;
+    }
+
+    /**
+     * 当前存活的 Activity 数量。供性能监控/资源查看器使用。
+     */
+    public int getActiveActivityCount() {
+        return mActivityList == null ? 0 : mActivityList.size();
+    }
+
+    /**
+     * 当前正在下载（STATE_DOWNLOAD / STATE_RELAY_DOWNLOAD）的画廊数量。
+     */
+    public int getDownloadingCount() {
+        DownloadManager dm = mDownloadManager;
+        return dm == null ? 0 : dm.getDownloadingCount();
+    }
+
+    /**
+     * 当前等待队列（STATE_WAIT）中的画廊数量。
+     */
+    public int getWaitingCount() {
+        DownloadManager dm = mDownloadManager;
+        return dm == null ? 0 : dm.getWaitingCount();
     }
 
     @NonNull

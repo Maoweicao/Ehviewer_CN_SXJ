@@ -1,0 +1,11 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <!-- A 60-degree "radar sweep" wedge, centered at 50,50. Tinted via the
+         ImageView so it adapts to light/dark theme colorPrimary. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,50 L50,12 A38,38 0 0 1 82.9,31 Z" />
+</vector>

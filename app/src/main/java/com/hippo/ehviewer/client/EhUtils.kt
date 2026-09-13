@@ -279,6 +279,255 @@ object EhUtils {
         })
     }
 
+    // 整段标记匹配则整个丢弃，例如 [AI Generated]、[Digital]、[English Translation]
+    private val NOISE_MARKER_PATTERNS: List<Regex> = listOf(
+        Regex("(?i)ai-generated|ai generated|ai art|full color|english translation|scanlation|complete ver|preview|sample|update|digital"),
+        Regex("AI翻译|机翻|汉化|无修|无修正|DL版|完全版")
+    )
+
+    // 批次/章节数字标记：P3、Vol.2、Part 1、Ch.5、No.12...
+    private val PATTERN_SEQUENCE: Regex = Regex(
+        "(?i)^(?:v(?:ol)?\\.?|p(?:art)?\\.?|ch(?:apter)?\\.?|no\\.?|ep(?:isode)?\\.?|volume|part|chapter)?\\d+$"
+    )
+
+    // 弱区分度的英文停用词，作为正文词保留对相似搜索无益
+    private val STOP_WORDS: Set<String> = setOf(
+        "the", "a", "an", "of", "and", "or", "in", "on", "for", "with", "to", "at", "no"
+    )
+
+    private fun isNoiseMarker(text: String): Boolean {
+        return NOISE_MARKER_PATTERNS.any { it.containsMatchIn(text) }
+    }
+
+    private fun isSequenceToken(token: String): Boolean {
+        return PATTERN_SEQUENCE.matches(token)
+    }
+
+    private fun appendSearchToken(parts: MutableList<String>, token: String) {
+        val t = token.trim()
+        if (t.isEmpty()) return
+        // 含空白或常见分隔符的整体词加引号，保持作者名等整体语义
+        if (t.any { it.isWhitespace() } || t.any { it == '/' || it == '.' || it == ',' }) {
+            parts.add("\"$t\"")
+        } else {
+            parts.add(t)
+        }
+    }
+
+    /**
+     * 宽松提取相似画廊搜索关键词（用于“相似画廊”检索）。
+     * - 括号/花括号等包裹的内容整体保留并自动加引号（作者名等），整段为噪声标记时丢弃
+     * - 过滤 [AI Generated]、[Digital]、汉化、无修 等标记
+     * - 过滤批次/章节数字（P3、Vol.2、Part 1、Ch.5...）
+     * - 保留正文有效词语，去掉英文停用词
+     *
+     * 示例: "( KANTEIA ART ) IMAGE SET SOCIAL MEDIA P3 [AI Generated]"
+     *   -> "KANTEIA ART" IMAGE SET SOCIAL MEDIA
+     */
+    @JvmStatic
+    fun extractSearchKeywords(title: String?): String? {
+        if (title == null) return null
+        val parts = ArrayList<String>()
+
+        // Step 1: 括号内容整体保留
+        val matcher = PATTERN_BRACKET_CONTENT.matcher(title)
+        while (matcher.find()) {
+            for (i in 1..5) {
+                val group = matcher.group(i) ?: continue
+                val trimmed = group.trim()
+                if (trimmed.isEmpty() || isNoiseMarker(trimmed)) continue
+                appendSearchToken(parts, trimmed)
+            }
+        }
+
+        // Step 2: 括号之间保留正文词
+        var remaining = PATTERN_BRACKET_CONTENT.matcher(title).replaceAll(" ").trim()
+        remaining = remaining.replace(Regex("[\\[\\]\\(\\)（）\\{\\}~]"), " ")
+        for (part in remaining.split(Regex("[\\s|\\-_/]+"))) {
+            val t = part.trim()
+            if (t.isEmpty() || isNoiseToken(t) || isSequenceToken(t)) continue
+            if (STOP_WORDS.contains(t.lowercase())) continue
+            appendSearchToken(parts, t)
+        }
+
+        if (parts.isEmpty()) return null
+        return parts.joinToString(" ")
+    }
+
+    // 下载目录名前缀：gid - 标题。例如 "12345 - [Artist] Title"
+    private val PATTERN_GID_PREFIX: Regex = Regex("""^\d+\s*-\s*""")
+
+    // 展会前缀：(C93) / （C93） / [C93] / ［C93］
+    private val PATTERN_EXHIBITION: Regex = Regex(
+        """^[（(\[［]\s*[Cc][0-9]{1,3}\s*[）)\]\］]\s*"""
+    )
+
+    // 平台前缀（方括号或裸词形式）
+    private val PATTERN_PLATFORM_BRACKET: Regex = Regex(
+        """^[\[［]\s*(?:pixiv|twitter|fanbox|fantia|skeb|patreon)[^\]］]*[\]］]\s*""",
+        RegexOption.IGNORE_CASE
+    )
+    private val PATTERN_PLATFORM_BARE: Regex = Regex(
+        """^(?:pixiv|twitter|fanbox|fantia|skeb|patreon)\s+""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // CJK 区间：汉字、平假名、片假名追加假名、谚文
+    private fun isCjk(c: Char): Boolean {
+        return c in '\u4e00'..'\u9fff' || c in '\u3040'..'\u30ff' ||
+                c in '\u31f0'..'\u31ff' || c in '\uac00'..'\ud7af'
+    }
+
+    private fun hasCJK(text: String): Boolean {
+        return text.any { isCjk(it) }
+    }
+
+    private fun cleanArtistName(raw: String): String? {
+        var s = raw.trim().trim(' ', '\t', ',', ';', '·', '-', '|', '（', '）')
+        s = s.trim()
+        if (s.isEmpty() || s.length > 40) return null
+        if (isNoiseMarker(s)) return null
+        return s
+    }
+
+    private fun stripPlatformPrefix(text: String): String {
+        var t = text
+        var changed: Boolean
+        do {
+            changed = false
+            val afterBracket = PATTERN_PLATFORM_BRACKET.replaceFirst(t, "").trim()
+            if (afterBracket != t) {
+                t = afterBracket
+                changed = true
+            }
+            val afterBare = PATTERN_PLATFORM_BARE.replaceFirst(t, "").trim()
+            if (afterBare != t) {
+                t = afterBare
+                changed = true
+            }
+        } while (changed)
+        return t
+    }
+
+    /**
+     * 从单个标题/目录名文本中提取作者名。
+     * 规则：gid 前缀 → 展会前缀 → 平台前缀 → Patreon artist- → 首括号 [X (Y)]
+     * 外层拉丁且内层全 CJK 时取外层（如 Abyonus(アビョノス)→Abyonus） → 正文
+     * por/by（取后）、·（仅左侧非 CJK）、" - "（左侧非 CJK 且不超过 5 个词）。
+     * 噪声/序列标记（isNoiseMarker/PATTERN_SEQUENCE）会被跳过，歧义时返回 null。
+     */
+    private fun extractArtistFromTitle(input: String): String? {
+        var text = input.trim()
+        if (text.isEmpty()) return null
+
+        // gid 前缀：12345 - [Artist] Title
+        text = PATTERN_GID_PREFIX.replaceFirst(text, "").trim()
+        if (text.isEmpty()) return null
+
+        // 展会前缀：(C93)、[C93] 等
+        text = PATTERN_EXHIBITION.replaceFirst(text, "").trim()
+        if (text.isEmpty()) return null
+
+        // 平台前缀：[Pixiv]、Pixiv 等
+        text = stripPlatformPrefix(text)
+        if (text.isEmpty()) return null
+
+        // Patreon artist- XXX / artist: XXX
+        val patreon = Regex("""(?i)^\s*artist\s*[-:]\s*(.+)$""").find(text)
+        if (patreon != null) {
+            return cleanArtistName(patreon.groupValues[1])
+        }
+
+        // 正文 por/by：取右侧
+        val porBy = Regex("""(?i)\s+(?:por|by)\s+([A-Za-z\u00C0-\u024F][^,;]*)$""").find(text)
+        if (porBy != null) {
+            val right = porBy.groupValues[1].trim()
+            if (right.isNotEmpty() && !hasCJK(right) && right.length <= 30) {
+                return cleanArtistName(right)
+            }
+        }
+
+        // 首个有效括号内容
+        val matcher = PATTERN_BRACKET_CONTENT.matcher(text)
+        while (matcher.find()) {
+            for (i in 1..5) {
+                val content = matcher.group(i) ?: continue
+                val trimmed = content.trim()
+                if (trimmed.isEmpty() || isNoiseMarker(trimmed)) continue
+                if (PATTERN_SEQUENCE.matches(trimmed)) continue
+                if (trimmed.all { it.isDigit() }) continue
+                val innerMatcher = Regex("""\(([^()]*)\)""").find(trimmed)
+                if (innerMatcher != null) {
+                    val inner = innerMatcher.groupValues[1].trim()
+                    val outer = (trimmed.substring(0, innerMatcher.range.first) +
+                            trimmed.substring(innerMatcher.range.last + 1)).trim()
+                    val outerHasLatin = outer.isNotEmpty() && outer.any { isAlphaNumeric(it) }
+                    val innerHasCJK = inner.isNotEmpty() && hasCJK(inner)
+                    val candidate = if (outerHasLatin && innerHasCJK) outer else inner
+                    val artist = cleanArtistName(candidate)
+                    if (artist != null) {
+                        return artist
+                    }
+                } else {
+                    val artist = cleanArtistName(trimmed)
+                    if (artist != null) {
+                        return artist
+                    }
+                }
+            }
+        }
+
+        // 括号被移除后的正文
+        var remaining = PATTERN_BRACKET_CONTENT.matcher(text).replaceAll(" ").trim()
+        remaining = remaining.replace(Regex("""[\[\]()（）{}~]"""), " ").trim()
+        if (remaining.isEmpty()) return null
+
+        // · 分割：左侧非 CJK
+        val dotIndex = remaining.indexOf('·')
+        if (dotIndex > 0) {
+            val left = remaining.substring(0, dotIndex).trim()
+            if (left.isNotEmpty() && !hasCJK(left) && left.length <= 30) {
+                return cleanArtistName(left)
+            }
+        }
+
+        // " - " 分割：左侧非 CJK 且不超过 5 个词
+        val dashMatch = Regex("""^(.+?)\s*-\s*""").find(remaining)
+        if (dashMatch != null) {
+            val left = dashMatch.groupValues[1].trim()
+            if (left.isNotEmpty() && !hasCJK(left) &&
+                    left.split(Regex("""\s+""")).size <= 5) {
+                return cleanArtistName(left)
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * 从标题、日文原标题与下载目录名中可靠地提取作者名，供"按作者搜索相似画廊"使用。
+     */
+    @JvmStatic
+    fun extractArtistName(title: String?, titleJpn: String?, downloadDirname: String?): String? {
+        val candidates = ArrayList<String>()
+        if (!title.isNullOrEmpty()) {
+            candidates.add(title)
+        }
+        if (!titleJpn.isNullOrEmpty() && titleJpn != title) {
+            candidates.add(titleJpn)
+        }
+        if (!downloadDirname.isNullOrEmpty()) {
+            candidates.add(downloadDirname)
+        }
+        for (candidate in candidates) {
+            val artist = extractArtistFromTitle(candidate)
+            if (artist != null) {
+                return artist
+            }
+        }
+        return null
+    }
+
     @JvmStatic
     fun handleThumbUrlResolution(url: String?): String? {
         if (null == url) {

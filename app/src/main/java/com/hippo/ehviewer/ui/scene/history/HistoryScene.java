@@ -54,6 +54,7 @@ import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.client.MergedGalleryChecker;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.HistoryInfo;
 import com.hippo.ehviewer.ui.CommonOperations;
@@ -75,6 +76,9 @@ import com.hippo.lib.yorozuya.AssertUtils;
 import com.hippo.lib.yorozuya.ViewUtils;
 
 import org.greenrobot.greendao.query.LazyList;
+
+import java.util.ArrayList;
+import java.util.List;
 
 
 public class HistoryScene extends ToolbarScene
@@ -279,24 +283,45 @@ public class HistoryScene extends ToolbarScene
         }
 
         final GalleryInfo gi = mLazyList.get(position);
+
+        MergedGalleryChecker.check(context, gi, target -> showLongClickDialog(gi, activity, target));
+        return true;
+    }
+
+    private void showLongClickDialog(final GalleryInfo gi, final MainActivity activity,
+                                     @Nullable MergedGalleryChecker.MergedTarget mergedTarget) {
+        final Context context = getEHContext();
+        if (null == context || null == getDialogContext()) {
+            return;
+        }
+
+        List<String> items = new ArrayList<>();
+        final String downloadLabel = context.getString(R.string.download);
+        final String favouriteLabel = context.getString(R.string.add_to_favourites);
+        items.add(downloadLabel);
+        items.add(favouriteLabel);
+        final String jumpLabel;
+        if (mergedTarget != null) {
+            jumpLabel = context.getString(R.string.jump_to_merged_gallery);
+            items.add(jumpLabel);
+        } else {
+            jumpLabel = "";
+        }
+
         new AlertDialog.Builder(getDialogContext())
                 .setTitle(EhUtils.getSuitableTitle(gi))
-                .setItems(R.array.gallery_list_menu_entries, new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        switch (which) {
-                            case 0: // Download
-                                CommonOperations.startDownload(activity, gi, false);
-                                break;
-                            case 1: // Favorites
-                                CommonOperations.addToFavorites(activity, gi,
-                                        new addToFavoriteListener(context,
-                                                activity.getStageId(), getTag()), false);
-                                break;
-                        }
+                .setItems(items.toArray(new String[0]), (dialog, which) -> {
+                    String label = items.get(which);
+                    if (downloadLabel.equals(label)) {
+                        CommonOperations.startDownload(activity, gi, false);
+                    } else if (favouriteLabel.equals(label)) {
+                        CommonOperations.addToFavorites(activity, gi,
+                                new addToFavoriteListener(context,
+                                        activity.getStageId(), getTag()), false);
+                    } else if (jumpLabel.equals(label)) {
+                        startScene(MergedGalleryChecker.createJumpAnnouncer(mergedTarget));
                     }
                 }).show();
-        return true;
     }
 
     private class HistoryHolder extends AbstractSwipeableItemViewHolder {

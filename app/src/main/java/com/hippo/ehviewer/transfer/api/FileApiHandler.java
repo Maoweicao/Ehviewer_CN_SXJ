@@ -22,15 +22,19 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.AppConfig;
+import com.hippo.ehviewer.BackgroundTaskManager;
+import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
+import com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.FileTreeTaskExecutor;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.data.UnifiedTask;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
+import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.unifile.UniFile;
 
 import java.io.ByteArrayInputStream;
@@ -1635,8 +1639,14 @@ public class FileApiHandler extends BaseApiHandler {
             return ResponseBuilder.notFound("Path");
         }
 
+        // 删除的是画廊下载目录：改走统一的删除管线（内存移除 + 数据库清理 + 下载历史标记为已删除），
+        // 否则只删文件会留下数据库记录，"校验已下载画廊完整性"会把该画廊重置为待下载、重新发起下载
         if (ROOT_DOWNLOADS.equals(root) && target.isDirectory()) {
-            TransferLogger.getInstance().w(TAG, "删除下载目录下的文件夹，下载记录可能残留: " + target.getAbsolutePath());
+            List<DownloadInfo> matchedGalleries = findGalleriesByDirName(target.getName());
+            if (!matchedGalleries.isEmpty()) {
+                return submitGalleryDirDelete(matchedGalleries, parseDeleteFiles(session));
+            }
+            TransferLogger.getInstance().w(TAG, "删除下载目录下的文件夹（未匹配到下载记录，下载记录可能残留）: " + target.getAbsolutePath());
         }
 
         UnifiedTask task = FileTreeTaskExecutor.getInstance().delete(target);
@@ -1647,5 +1657,65 @@ public class FileApiHandler extends BaseApiHandler {
         response.put("status", task.status);
         response.put("total", 1);
         return ResponseBuilder.accepted(response.toJSONString());
+    }
+
+    /**
+     * 在下载列表中查找下载目录名与指定文件夹名匹配的画廊。
+     * 目录名通常为数据库中记录的 dirname，也可能是旧版本的 "gid-" 前缀目录。
+     */
+    private List<DownloadInfo> findGalleriesByDirName(String dirName) {
+        List<DownloadInfo> matched = new ArrayList<>();
+        if (dirName == null || dirName.isEmpty()) {
+            return matched;
+        }
+        for (DownloadInfo info : downloadManager.getAllDownloadInfoList()) {
+            String dirname = EhDB.getDownloadDirname(info.gid);
+            boolean hit = (dirname != null && dirName.equals(dirname))
+                    || dirName.startsWith(info.gid + "-");
+            if (hit) {
+                matched.add(info);
+            }
+        }
+        return matched;
+    }
+
+    /**
+     * 删除画廊目录：与 DELETE /api/v1/downloads/{gid} 一致，提交 DeleteRangeDownloadTask，
+     * 由后台任务完成下载历史标记（DELETION_NORMAL）、数据库下载记录清理与本地文件清理。
+     */
+    private NanoHTTPD.Response submitGalleryDirDelete(List<DownloadInfo> infoList, boolean deleteFiles) {
+        LongList gidList = new LongList(infoList.size());
+        for (DownloadInfo info : infoList) {
+            gidList.add(info.gid);
+        }
+        // 从内存列表中移除（即时刷新 UI）
+        downloadManager.removeFromMemoryRange(gidList);
+        DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
+                context, downloadManager, infoList, deleteFiles, null);
+        BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+        TransferLogger.getInstance().i(TAG, "删除画廊目录，走统一删除管线: "
+                + infoList.size() + " 个画廊, deleteFiles=" + deleteFiles);
+        JSONObject response = new JSONObject();
+        response.put("success", true);
+        response.put("accepted", true);
+        response.put("taskId", handle.taskId);
+        response.put("status", "pending");
+        response.put("total", 1);
+        response.put("galleryCount", infoList.size());
+        response.put("taskClassName", DeleteRangeDownloadTask.class.getName());
+        return ResponseBuilder.accepted(response.toJSONString());
+    }
+
+    /**
+     * 解析 deleteFiles（true/1 为删除本地文件，false 为移入回收站），
+     * 未指定时取全局设置 isDeleteFilesOnRemoteDelete。
+     */
+    private boolean parseDeleteFiles(NanoHTTPD.IHTTPSession session) {
+        Map<String, String> parms = session.getParms();
+        String value = parms != null ? parms.get("deleteFiles") : null;
+        if (value == null) {
+            return Settings.isDeleteFilesOnRemoteDelete();
+        }
+        return "1".equals(value) || "true".equalsIgnoreCase(value);
     }
 }

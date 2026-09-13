@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fillViewport="true">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp">
+
+            <!-- 本机身份信息 -->
+            <TextView
+                android:id="@+id/section_identity"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_identity_section"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorPrimary"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="4dp" />
+
+            <TextView
+                android:id="@+id/self_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="15sp"
+                android:textColor="?android:attr/textColorPrimary" />
+
+            <TextView
+                android:id="@+id/self_id"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:layout_marginTop="2dp" />
+
+            <TextView
+                android:id="@+id/self_caps"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textSize="12sp"
+                android:textColor="?android:attr/textColorSecondary"
+                android:layout_marginTop="2dp" />
+
+            <!-- 实验室开关 -->
+            <TextView
+                android:id="@+id/section_toggles"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggles_section"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:textColor="?attr/colorPrimary"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_enabled"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggle_enabled"
+                android:textSize="15sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_auto_relay"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggle_auto_relay"
+                android:textSize="15sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_cross_device_image"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggle_cross_device_image"
+                android:textSize="15sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_db_snapshot"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggle_db_snapshot"
+                android:textSize="15sp" />
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switch_incremental_resume"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_toggle_incremental_resume"
+                android:textSize="15sp" />
+
+            <!-- 信任设备列表标题 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="16dp"
+                android:layout_marginBottom="4dp">
+
+                <TextView
+                    android:id="@+id/section_peers"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/multi_device_peers_section"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:textColor="?attr/colorPrimary" />
+
+                <Button
+                    android:id="@+id/btn_add_peer"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/multi_device_add_peer"
+                    android:textSize="13sp"
+                    style="@style/Widget.AppCompat.Button.Colored" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp" />
+
+    <TextView
+        android:id="@+id/empty_text"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/multi_device_peers_empty"
+        android:textSize="14sp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:gravity="center"
+        android:padding="24dp"
+        android:visibility="gone" />
+
+</LinearLayout>

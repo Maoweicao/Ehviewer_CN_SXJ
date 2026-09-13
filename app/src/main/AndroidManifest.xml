@@ -213,6 +213,11 @@
             android:label="@string/lab_progressive_manager"
             android:theme="@style/AppTheme.Toolbar" />
         <activity
+            android:name=".ui.lab.MultiDeviceRelayActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/lab_relay_center"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
             android:name=".ui.SystemInfoActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_about_system_info"
@@ -403,6 +408,20 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- ANR 弹窗自动清除：需用户在系统设置中开启无障碍，见 AnrDialogDismissService -->
+        <service
+            android:name="com.hippo.ehviewer.service.AnrDialogDismissService"
+            android:exported="false"
+            android:label="@string/anr_dismiss_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/anr_dialog_dismiss_service_config" />
+        </service>
+
         <activity
             android:name="com.hippo.ehviewer.ui.CaptureActivity"
             android:label="@string/capture_title"
@@ -411,6 +430,11 @@
         <activity
             android:name="com.hippo.ehviewer.ui.PerformanceLogActivity"
             android:label="@string/performance_log_title"
+            android:theme="@style/AppTheme.Toolbar" />
+
+        <activity
+            android:name="com.hippo.ehviewer.ui.ResourceViewerActivity"
+            android:label="@string/resource_viewer_title"
             android:theme="@style/AppTheme.Toolbar" />
 
         <activity

@@ -290,7 +290,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                 }
                 holder.favourite.setVisibility((mShowFavourite && gi.favoriteSlot >= -1 && gi.favoriteSlot <= 10) ? View.VISIBLE : View.GONE);
                 holder.downloaded.setVisibility(mDownloadManager.containDownloadInfo(gi.gid) ? View.VISIBLE : View.GONE);
-                bindMergedStatus(holder, gi.gid);
+                bindDownloadHistoryStatus(holder, gi.gid);
                 break;
             }
             case TYPE_GRID: {
@@ -306,7 +306,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
                     ((TriangleDrawable) drawable).setColor(color);
                 }
                 holder.simpleLanguage.setText(gi.simpleLanguage);
-                bindMergedStatus(holder, gi.gid);
+                bindDownloadHistoryStatus(holder, gi.gid);
                 break;
             }
         }
@@ -317,11 +317,20 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
         myOnThumbItemClickListener = listener;
     }
 
-    private void bindMergedStatus(@NonNull GalleryHolder holder, long gid) {
+    /**
+     * 读取下载历史标注条目状态：
+     * - 历史记录为重复/递进合并 → 显示合并标记；
+     * - 存在下载历史但已不在下载列表中（下载已被删除/移除）→ 显示删除标记，
+     *   提醒用户该画廊曾下载过、当前本地已不可读，避免重复下载。
+     */
+    private void bindDownloadHistoryStatus(@NonNull GalleryHolder holder, long gid) {
         DownloadHistory history = EhDB.getDownloadHistory(gid);
         boolean merged = history != null && (history.getDeletionType() == DownloadHistory.DELETION_DUPLICATE_MERGED
                 || history.getDeletionType() == DownloadHistory.DELETION_PROGRESSIVE_MERGED);
         holder.merged.setVisibility(merged ? View.VISIBLE : View.GONE);
+        boolean deleted = history != null && !merged
+                && !mDownloadManager.containDownloadInfo(gid);
+        holder.deleted.setVisibility(deleted ? View.VISIBLE : View.GONE);
     }
 
     /**
@@ -380,6 +389,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
         public final ImageView favourite;
         public final ImageView downloaded;
         public final ImageView merged;
+        public final ImageView deleted;
         public final ImageView selected;
 
         public GalleryHolder(View itemView, final OnThumbItemClickListener onThumbItemClickListener, int mType) {
@@ -395,6 +405,7 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
             favourite = itemView.findViewById(R.id.favourited);
             downloaded = itemView.findViewById(R.id.downloaded);
             merged = itemView.findViewById(R.id.merged);
+            deleted = itemView.findViewById(R.id.deleted);
             selected = itemView.findViewById(R.id.selected);
             if (mType == 0) {
                 thumb.setOnClickListener(v -> {

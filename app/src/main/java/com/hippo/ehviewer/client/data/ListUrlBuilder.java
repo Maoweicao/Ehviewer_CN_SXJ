@@ -34,6 +34,7 @@ import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.widget.GalleryInfoContentHelper;
+import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.network.UrlBuilder;
 import com.hippo.lib.yorozuya.NumberUtils;
 import com.hippo.lib.yorozuya.StringUtils;
@@ -559,7 +560,7 @@ public class ListUrlBuilder implements Cloneable, Parcelable {
             default:
             case MODE_NORMAL:
             case MODE_SUBSCRIPTION: {
-                String url;
+                String url = EhUrl.getHost();
                 if (mMode == MODE_NORMAL) {
                     url = EhUrl.getHost();
                 } else {
@@ -611,7 +612,14 @@ public class ListUrlBuilder implements Cloneable, Parcelable {
                         ub.addQuery("f_spt", mPageTo != -1 ? Integer.toString(mPageTo) : "");
                     }
                 }
-                return ub.build();
+                String built = ub.build();
+                SearchDebugLog.d("ListUrlBuilder", "mode=" + mMode
+                        + " f_search='" + mKeyword + "' advanceSearch=0x" + Integer.toHexString(mAdvanceSearch)
+                        + " minRating=" + mMinRating + " pageFrom=" + mPageFrom + " pageTo=" + mPageTo
+                        + "\n  final URL: " + built
+                        + "\n  Pseudo-SQL: SELECT * FROM galleries WHERE category & ~0x" + Integer.toHexString(mCategory)
+                        + " AND (name LIKE '%" + mKeyword + "%' OR tags LIKE '%" + mKeyword + "%') ORDER BY posted DESC");
+                return built;
             }
             case MODE_UPLOADER: {
                 StringBuilder sb = new StringBuilder(EhUrl.getHost());

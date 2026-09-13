@@ -1045,6 +1045,7 @@
     <string name="quick_filter_low_rating">低評分下載</string>
     <string name="quick_filter_huge_file">超大檔案</string>
     <string name="quick_filter_old_unfavorited">老舊未收藏</string>
+    <string name="quick_filter_ai_generated">AI 生成畫廊</string>
     <string name="filter_loading">正在載入篩選</string>
     <string name="download_start_all">全部開始</string>
     <string name="download_stop_all">全部停止</string>

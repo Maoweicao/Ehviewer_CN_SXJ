@@ -72,9 +72,6 @@ class StartRangeDownloadTask(context: Context, private val gidList: LongList) : 
             updateProgress(10, context.getString(R.string.start_range_download_processing, validCount))
             delay(500)
             
-            // 统一通过 DownloadService 拉起前台服务，再由服务驱动下载
-            DownloadService.startRangeDownload(context, validGidList)
-            
             // 等待一段时间让下载状态更新
             delay(1000)
             

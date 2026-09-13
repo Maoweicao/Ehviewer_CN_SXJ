@@ -85,6 +85,7 @@ import com.hippo.ehviewer.client.data.ListUrlBuilder;
 import com.hippo.ehviewer.client.data.PreviewSet;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
 import com.hippo.ehviewer.client.exception.NoHAtHClientException;
+import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser;
 import com.hippo.ehviewer.client.parser.RateGalleryParser;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.Filter;
@@ -147,6 +148,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -215,6 +217,8 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
     @Nullable
     private TextView mHaveNewVersion;
     @Nullable
+    private View mMergedBanner;
+    @Nullable
     private View mRead;
     // Below header
     @Nullable
@@ -239,6 +243,14 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
     private TextView mRatingText;
     @Nullable
     private RatingBar mRating;
+    @Nullable
+    private View mLocalRatingSection;
+    @Nullable
+    private TextView mLocalRatingLabel;
+    @Nullable
+    private com.hippo.ehviewer.widget.SimpleRatingView mLocalRatingView;
+    @Nullable
+    private TextView mLocalRatingText;
     @Nullable
     private View mHeartGroup;
     @Nullable
@@ -598,6 +610,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mActionGroup = (ViewGroup) ViewUtils.$$(mHeader, R.id.action_card);
         mDownload = (TextView) ViewUtils.$$(mActionGroup, R.id.download);
         mHaveNewVersion = (TextView) ViewUtils.$$(mHeader, R.id.new_version);
+        mMergedBanner = ViewUtils.$$(mainView, R.id.merged_gallery_banner);
         mArchiverDownloadProgress = (ArchiverDownloadProgress) ViewUtils.$$(mHeader, R.id.archiver_download_progress);
         mRead = ViewUtils.$$(mActionGroup, R.id.read);
         Ripple.addRipple(mThumb, isDarkTheme);
@@ -614,6 +627,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mRead.setOnClickListener(this);
         mTitle.setOnClickListener(this);
 
+        if (mMergedBanner != null) {
+            mMergedBanner.setOnClickListener(this);
+        }
+
         mUploader.setOnLongClickListener(this);
 
 
@@ -629,6 +646,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mActions = ViewUtils.$$(belowHeader, R.id.actions);
         mRatingText = (TextView) ViewUtils.$$(mActions, R.id.rating_text);
         mRating = (RatingBar) ViewUtils.$$(mActions, R.id.rating);
+        mLocalRatingSection = ViewUtils.$$(mActions, R.id.local_rating_section);
+        mLocalRatingLabel = (TextView) ViewUtils.$$(mActions, R.id.local_rating_label);
+        mLocalRatingView = (com.hippo.ehviewer.widget.SimpleRatingView) ViewUtils.$$(mActions, R.id.local_rating_view);
+        mLocalRatingText = (TextView) ViewUtils.$$(mActions, R.id.local_rating_text);
         mHeartGroup = ViewUtils.$$(mActions, R.id.heart_group);
         mHeart = (TextView) ViewUtils.$$(mHeartGroup, R.id.heart);
         mHeartOutline = (TextView) ViewUtils.$$(mHeartGroup, R.id.heart_outline);
@@ -656,6 +677,9 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mRate.setOnClickListener(this);
         mSimilar.setOnClickListener(this);
         mSearchCover.setOnClickListener(this);
+        if (mLocalRatingSection != null) {
+            mLocalRatingSection.setOnClickListener(this);
+        }
         ensureActionDrawable(context);
 
         mTags = (LinearLayout) ViewUtils.$$(belowHeader, R.id.tags);
@@ -764,6 +788,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mActionGroup = null;
         mDownload = null;
         mHaveNewVersion = null;
+        mMergedBanner = null;
         mRead = null;
         mBelowHeader = null;
         mArchiverDownloadProgress = null;
@@ -1062,6 +1087,9 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 mHaveNewVersion.setVisibility(View.GONE);
             }
         }
+        if (mMergedBanner != null) {
+            mMergedBanner.setVisibility(TextUtils.isEmpty(gd.parent) ? View.GONE : View.VISIBLE);
+        }
         if (null == mGalleryInfo) {
             mThumb.load(EhCacheKeyFactory.getThumbKey(gd.gid), gd.thumb);
         } else {
@@ -1093,6 +1121,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
 
         mRatingText.setText(getAllRatingText(gd.rating, gd.ratingCount));
         mRating.setRating(gd.rating);
+        refreshLocalRatingDisplay();
 
         if (resources != null) {
             mFavoredTimes.setText(resources.getString(R.string.favored_times, gd.favoriteCount));
@@ -1638,6 +1667,65 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         return resources.getString(R.string.rating_text, getRatingText(rating, resources), rating, ratingCount);
     }
 
+    @Nullable
+    private com.hippo.ehviewer.local.LocalRatingManager getLocalRatingManager() {
+        Context context = getEHContext();
+        if (context != null) {
+            return com.hippo.ehviewer.local.LocalRatingManager.getInstance(context);
+        }
+        return com.hippo.ehviewer.local.LocalRatingManager.getInstance();
+    }
+
+    /**
+     * 刷新本地评分覆盖的显示。
+     * 已设置时显示本地星星 + “本地 x.x / EH y.y”，未设置时显示提示文字。
+     */
+    private void refreshLocalRatingDisplay() {
+        if (mLocalRatingSection == null || mLocalRatingLabel == null
+                || mLocalRatingView == null || mLocalRatingText == null || mGalleryDetail == null) {
+            return;
+        }
+        com.hippo.ehviewer.local.LocalRatingManager localRatingManager = getLocalRatingManager();
+        if (localRatingManager == null) {
+            return;
+        }
+        float localRating = localRatingManager.getRating(mGalleryDetail.gid);
+        Resources resources = getResources2();
+        if (resources == null) {
+            return;
+        }
+        if (localRating > 0f) {
+            mLocalRatingView.setRating(localRating);
+            mLocalRatingView.setVisibility(View.VISIBLE);
+            mLocalRatingText.setText(resources.getString(R.string.local_rating_both_text,
+                    String.format(java.util.Locale.US, "%.1f", localRating),
+                    String.format(java.util.Locale.US, "%.1f", mGalleryDetail.rating)));
+        } else {
+            mLocalRatingView.setVisibility(View.GONE);
+            mLocalRatingText.setText(resources.getString(R.string.local_rating_hint));
+        }
+    }
+
+    private void showLocalRatingDialog() {
+        Context context = getEHContext();
+        com.hippo.ehviewer.local.LocalRatingManager localRatingManager = getLocalRatingManager();
+        if (context == null || mGalleryDetail == null || localRatingManager == null) {
+            return;
+        }
+        float current = localRatingManager.getRating(mGalleryDetail.gid);
+        LocalRateDialogHelper helper = new LocalRateDialogHelper();
+        AlertDialog.Builder builder = new AlertDialog.Builder(context)
+                .setTitle(R.string.local_rating_dialog_title)
+                .setView(R.layout.dialog_local_rate)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.local_rating_set, helper);
+        if (current > 0f) {
+            builder.setNeutralButton(R.string.local_rating_clear, helper);
+        }
+        Dialog dialog = builder.show();
+        helper.setDialog(dialog, current);
+    }
+
     private void setTransitionName() {
         long gid = getGid();
 
@@ -1699,31 +1787,12 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         if (null == gd) {
             return;
         }
-        List<String> tokens = EhUtils.tokenizeTitle(gd.title);
-        if (!tokens.isEmpty()) {
+        // 宽松提取：保留括号内完整作者名（加引号）、保留正文词，过滤批次数字与 [AI Generated] 等标记
+        String keyword = EhUtils.extractSearchKeywords(gd.title);
+        if (keyword != null && !keyword.isEmpty()) {
             ListUrlBuilder lub = new ListUrlBuilder();
             lub.setMode(ListUrlBuilder.MODE_NORMAL);
-            // Take top 3 most distinctive tokens, quote multi-word tokens
-            int count = Math.min(tokens.size(), 3);
-            StringBuilder query = new StringBuilder();
-            for (int i = 0; i < count; i++) {
-                if (i > 0) query.append(" ");
-                String token = tokens.get(i);
-                if (token.contains(" ")) {
-                    query.append("\"").append(token).append("\"");
-                } else {
-                    query.append(token);
-                }
-            }
-            lub.setKeyword(query.toString());
-            GalleryListScene.startScene(this, lub);
-            return;
-        }
-        String keyword = EhUtils.extractTitle(gd.title);
-        if (null != keyword) {
-            ListUrlBuilder lub = new ListUrlBuilder();
-            lub.setMode(ListUrlBuilder.MODE_NORMAL);
-            lub.setKeyword("\"" + keyword + "\"");
+            lub.setKeyword(keyword);
             GalleryListScene.startScene(this, lub);
             return;
         }
@@ -1741,6 +1810,110 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             lub.setKeyword(gd.uploader);
             GalleryListScene.startScene(this, lub);
         }
+    }
+
+    private void onMergedBannerClick() {
+        GalleryDetail gd = mGalleryDetail;
+        if (gd == null || TextUtils.isEmpty(gd.parent)) {
+            return;
+        }
+        GalleryDetailUrlParser.Result result = GalleryDetailUrlParser.parse(gd.parent, false);
+        if (result != null) {
+            Bundle args = new Bundle();
+            args.putString(KEY_ACTION, ACTION_GID_TOKEN);
+            args.putLong(KEY_GID, result.gid);
+            args.putString(KEY_TOKEN, result.token);
+            startScene(new Announcer(GalleryDetailScene.class).setArgs(args));
+        }
+    }
+
+    private void showSimilarSearchDialog() {
+        final GalleryDetail gd = mGalleryDetail;
+        if (gd == null) {
+            return;
+        }
+        Context context = getEHContext();
+        if (context == null || getDialogContext() == null) {
+            return;
+        }
+
+        final String artist;
+        String artistFromTags = getArtist(gd.tags);
+        if (!TextUtils.isEmpty(artistFromTags)) {
+            artist = artistFromTags;
+        } else {
+            artist = EhUtils.extractArtistName(gd.title, gd.titleJpn, EhDB.getDownloadDirname(gd.gid));
+        }
+        final String artistLabel;
+        if (!TextUtils.isEmpty(artist)) {
+            artistLabel = context.getString(R.string.similar_search_by_artist, artist);
+        } else {
+            artistLabel = null;
+        }
+
+        final String keyword = EhUtils.extractSearchKeywords(gd.title);
+        final String keywordLabel = context.getString(R.string.similar_search_by_title);
+
+        final String jpnLabel;
+        if (!TextUtils.isEmpty(gd.titleJpn)) {
+            jpnLabel = context.getString(R.string.similar_search_by_jpn_title);
+        } else {
+            jpnLabel = null;
+        }
+
+        final String uploaderLabel;
+        if (!TextUtils.isEmpty(gd.uploader)) {
+            uploaderLabel = context.getString(R.string.similar_search_by_uploader, gd.uploader);
+        } else {
+            uploaderLabel = null;
+        }
+
+        List<String> items = new ArrayList<>();
+        if (artistLabel != null) {
+            items.add(artistLabel);
+        }
+        if (!TextUtils.isEmpty(keyword)) {
+            items.add(keywordLabel);
+        }
+        if (jpnLabel != null) {
+            items.add(jpnLabel);
+        }
+        if (uploaderLabel != null) {
+            items.add(uploaderLabel);
+        }
+        if (items.isEmpty()) {
+            Toast.makeText(context, R.string.similar_search_empty, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        new AlertDialog.Builder(getDialogContext())
+                .setTitle(R.string.similar_gallery)
+                .setItems(items.toArray(new String[0]), (dialog, which) -> {
+                    String label = items.get(which);
+                    if (label.equals(artistLabel)) {
+                        ListUrlBuilder lub = new ListUrlBuilder();
+                        lub.setMode(ListUrlBuilder.MODE_TAG);
+                        lub.setKeyword("artist:" + artist);
+                        GalleryListScene.startScene(this, lub);
+                    } else if (label.equals(keywordLabel)) {
+                        ListUrlBuilder lub = new ListUrlBuilder();
+                        lub.setMode(ListUrlBuilder.MODE_NORMAL);
+                        lub.setKeyword(keyword);
+                        GalleryListScene.startScene(this, lub);
+                    } else if (label.equals(jpnLabel)) {
+                        ListUrlBuilder lub = new ListUrlBuilder();
+                        lub.setMode(ListUrlBuilder.MODE_NORMAL);
+                        lub.setKeyword(gd.titleJpn);
+                        GalleryListScene.startScene(this, lub);
+                    } else if (label.equals(uploaderLabel)) {
+                        ListUrlBuilder lub = new ListUrlBuilder();
+                        lub.setMode(ListUrlBuilder.MODE_UPLOADER);
+                        lub.setKeyword(gd.uploader);
+                        GalleryListScene.startScene(this, lub);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
     }
 
     private void showCoverGalleryList() {
@@ -1820,6 +1993,8 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 return;
             }
             myUpdateDialog.showSelectDialog(mGalleryDetail);
+        } else if (mMergedBanner == v) {
+            onMergedBannerClick();
         } else if (mRead == v) {
             GalleryInfo galleryInfo = null;
             if (mGalleryInfo != null) {
@@ -1906,6 +2081,8 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                     .setPositiveButton(android.R.string.ok, helper)
                     .show();
             helper.setDialog(dialog, mGalleryDetail.rating);
+        } else if (mLocalRatingSection == v) {
+            showLocalRatingDialog();
         } else if (mSimilar == v) {
             showSimilarGalleryList();
         } else if (mSearchCover == v) {
@@ -2080,6 +2257,9 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
 
         if (mUploader == v) {
             showFilterUploaderDialog();
+        } else if (mSimilar == v) {
+            showSimilarSearchDialog();
+            return true;
         } else if (mDownload == v) {
 //            GalleryInfo galleryInfo = getGalleryInfo();
 //            if (galleryInfo != null) {
@@ -2264,11 +2444,15 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mGalleryDetail = result;
         updateDownloadState();
         if (mDownloadState != DownloadInfo.STATE_INVALID) {
-            if (mDownloadInfo != null && !mDownloadInfo.thumb.equals(result.thumb) && mDownloadInfo.gid == result.gid) {
-                useNetWorkLoadThumb = true;
-                mDownloadInfo.updateInfo(result);
-                mDownloadInfo.state = mDownloadState;
-                EhDB.putDownloadInfo(mDownloadInfo);
+            // 安全比较 thumb，避免 NPE
+            if (mDownloadInfo != null && mDownloadInfo.gid == result.gid) {
+                boolean thumbChanged = mDownloadInfo.thumb != null ? !mDownloadInfo.thumb.equals(result.thumb) : result.thumb != null;
+                if (thumbChanged) {
+                    useNetWorkLoadThumb = true;
+                    mDownloadInfo.updateInfo(result);
+                    mDownloadInfo.state = mDownloadState;
+                    EhDB.putDownloadInfo(mDownloadInfo);
+                }
             }
         }
         adjustViewVisibility(STATE_NORMAL, true);
@@ -2306,6 +2490,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             mRatingText.setText(getAllRatingText(result.rating, result.ratingCount));
             mRating.setRating(result.rating);
         }
+        refreshLocalRatingDisplay();
     }
 
     private void onModifyFavoritesSuccess(boolean addOrRemove) {
@@ -2588,6 +2773,67 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                     .setCallback(new RateGalleryListener(context,
                             activity.getStageId(), getTag(), mGalleryDetail.gid));
             EhApplication.getEhClient(context).execute(request);
+        }
+    }
+
+    /**
+     * 本地评分对话框帮助类。点击“确定/设置”保存本地评分（评分为 0 时清除），
+     * 点击“清除本地评分”按钮删除本地评分。
+     */
+    private class LocalRateDialogHelper implements GalleryRatingBar.OnUserRateListener,
+            DialogInterface.OnClickListener {
+
+        @Nullable
+        private GalleryRatingBar mRatingBar;
+        @Nullable
+        private TextView mRatingText;
+
+        public void setDialog(Dialog dialog, float rating) {
+            mRatingText = (TextView) ViewUtils.$$(dialog, R.id.local_rating_text);
+            mRatingBar = (GalleryRatingBar) ViewUtils.$$(dialog, R.id.local_rating_view);
+            Resources resources = getResources2();
+            if (resources != null) {
+                mRatingText.setText(rating > 0f
+                        ? resources.getString(R.string.local_rating_both_text,
+                            String.format(java.util.Locale.US, "%.1f", rating),
+                            String.format(java.util.Locale.US, "%.1f", mGalleryDetail != null ? mGalleryDetail.rating : rating))
+                        : resources.getString(R.string.local_rating_none));
+            }
+            mRatingBar.setRating(rating > 0f ? rating : 3f);
+            mRatingBar.setOnUserRateListener(this);
+        }
+
+        @Override
+        public void onUserRate(float rating) {
+            if (null != mRatingText && getResources2() != null) {
+                mRatingText.setText(getResources2().getString(R.string.local_rating_both_text,
+                        String.format(java.util.Locale.US, "%.1f", rating),
+                        String.format(java.util.Locale.US, "%.1f",
+                                mGalleryDetail != null ? mGalleryDetail.rating : rating)));
+            }
+        }
+
+        @Override
+        public void onClick(DialogInterface dialog, int which) {
+            if (null == mGalleryDetail || null == mRatingBar) {
+                return;
+            }
+            com.hippo.ehviewer.local.LocalRatingManager localRatingManager = getLocalRatingManager();
+            if (localRatingManager == null) {
+                return;
+            }
+            long gid = mGalleryDetail.gid;
+            if (which == DialogInterface.BUTTON_POSITIVE) {
+                float rating = mRatingBar.getRating();
+                localRatingManager.setRating(gid, rating);
+                showTip(rating > 0f ? R.string.local_rating_saved : R.string.local_rating_cleared, LENGTH_SHORT);
+            } else if (which == DialogInterface.BUTTON_NEUTRAL) {
+                localRatingManager.removeRating(gid);
+                showTip(R.string.local_rating_cleared, LENGTH_SHORT);
+            } else {
+                return;
+            }
+            refreshLocalRatingDisplay();
         }
     }
 

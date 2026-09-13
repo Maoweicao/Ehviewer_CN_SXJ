@@ -57,7 +57,7 @@ public class TransferServerManager extends Observable {
     public void start() throws Exception {
         TransferLogger logger = TransferLogger.getInstance();
         logger.i(TAG, "启动传输服务器...");
-        
+
         // 启动HTTP服务器
         logger.d(TAG, "启动HTTP服务器，端口: " + DEFAULT_PORT);
         httpServer.start();
@@ -68,6 +68,14 @@ public class TransferServerManager extends Observable {
         logger.d(TAG, "注册mDNS服务: " + serviceName);
         discoveryManager.registerService(serviceName, SERVICE_TYPE, DEFAULT_PORT);
         logger.i(TAG, "mDNS服务注册成功");
+
+        // v3.0：注册实验室 / 多机联动监听（RelayInvoker 自动判定 + DownloadListener）
+        try {
+            com.hippo.ehviewer.lab.relay.RelayInvoker.getInstance(context).registerDownloadListener();
+            logger.i(TAG, "实验室 RelayInvoker 已注册 DownloadInfo 监听");
+        } catch (Throwable t) {
+            logger.w(TAG, "实验室模块未初始化（属正常，旧版本不依赖）");
+        }
 
         isRunning = true;
         setChanged();

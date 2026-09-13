@@ -1,6 +1,7 @@
 package com.hippo.ehviewer.sync;
 
 import android.annotation.SuppressLint;
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -13,15 +14,18 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.callBack.DownloadSearchCallback;
 import com.hippo.ehviewer.client.EhConfig;
+import com.hippo.ehviewer.client.EhTagDatabase;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadGalleryMetaHelper;
+import com.hippo.ehviewer.local.LocalRatingManager;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
+import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.unifile.UniFile;
 
 import java.text.Normalizer;
@@ -62,17 +66,27 @@ public class DownloadListInfosExecutor {
 
     private final String mSearchKey;
 
+    @Nullable
+    private final Context mContext;
+
     private DownloadManager mDownloadManager;
     private final Map<Long, Long> mGalleryTimeCache = new HashMap<>();
 
     public DownloadListInfosExecutor(@Nullable List<DownloadInfo> mList, String searchKey) {
+        this(mList, searchKey, null);
+    }
+
+    public DownloadListInfosExecutor(@Nullable List<DownloadInfo> mList, String searchKey,
+                                     @Nullable Context context) {
         this.mList = mList;
         this.mSearchKey = searchKey;
+        this.mContext = context != null ? context.getApplicationContext() : null;
     }
 
     public DownloadListInfosExecutor(@Nullable List<DownloadInfo> mList, DownloadManager downloadManager) {
         this.mList = mList;
         this.mSearchKey = "";
+        this.mContext = null;
         mDownloadManager = downloadManager;
     }
 
@@ -143,6 +157,8 @@ public class DownloadListInfosExecutor {
                 case R.id.sort_by_name_desc:
                 case R.id.sort_by_file_size_asc:
                 case R.id.sort_by_file_size_desc:
+                case R.id.sort_by_remaining_pages_asc:
+                case R.id.sort_by_remaining_pages_desc:
                     resultList = sortByType(safeList, id);
                     break;
                 case R.id.all_kind:
@@ -449,6 +465,7 @@ public class DownloadListInfosExecutor {
     public static final int QUICK_FILTER_LOW_RATING = R.id.quick_filter_low_rating;
     public static final int QUICK_FILTER_HUGE_FILE = R.id.quick_filter_huge_file;
     public static final int QUICK_FILTER_OLD_UNFAVORITED = R.id.quick_filter_old_unfavorited;
+    public static final int QUICK_FILTER_AI_GENERATED = R.id.quick_filter_ai_generated;
 
     // 快捷筛选体积阈值
     private static final long SIZE_100MB = 100L * 1024 * 1024;
@@ -476,7 +493,7 @@ public class DownloadListInfosExecutor {
                         for (DownloadInfo info : finished) {
                             long size = sizeMap.getOrDefault(info.gid, 0L);
                             info.fileSize = size;
-                            if (size >= SIZE_100MB && info.rating > 0f && info.rating < 3.5f) {
+                            if (size >= SIZE_100MB && getEffectiveRating(info) > 0f && getEffectiveRating(info) < 3.5f) {
                                 result.add(info);
                             }
                         }
@@ -508,11 +525,12 @@ public class DownloadListInfosExecutor {
                     }
                     case QUICK_FILTER_LOW_RATING: {
                         for (DownloadInfo info : finished) {
-                            if (info.rating > 0f && info.rating < 3f) {
+                            float effectiveRating = getEffectiveRating(info);
+                            if (effectiveRating > 0f && effectiveRating < 3f) {
                                 result.add(info);
                             }
                         }
-                        result.sort((a, b) -> Float.compare(a.rating, b.rating));
+                        result.sort((a, b) -> Float.compare(getEffectiveRating(a), getEffectiveRating(b)));
                         break;
                     }
                     case QUICK_FILTER_HUGE_FILE: {
@@ -537,6 +555,15 @@ public class DownloadListInfosExecutor {
                         result.sort((a, b) -> Integer.compare(getPostedYear(a), getPostedYear(b)));
                         break;
                     }
+                    case QUICK_FILTER_AI_GENERATED: {
+                        // 筛选标签或标题中含有“AI 生成”标记的画廊（不限于已完成）
+                        for (DownloadInfo info : source) {
+                            if (isAiGenerated(info)) {
+                                result.add(info);
+                            }
+                        }
+                        break;
+                    }
                     default:
                         result = finished;
                         break;
@@ -558,6 +585,56 @@ public class DownloadListInfosExecutor {
 
     private long sizeOf(DownloadInfo info) {
         return info.fileSize > 0 ? info.fileSize : 0L;
+    }
+
+    /**
+     * 判断画廊是否属于“AI 生成/辅助”作品：标签或标题中包含 AI 生成相关标记。
+     *
+     * 判定依据（区分大小写不敏感）：
+     * <ul>
+     *   <li>标签（simpleTags）：命名空间或值包含 ai-generated / ai_generated / ai_assisted 等</li>
+     *   <li>标题（title / titleJpn）：包含 “ai generated”、“ai-gen”、“[ai]” 等特征词</li>
+     * </ul>
+     */
+    private boolean isAiGenerated(DownloadInfo info) {
+        if (info == null) {
+            return false;
+        }
+        // 1) 标签检测：命名空间/值中包含 ai-generated、ai_generated、ai_assisted、ai- 等
+        String[] tags = info.simpleTags;
+        if (tags != null) {
+            for (String tag : tags) {
+                if (tag != null && isAiGeneratedTag(tag)) {
+                    return true;
+                }
+            }
+        }
+        // 2) 标题检测
+        return matchesAiInText(info.title) || matchesAiInText(info.titleJpn);
+    }
+
+    private boolean isAiGeneratedTag(String tag) {
+        String t = tag.toLowerCase(Locale.ROOT);
+        return t.contains("ai-generated")
+                || t.contains("ai_generated")
+                || t.contains("ai_assisted")
+                || t.startsWith("ai-")
+                || t.startsWith("ai_");
+    }
+
+    private boolean matchesAiInText(String text) {
+        if (text == null || text.isEmpty()) {
+            return false;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        return lower.contains("ai-generated")
+                || lower.contains("ai generated")
+                || lower.contains("ai_generated")
+                || lower.contains("ai-gen")
+                || lower.contains(" ai_gen")
+                || lower.matches(".*\\[\\s*ai[^]]*\\].*")
+                || lower.matches(".*\\bai\\b.*\\b(generat|diffusion|dream|art)\\b.*")
+                || lower.matches(".*\\b(generat|diffusion|dream|art)\\b.*\\bai\\b.*");
     }
 
     /**
@@ -664,8 +741,10 @@ public class DownloadListInfosExecutor {
     }
 
     private boolean isBetterDuplicate(DownloadInfo candidate, DownloadInfo current) {
-        if (candidate.rating != current.rating) {
-            return candidate.rating > current.rating;
+        float candidateRating = getEffectiveRating(candidate);
+        float currentRating = getEffectiveRating(current);
+        if (candidateRating != currentRating) {
+            return candidateRating > currentRating;
         }
         double candidateComplete = completion(candidate);
         double currentComplete = completion(current);
@@ -716,12 +795,29 @@ public class DownloadListInfosExecutor {
         }
         List<DownloadInfo> list = new ArrayList<>();
         for (DownloadInfo info : sourceList) {
-            if (info.rating >= ratingFrom && info.rating <= ratingTo) {
+            float effectiveRating = getEffectiveRating(info);
+            if (effectiveRating >= ratingFrom && effectiveRating <= ratingTo) {
                 list.add(info);
             }
         }
         Log.d("DownloadListInfos", "filterByRating: range=" + ratingFrom + "~" + ratingTo + ", 过滤后列表大小=" + list.size());
         return list;
+    }
+
+    /**
+     * 计算有效评分：优先使用本地评分（本地评分覆盖），
+     * 未设置本地评分时回退到 E-Hentai 在线评分。
+     */
+    private static float getEffectiveRating(DownloadInfo info) {
+        if (info == null) {
+            return -1f;
+        }
+        LocalRatingManager localRatingManager = LocalRatingManager.getInstance();
+        if (localRatingManager == null) {
+            // Not initialized yet, fall back to the transient field (populated at startup)
+            return info.localRating > 0f ? info.localRating : info.rating;
+        }
+        return localRatingManager.getEffectiveRating(info.gid, info.rating);
     }
 
     private List<DownloadInfo> filterByPageRange(@Nullable List<DownloadInfo> sourceList,
@@ -928,6 +1024,14 @@ public class DownloadListInfosExecutor {
             }
         }
 
+        // 如果是按剩余页数排序，先计算每个画廊的剩余页数
+        Map<DownloadInfo, Integer> computedRemaining = new java.util.HashMap<>();
+        if (type == R.id.sort_by_remaining_pages_asc || type == R.id.sort_by_remaining_pages_desc) {
+            for (DownloadInfo info : arr) {
+                computedRemaining.put(info, calculateRemainingPages(info));
+            }
+        }
+
         int n = arr.length;
         // 子数组的大小分别为1，2，4，8...
         // 刚开始合并的数组大小是1，接着是2，接着4....
@@ -939,7 +1043,7 @@ public class DownloadListInfosExecutor {
             //进行合并，对数组大小为 i 的数组进行两两合并
             while (right < n) {
                 // 合并函数和递归式的合并函数一样
-                merge(arr, left, mid, right, type, computedSizes);
+                merge(arr, left, mid, right, type, computedSizes, computedRemaining);
                 left = right + 1;
                 mid = left + i - 1;
                 right = mid + i;
@@ -947,7 +1051,7 @@ public class DownloadListInfosExecutor {
             // 还有一些被遗漏的数组没合并，千万别忘了
             // 因为不可能每个字数组的大小都刚好为 i
             if (left < n && mid < n) {
-                merge(arr, left, mid, n - 1, type, computedSizes);
+                merge(arr, left, mid, n - 1, type, computedSizes, computedRemaining);
             }
         }
         
@@ -958,7 +1062,7 @@ public class DownloadListInfosExecutor {
     // 合并函数，把两个有序的数组合并起来
     // arr[left..mif]表示一个数组，arr[mid+1 .. right]表示一个数组
     @SuppressLint("NonConstantResourceId")
-    private static void merge(DownloadInfo[] arr, int left, int mid, int right, int sortType, java.util.Map<DownloadInfo, Long> sizeMap) {
+    private static void merge(DownloadInfo[] arr, int left, int mid, int right, int sortType, java.util.Map<DownloadInfo, Long> sizeMap, java.util.Map<DownloadInfo, Integer> remainingMap) {
         //先用一个临时数组把他们合并汇总起来
         DownloadInfo[] a = new DownloadInfo[right - left + 1];
         int i = left;
@@ -995,14 +1099,14 @@ public class DownloadListInfosExecutor {
                     }
                     break;
                 case R.id.sort_by_rating_asc:
-                    if (arr[i].rating < arr[j].rating) {
+                    if (getEffectiveRating(arr[i]) < getEffectiveRating(arr[j])) {
                         a[k++] = arr[i++];
                     } else {
                         a[k++] = arr[j++];
                     }
                     break;
                 case R.id.sort_by_rating_desc:
-                    if (arr[i].rating > arr[j].rating) {
+                    if (getEffectiveRating(arr[i]) > getEffectiveRating(arr[j])) {
                         a[k++] = arr[i++];
                     } else {
                         a[k++] = arr[j++];
@@ -1103,6 +1207,17 @@ public class DownloadListInfosExecutor {
                     }
                     break;
                 }
+                case R.id.sort_by_remaining_pages_asc:
+                case R.id.sort_by_remaining_pages_desc: {
+                    int remI = remainingMap != null ? remainingMap.getOrDefault(arr[i], Integer.MAX_VALUE) : Integer.MAX_VALUE;
+                    int remJ = remainingMap != null ? remainingMap.getOrDefault(arr[j], Integer.MAX_VALUE) : Integer.MAX_VALUE;
+                    if (sortType == R.id.sort_by_remaining_pages_asc) {
+                        a[k++] = remI <= remJ ? arr[i++] : arr[j++];
+                    } else {
+                        a[k++] = remI >= remJ ? arr[i++] : arr[j++];
+                    }
+                    break;
+                }
             }
 
         }
@@ -1128,6 +1243,59 @@ public class DownloadListInfosExecutor {
             case DownloadInfo.STATE_FINISH:   return 5;  // 最低优先
             default: return 6;
         }
+    }
+
+    /**
+     * 智能计算剩余页数：
+     * 1. 已完成的下载返回 0（finished >= total 或状态为 FINISH）
+     * 2. 否则优先使用 total - finished（总页数 - 已完成页数）
+     * 3. 如果 total 未知，尝试从 SpiderInfo/本地文件数获取
+     * 4. 回退使用 pages 字段
+     * 5. 未知的排最后（Integer.MAX_VALUE）
+     */
+    private int calculateRemainingPages(DownloadInfo info) {
+        // 已经完成（或全部页面已下载）的，剩余为 0
+        if (info.state == DownloadInfo.STATE_FINISH
+                || (info.total > 0 && info.finished >= info.total)) {
+            return 0;
+        }
+        // 优先使用 total - finished
+        if (info.total > 0 && info.finished >= 0) {
+            return Math.max(0, info.total - info.finished);
+        }
+        // 尝试从 SpiderInfo 获取
+        try {
+            SpiderInfo si = SpiderInfo.getSpiderInfo(info);
+            if (si != null && si.pages > 0) {
+                // 本地已下载文件数
+                int localCount = countLocalFiles(info);
+                return Math.max(0, si.pages - localCount);
+            }
+        } catch (Exception ignored) {
+        }
+        // 回退：用 pages 字段
+        if (info.pages > 0) {
+            return info.pages;
+        }
+        return Integer.MAX_VALUE; // 未知的排最后
+    }
+
+    /**
+     * 统计本地下载目录中的文件数（排除 .ehviewer 等元数据文件）
+     */
+    private int countLocalFiles(DownloadInfo info) {
+        UniFile dir = SpiderDen.getGalleryDownloadDir(info);
+        if (dir == null || !dir.isDirectory()) return 0;
+        int count = 0;
+        UniFile[] children = dir.listFiles();
+        if (children != null) {
+            for (UniFile child : children) {
+                if (child.isFile() && !child.getName().startsWith(".")) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private List<DownloadInfo> filterDownloadState(List<DownloadInfo> sourceList, int state) {
@@ -1261,42 +1429,378 @@ public class DownloadListInfosExecutor {
         if (mList == null) {
             return new ArrayList<>();
         }
+        List<SearchBranch> branches = parseBooleanQuery(mSearchKey);
+        Map<String, List<String>> termAliases = buildTermAliases(branches);
+        SearchDebugLog.d("DownloadSearch", "searchingInBackground query='" + mSearchKey
+                + "' -> " + branches.size() + " branch(es), "
+                + termAliases.size() + " term alias group(s)");
+
         List<DownloadInfo> safeList = new ArrayList<>(mList);
         List<DownloadInfo> cache = new ArrayList<>();
 
         for (DownloadInfo info : safeList) {
-            if (EhUtils.judgeSuitableTitle(info, mSearchKey)) {
-                cache.add(info);
-            } else if (matchTag(mSearchKey, info)) {
-                cache.add(info);
-            } else if (matchAiDescription(mSearchKey, info)) {
+            boolean matched = matchBranches(branches, info, termAliases);
+            if (matched) {
                 cache.add(info);
             }
+            SearchDebugLog.d("DownloadSearch", "  " + (matched ? "MATCH  " : "NO-MATCH") + info.gid
+                    + " title=" + info.title);
         }
 
         return cache;
     }
 
-    private boolean matchTag(String mSearchKey, DownloadInfo info) {
+    /**
+     * 为每个搜索词条预计算别名集（只算一次）：
+     * 原词、去命名空间值（parody:arknights -> arknights）、
+     * 标签库规范 key（resolveTagTerm）与其中文翻译（getTranslation）。
+     * 让“标题 / 标签 / AI 描述”三处都能用中文或英文命中。
+     */
+    private Map<String, List<String>> buildTermAliases(List<SearchBranch> branches) {
+        Map<String, List<String>> map = new HashMap<>();
+        if (branches == null) {
+            return map;
+        }
+        Set<String> terms = new HashSet<>();
+        for (SearchBranch branch : branches) {
+            terms.addAll(branch.positives);
+            terms.addAll(branch.negatives);
+        }
+        if (terms.isEmpty()) {
+            return map;
+        }
+        EhTagDatabase db = mContext != null ? EhTagDatabase.getInstance(mContext) : null;
+        for (String term : terms) {
+            List<String> aliases = computeAliases(term, db);
+            if (!aliases.isEmpty()) {
+                map.put(term, aliases);
+            }
+            SearchDebugLog.d("DownloadSearch", "aliases('" + term + "') -> " + aliases);
+        }
+        return map;
+    }
+
+    private static List<String> computeAliases(String term, @Nullable EhTagDatabase db) {
+        List<String> aliases = new ArrayList<>();
+        String t = term == null ? "" : term.trim();
+        if (t.length() >= 2 && t.startsWith("\"") && t.endsWith("\"")) {
+            t = t.substring(1, t.length() - 1);
+        }
+        if (t.isEmpty()) {
+            return aliases;
+        }
+        addAlias(aliases, t);
+        int idx = t.indexOf(':');
+        if (idx >= 0) {
+            addAlias(aliases, t.substring(idx + 1));
+        }
+        if (db != null) {
+            String canonical = db.resolveTagTerm(t);
+            if (canonical != null && !canonical.isEmpty()) {
+                addAlias(aliases, canonical);
+                int ci = canonical.indexOf(':');
+                if (ci >= 0) {
+                    addAlias(aliases, canonical.substring(ci + 1));
+                }
+                String chinese = db.getTranslation(canonical);
+                if (chinese != null && !"null".equals(chinese)) {
+                    addAlias(aliases, chinese);
+                }
+            }
+        }
+        return aliases;
+    }
+
+    /** 别名统一用小写且把 '+' 换成空格，与标签/标题/AI 描述归一化一致。 */
+    private static void addAlias(List<String> aliases, String value) {
+        String normalized = normalizeTagToken(value);
+        if (!normalized.isEmpty() && !aliases.contains(normalized)) {
+            aliases.add(normalized);
+        }
+    }
+
+    /** 兼容旧行为 + 新增布尔语义：任一分支满足即命中。标题统一小写只算一次。 */
+    private boolean matchBranches(List<SearchBranch> branches, DownloadInfo info,
+                                  Map<String, List<String>> termAliases) {
+        if (branches == null || branches.isEmpty()) {
+            // 解析失败时退化为旧的整串标题包含
+            return EhUtils.judgeSuitableTitle(info, mSearchKey)
+                    || matchAiDescription(mSearchKey, info);
+        }
+        String titleJpn = info.titleJpn != null ? info.titleJpn : "";
+        String title = info.title != null ? info.title : "";
+        String titleLc = (titleJpn + title).toLowerCase(Locale.ROOT);
+        for (SearchBranch branch : branches) {
+            if (matchBranch(branch, info, titleLc, termAliases)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 分支命中 = 排除词都不命中 &&（分支原文整串命中标题 || 全部正词命中）。
+     * 保留旧 judgeSuitableTitle 的"整串包含"行为，同时支持真正的分组布尔语义。
+     */
+    private boolean matchBranch(SearchBranch branch, DownloadInfo info, String titleLc,
+                                Map<String, List<String>> termAliases) {
+        for (String neg : branch.negatives) {
+            if (matchTerm(neg, info, titleLc, termAliases)) {
+                return false;
+            }
+        }
+        if (branch.positives.isEmpty()) {
+            // 纯排除分支：排除词都不命中即满足
+            return true;
+        }
+        if (EhUtils.judgeSuitableTitle(info, branch.raw)) {
+            return true;
+        }
+        for (String pos : branch.positives) {
+            if (!matchTerm(pos, info, titleLc, termAliases)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 单词命中判定：标题/日版标题（大小写不敏感，任一别名）contains
+     * || 标签（精确/去命名空间精确，任一别名） || AI 描述（任一别名）contains。
+     */
+    private boolean matchTerm(String term, DownloadInfo info, String titleLc,
+                              Map<String, List<String>> termAliases) {
+        List<String> aliases = termAliases != null ? termAliases.get(term) : null;
+        if (aliases == null || aliases.isEmpty()) {
+            // 兜底：解析未覆盖（引号/异常词）时直接用原词
+            aliases = computeAliases(term, mContext != null ? EhTagDatabase.getInstance(mContext) : null);
+            if (aliases.isEmpty()) {
+                return false;
+            }
+        }
+        for (String alias : aliases) {
+            if (alias.length() > 0 && titleLc.contains(alias)) {
+                return true;
+            }
+        }
+        return tagMatches(aliases, info) || matchAiDescriptionAliases(aliases, info);
+    }
+
+    /**
+     * 标签匹配：精确 token 或“忽略命名空间前缀”后的值匹配。
+     * 例如搜索词 "arknights" 可命中 "parody:arknights"；"ai generated" 可命中 "other:ai+generated"。
+     * 只做精确比较，不做子串，避免 "parody:arknights" 误配 "parody:arknights endfield"。
+     */
+    private boolean tagMatches(List<String> aliases, DownloadInfo info) {
         if (info.tgList == null || info.tgList.isEmpty()) {
             info.tgList = searchTagList(info.gid);
         }
         if (info.tgList == null) {
             return false;
         }
-
-        String[] searchTags = mSearchKey.split("\\s+");
-
-        boolean result = true;
-        for (String searchTag : searchTags) {
-            if (!info.tgList.contains(searchTag)) {
-                result = false;
-                break;
+        Set<String> aliasSet = new HashSet<>(aliases);
+        for (String tg : info.tgList) {
+            if (aliasSet.contains(normalizeTagToken(tg))) {
+                return true;
+            }
+            int idx = tg.indexOf(':');
+            if (idx >= 0) {
+                if (aliasSet.contains(normalizeTagToken(tg.substring(idx + 1)))) {
+                    return true;
+                }
             }
         }
+        return false;
+    }
 
+    /** 标签/搜索词归一化：小写，e-hentai 标签中的 '+' 表示空格。 */
+    private static String normalizeTagToken(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.trim().toLowerCase(Locale.ROOT).replace('+', ' ');
+    }
 
-        return result;
+    /** AI 描述包含任一别名（小写，LOCALE 无关）。 */
+    private boolean matchAiDescriptionAliases(List<String> aliases, DownloadInfo info) {
+        if (info == null || aliases == null || aliases.isEmpty()) {
+            return false;
+        }
+        try {
+            com.hippo.ehviewer.dao.GalleryAiInfo aiInfo = EhDB.queryGalleryAiInfo(info.gid);
+            if (aiInfo == null) {
+                return false;
+            }
+            if (containsAny(aliases, aiInfo.getSummary())) {
+                return true;
+            }
+            if (containsAny(aliases, aiInfo.getTags())) {
+                return true;
+            }
+            return containsAny(aliases, aiInfo.getDescriptions());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static boolean containsAny(List<String> aliases, String text) {
+        if (text == null || text.isEmpty() || aliases == null || aliases.isEmpty()) {
+            return false;
+        }
+        String lower = text.toLowerCase(Locale.ROOT);
+        for (String alias : aliases) {
+            if (alias.length() > 0 && lower.contains(alias)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 布尔表达式分支：一组以 AND 连接的正词 + 一组排除词。
+     * 由 parseBooleanQuery 从 e-hentai f_search 表达式（如 "(a -b) OR (c d)"）解析而来。
+     */
+    private static class SearchBranch {
+        final List<String> positives = new ArrayList<>();
+        final List<String> negatives = new ArrayList<>();
+        final String raw; // 原始分支文本（不含最外层括号），用于标题整串兼容匹配
+
+        SearchBranch(String raw) {
+            this.raw = raw;
+        }
+    }
+
+    /**
+     * 把查询解析为若干 OR 分支。
+     * 顶层按 " OR "（深度 0，引号外，大小写不敏感）切分；
+     * 分支内按空格（引号内除外）切分为词条，"-" 前缀归入排除词；
+     * 最外层括号被剥离。畸形输入防御性处理。
+     */
+    private static List<SearchBranch> parseBooleanQuery(String query) {
+        List<SearchBranch> branches = new ArrayList<>();
+        if (query == null || query.trim().isEmpty()) {
+            return branches;
+        }
+        List<String> parts = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        int depth = 0;
+        boolean inQuote = false;
+        String s = query;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"') {
+                inQuote = !inQuote;
+            }
+            if (!inQuote) {
+                if (c == '(') {
+                    depth++;
+                } else if (c == ')') {
+                    depth = Math.max(0, depth - 1);
+                }
+                // 深度 0 处识别 " OR "
+                if (depth == 0 && i + 2 < s.length() && Character.isWhitespace(c)
+                        && (Character.toLowerCase(s.charAt(i + 1)) == 'o')
+                        && (Character.toLowerCase(s.charAt(i + 2)) == 'r')
+                        && (i + 3 >= s.length() || Character.isWhitespace(s.charAt(i + 3)))) {
+                    if (cur.length() > 0) {
+                        parts.add(cur.toString());
+                        cur.setLength(0);
+                    }
+                    i += 3; // 跳过 " OR" 与后面的一个空格
+                    continue;
+                }
+            }
+            cur.append(c);
+        }
+        if (cur.length() > 0) {
+            parts.add(cur.toString());
+        }
+        for (String part : parts) {
+            SearchBranch branch = parseBranch(part);
+            if (branch != null) {
+                branches.add(branch);
+            }
+        }
+        return branches;
+    }
+
+    private static SearchBranch parseBranch(String part) {
+        String s = part.trim();
+        if (s.isEmpty()) {
+            return null;
+        }
+        while (s.startsWith("(") && s.endsWith(")") && isBalancedOuter(s)) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+        SearchBranch branch = new SearchBranch(s);
+        for (String token : tokenizeSpaces(s)) {
+            String term = token;
+            boolean negative = false;
+            while (term.startsWith("-") && !isQuoted(term)) {
+                negative = true;
+                term = term.substring(1);
+            }
+            if (term.isEmpty()) {
+                continue;
+            }
+            if (negative) {
+                branch.negatives.add(term);
+            } else {
+                branch.positives.add(term);
+            }
+        }
+        if (branch.positives.isEmpty() && branch.negatives.isEmpty()) {
+            return null;
+        }
+        return branch;
+    }
+
+    /** 按空格分词，双引号内的空格不切分。 */
+    private static List<String> tokenizeSpaces(String input) {
+        List<String> tokens = new ArrayList<>();
+        boolean inQuote = false;
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '"') {
+                inQuote = !inQuote;
+                sb.append(c);
+            } else if (Character.isWhitespace(c) && !inQuote) {
+                if (sb.length() > 0) {
+                    tokens.add(sb.toString());
+                    sb.setLength(0);
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        if (sb.length() > 0) {
+            tokens.add(sb.toString());
+        }
+        return tokens;
+    }
+
+    private static boolean isQuoted(String s) {
+        return s.length() >= 2 && s.startsWith("\"") && s.endsWith("\"");
+    }
+
+    private static boolean isBalancedOuter(String s) {
+        if (s.length() < 2) {
+            return false;
+        }
+        int depth = 0;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '(') {
+                depth++;
+            } else if (c == ')') {
+                depth--;
+                if (depth < 0) {
+                    return false;
+                }
+            }
+        }
+        return depth == 0;
     }
 
     /**

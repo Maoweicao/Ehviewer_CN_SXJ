@@ -70,6 +70,19 @@
                 android:layout_marginTop="2dp"/>
 
             <TextView
+                android:id="@+id/local_rating_text"
+                style="@style/CardMessage"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_toRightOf="@id/rating"
+                android:layout_below="@id/uploader"
+                android:layout_marginLeft="6dp"
+                android:layout_marginTop="2dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:visibility="gone"/>
+
+            <TextView
                 android:id="@+id/folder_time"
                 style="@style/CardMessage"
                 android:layout_width="wrap_content"

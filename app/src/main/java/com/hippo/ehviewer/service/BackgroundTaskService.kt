@@ -50,8 +50,38 @@ class BackgroundTaskService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val LOCK_REFRESH_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
 
+        // stop() 合并延迟：任务全部结束后延迟一段时间再真正停服务。
+        // 任务快速启停时（上一任务刚结束、下一任务立即开始），频繁销毁/重建
+        // 前台服务会让系统反复打开 startForegroundService -> startForeground
+        // 的超时窗口，是 ForegroundServiceDidNotStartInTimeException 的重要诱因。
+        private const val STOP_DELAY_MS = 2000L
+
         const val EXTRA_ACTIVE_TASK_COUNT = "active_task_count"
         const val EXTRA_TASK_NAME = "task_name"
+
+        // 用于串行化 start/stop 竞态，以及去重排队中的启动投递。
+        // BackgroundTaskManager 从工作线程调用 start()/stop()，若不做保护，
+        // 快速的任务启停会在主线程消息队列中堆积多个 doStart，或与 stop 交错，
+        // 导致系统要求的 startForeground() 未在超时窗口内被调用而崩溃。
+        private val lock = Any()
+        private var startScheduled = false
+
+        // 主线程上待执行的延迟停止任务；新的 start() 会取消它。
+        private var pendingStop: Runnable? = null
+
+        // 服务当前是否已处于运行（前台）状态。以 Service 生命周期为准：
+        // onCreate 置 true，onDestroy 置 false。
+        //
+        // 系统对每一次 startForegroundService() 调用都要求随后在超时窗口内
+        // （主线程能跑起来的前提下）完成 startForeground()，计时按墙钟走。
+        // 大规模任务场景下每秒都有任务启停，若每次都走 startForegroundService，
+        // 倒计时窗口会被反复打开；一旦主线程被进度消息淹没，onStartCommand
+        // 排队超时即崩溃（本应用历史上最频发的 ForegroundServiceDidNotStartInTimeException）。
+        // 因此：服务已运行时一律用普通 startService() 更新（不开新窗口，
+        // 且持有前台服务的进程对 startService 没有后台启动限制），
+        // 只在服务真正不运行时才允许 startForegroundService()。
+        @Volatile
+        private var sServiceRunning = false
 
         @JvmStatic
         fun start(context: Context, taskName: String?, activeCount: Int): Boolean {
@@ -65,11 +95,28 @@ class BackgroundTaskService : Service() {
                     putExtra(EXTRA_ACTIVE_TASK_COUNT, activeCount)
                     putExtra(EXTRA_TASK_NAME, taskName)
                 }
-                if (Looper.myLooper() == Looper.getMainLooper()) {
-                    doStart(context, intent)
-                } else {
-                    SimpleHandler.getInstance().post { doStart(context, intent) }
-                    true
+                synchronized(lock) {
+                    // 新任务到来：取消尚未执行的延迟停止，避免服务刚停又被重建。
+                    pendingStop?.let { SimpleHandler.getInstance().removeCallbacks(it) }
+                    pendingStop = null
+                    if (Looper.myLooper() == Looper.getMainLooper()) {
+                        startScheduled = false
+                        doStart(context, intent)
+                    } else {
+                        if (startScheduled) {
+                            // 已排队一个启动投递，避免重复堆积。
+                            // 排队中的投递持有旧 intent（旧任务名/数量），服务已在
+                            // 运行时仅用于更新通知，短暂滞后可接受。
+                            true
+                        } else {
+                            startScheduled = true
+                            SimpleHandler.getInstance().post {
+                                synchronized(lock) { startScheduled = false }
+                                doStart(context, intent)
+                            }
+                            true
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 // ForegroundServiceStartNotAllowedException (Android 12+),
@@ -79,8 +126,47 @@ class BackgroundTaskService : Service() {
             }
         }
 
+        @JvmStatic
+        fun stop(context: Context) {
+            // 与 start 共享锁，确保 stop 不会夹在“已投递但尚未执行的 start”之间。
+            // 真正的 stopService 延迟 STOP_DELAY_MS 执行，期间若有新任务 start()
+            // 会取消该次停止，从而把“反复销毁/重建前台服务”合并为一次生命周期。
+            // 注意：这里不取消已排队的 start 投递——若 stop 与新任务的 start 交错，
+            // start 投递先执行（服务启动），随后延迟停止在 2 秒后兜底收尾，
+            // 语义依然一致。
+            synchronized(lock) {
+                startScheduled = false
+                // 若已有待执行的延迟停止，先移除旧的可执行体再重新计时，
+                // 避免多个 stop 叠加时执行过期的旧 context。
+                pendingStop?.let { SimpleHandler.getInstance().removeCallbacks(it) }
+                val stopTask = Runnable {
+                    synchronized(lock) {
+                        pendingStop = null
+                        try {
+                            context.stopService(Intent(context, BackgroundTaskService::class.java))
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to stop foreground service", e)
+                        }
+                    }
+                }
+                pendingStop = stopTask
+                SimpleHandler.getInstance().postDelayed(stopTask, STOP_DELAY_MS)
+            }
+        }
+
         private fun doStart(context: Context, intent: Intent): Boolean {
             return try {
+                if (sServiceRunning) {
+                    // 服务已在前台运行：用普通 startService 更新即可，
+                    // 不再打开新的 startForeground 超时窗口。
+                    try {
+                        context.startService(intent)
+                        return true
+                    } catch (e: IllegalStateException) {
+                        // 竞态下服务可能刚好被系统停止，退回 startForegroundService 重建。
+                        Log.w(TAG, "startService failed on running service, falling back to startForegroundService", e)
+                    }
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
@@ -94,10 +180,6 @@ class BackgroundTaskService : Service() {
             }
         }
 
-        @JvmStatic
-        fun stop(context: Context) {
-            context.stopService(Intent(context, BackgroundTaskService::class.java))
-        }
     }
 
     private var mWakeLock: PowerManager.WakeLock? = null
@@ -107,24 +189,33 @@ class BackgroundTaskService : Service() {
     @SuppressLint("WakelockTimeout")
     override fun onCreate() {
         super.onCreate()
+        // 以服务真实生命周期维护运行标志：此后 companion 的 doStart 会改走
+        // 普通 startService 更新，不再打开新的 startForeground 超时窗口。
+        sServiceRunning = true
 
-        // 必须在系统超时窗口内调用 startForeground()。
-        // 先确保通知渠道存在（Android 8+ 必须），再立即 startForeground，
-        // 避免渠道创建或通知构建异常导致 startForeground 未被调用而崩溃。
-        try {
-            ensureNotificationChannel()
-            startForegroundCompat(0, null)
-            Log.d(TAG, "startForeground called in onCreate")
-        } catch (e: Throwable) {
-            // startForeground 失败时立即停止服务，避免系统抛出
-            // ForegroundServiceDidNotStartInTimeException 导致崩溃
-            Log.e(TAG, "Failed to startForeground in onCreate, stopping service", e)
+        // 系统要求 startForegroundService() 后必须在超时窗口（约 5s）内调用
+        // startForeground()，否则抛出 ForegroundServiceDidNotStartInTimeException。
+        // 因此这里把 startForeground() 作为 onCreate 的第一优先级操作，先以最小
+        // 通知满足时限，再补建渠道/刷新通知内容。任何情况下都不能在未调用
+        // startForeground() 之前 return。
+        if (!startForegroundSafely(0, null)) {
+            // 所有尝试都失败时：先调用一次不带类型的最稳妥 startForeground 兜底，
+            // 仍失败才停止服务。绝不静默返回而漏掉 startForeground()。
+            Log.e(TAG, "startForeground ultimately failed in onCreate, stopping service")
             try {
                 stopSelf()
             } catch (_: Throwable) {
             }
             return
         }
+        // 满足时限后再确保渠道存在，通知的真实内容/数量由 onStartCommand 提供并刷新
+        try {
+            ensureNotificationChannel()
+        } catch (e: Throwable) {
+            // 渠道创建失败不影响已满足时限的前台状态，仅记录
+            Log.w(TAG, "Failed to ensure notification channel in onCreate", e)
+        }
+        Log.d(TAG, "startForeground called in onCreate")
 
         // Initialize WakeLock
         try {
@@ -157,18 +248,46 @@ class BackgroundTaskService : Service() {
     }
 
     /**
-     * 在 Android 14+（API 34）使用带前台服务类型的三参数版本，
-     * 兼容旧版本两参数版本。避免类型未声明时抛异常。
+     * 尽力调用 startForeground()，返回是否成功。
+     *
+     * 在 Android 14+（API 34）优先使用带前台服务类型的三参数版本，若该调用抛出
+     * （例如 dataSync 类型在当前时机被系统拒绝），则回退到两参数版本（系统会使用
+     * 清单中声明的 dataSync 类型）。两参数也失败才返回 false。
+     *
+     * 该函数只负责“满足系统 startForegroundService→startForeground 时限”这一件事，
+     * 调用方绝不能在未成功的情况下静默返回，否则会触发
+     * ForegroundServiceDidNotStartInTimeException。
      */
-    private fun startForegroundCompat(activeCount: Int, taskName: String?) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(
-                NOTIFICATION_ID,
-                buildNotification(activeCount, taskName),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, buildNotification(activeCount, taskName))
+    @SuppressLint("MissingPermission")
+    private fun startForegroundSafely(activeCount: Int, taskName: String?): Boolean {
+        val notification = try {
+            buildNotification(activeCount, taskName)
+        } catch (e: Throwable) {
+            // 通知构建失败：不再尝试以 null 调用（startForeground 不接受 null），
+            // 直接视为未能在时限内成功，交由调用方停止服务。
+            Log.e(TAG, "Failed to build notification", e)
+            return false
+        }
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                    )
+                } catch (e: Throwable) {
+                    // 带类型版本失败，回退到无类型版本（使用清单声明的类型）
+                    Log.w(TAG, "Typed startForeground failed, falling back to untyped", e)
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            true
+        } catch (e: Throwable) {
+            Log.e(TAG, "startForeground failed", e)
+            false
         }
     }
 
@@ -179,10 +298,11 @@ class BackgroundTaskService : Service() {
         // Without this, Android throws ForegroundServiceDidNotStartInTimeException.
         val activeCount = intent?.getIntExtra(EXTRA_ACTIVE_TASK_COUNT, 0) ?: 0
         val taskName = intent?.getStringExtra(EXTRA_TASK_NAME)
-        try {
-            startForegroundCompat(activeCount, taskName)
-        } catch (e: Throwable) {
-            Log.e(TAG, "Failed to startForeground in onStartCommand, stopping service", e)
+        if (!startForegroundSafely(activeCount, taskName)) {
+            // 前台状态未能确立：继续运行也无法保证不被系统回收/触发异常，先停止服务。
+            // 注意：这里只有在 startForegroundSafely 内部把 3 参数与 2 参数都尝试过、
+            // 仍失败时才走到，不会出现“漏调 startForeground()”的情况。
+            Log.e(TAG, "Failed to startForeground in onStartCommand, stopping service")
             try {
                 stopSelf()
             } catch (_: Throwable) {
@@ -203,6 +323,9 @@ class BackgroundTaskService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        // 服务生命周期结束：此后如再有任务需要前台保护，doStart 会重新走
+        // startForegroundService 完整流程（打开一次性超时窗口并立即满足）。
+        sServiceRunning = false
         stopLockRefresh()
         releaseWakeLock()
         Log.i(TAG, "Service destroyed, locks released")

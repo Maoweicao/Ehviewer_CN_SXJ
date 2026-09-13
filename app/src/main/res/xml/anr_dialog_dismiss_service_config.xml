@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    ANR 弹窗自动清除服务的无障碍配置：
+    - 仅监听窗口状态/内容变化事件，内容可检索；
+    - flagIncludeNotImportantViews 提高系统弹窗按钮的可见性；
+    - 不申请手势/投影等更高权限，最小化能力面。
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/anr_dismiss_service_description"
+    android:notificationTimeout="200" />

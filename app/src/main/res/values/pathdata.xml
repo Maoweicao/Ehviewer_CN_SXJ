@@ -18,6 +18,8 @@
 <resources>
     <string name="sort_path" translatable="false">M6,7h2.5L5,3.5 1.5,7L4,7v10L1.5,17L5,20.5 8.5,17L6,17L6,7zM10,5v2h12L22,5L10,5zM10,19h12v-2L10,17v2zM10,13h12v-2L10,11v2z</string>
     <string name="pd_close" translatable="false">M19,6.41L17.59,5L12,10.59L6.41,5L5,6.41L10.59,12L5,17.59L6.41,19L12,13.41L17.59,19L19,17.59L13.41,12L19,6.41Z</string>
+
+    <string name="pd_tune" translatable="false">M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h2V5h-2V3h-2v2h-2v2h2v2z</string>
     <string name="pd_pause" translatable="false">M14,19.14H18V5.14H14M6,19.14H10V5.14H6V19.14Z</string>
     <string name="pd_play" translatable="false">M8,5.14V19.14L19,12.14L8,5.14Z</string>
     <string name="pd_check_all" translatable="false">M0.41,13.41L6,19L7.41,17.58L1.83,12M22.24,5.58L11.66,16.17L7.5,12L6.07,13.41L11.66,19L23.66,7M18,7L16.59,5.58L10.24,11.93L11.66,13.34L18,7Z</string>

@@ -3,15 +3,9 @@ package com.hippo.ehviewer.task
 import android.content.Context
 import android.graphics.BitmapFactory
 import android.util.Log
-import android.util.SparseArray
-import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
-import com.hippo.ehviewer.client.EhEngine
-import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.EhUtils
-import com.hippo.ehviewer.client.data.PreviewSet
-import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
 import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.spider.SpiderDen
@@ -24,7 +18,6 @@ import kotlinx.coroutines.ensureActive
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
-import java.text.Normalizer
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
@@ -129,14 +122,14 @@ class PreDownloadMergeTask(
             finish(Outcome.PROCEED)
             return
         }
-        val newSet = toHashSet(newSpi)
+        val newSet = SpiderTokenUtils.toHashSet(newSpi)
         if (newSet.isEmpty()) {
             logAndProgress(100, "画廊 hash 为空，回退正常下载")
             finish(Outcome.PROCEED)
             return
         }
         logAndProgress(40, "已拉取 ${newSpi.pages} 页 / ${newSet.size} 个 hash")
-        val hashToNewIndex = buildHashToNewIndex(newSpi)
+        val hashToNewIndex = SpiderTokenUtils.buildHashToNewIndex(newSpi)
         // 同步 ptoken 索引，便于后续递进检测复用
         try {
             EhDB.putPtokensIndex(gid, newSet.joinToString(","), newSpi.pages)
@@ -200,22 +193,15 @@ class PreDownloadMergeTask(
 
     /** 数据库扫描候选：目录存在、作者 + 去日期标题相同的画廊（含已完成和未完成）。 */
     private fun findCandidates(newInfo: DownloadInfo): List<DownloadInfo> {
-        val newUploader = newInfo.uploader?.trim()?.lowercase(Locale.ROOT) ?: ""
-        val newCore = normalizeCoreTitle(EhUtils.getSuitableTitle(newInfo))
+        val newCore = SpiderTokenUtils.normalizeCoreTitle(EhUtils.getSuitableTitle(newInfo))
         if (newCore.isEmpty()) {
             return emptyList()
         }
         val result = mutableListOf<DownloadInfo>()
         for (info in getMergeableCandidates()) {
-            if (info.gid == newInfo.gid) continue
-            val candUploader = info.uploader?.trim()?.lowercase(Locale.ROOT) ?: ""
-            if (newUploader.isNotEmpty() && candUploader.isNotEmpty() && newUploader != candUploader) {
-                continue
+            if (SpiderTokenUtils.isSameCoreTitleAndAuthor(newInfo, info)) {
+                result.add(info)
             }
-            if (normalizeCoreTitle(EhUtils.getSuitableTitle(info)) != newCore) {
-                continue
-            }
-            result.add(info)
         }
         return result
     }
@@ -267,15 +253,6 @@ class PreDownloadMergeTask(
         }
     }
 
-    /** 标题归一化：剥离日期标签（如 2026.08.02 / 2026-05-21），NFKC 后小写。 */
-    private fun normalizeCoreTitle(title: String?): String {
-        if (title.isNullOrBlank()) return ""
-        var t = title.replace(DATE_REGEX, " ")
-        t = t.replace("🔄", " ")
-        t = Normalizer.normalize(t, Normalizer.Form.NFKC)
-        return t.trim().lowercase(Locale.ROOT)
-    }
-
     /** 将 DownloadInfo 状态码转为可读名称，用于日志。 */
     private fun stateName(state: Int): String = when (state) {
         DownloadInfo.STATE_INVALID -> "INVALID"
@@ -291,80 +268,14 @@ class PreDownloadMergeTask(
 
     /** 预拉取新画廊完整 pTokenMap（循环 preview 页）。失败返回 null。 */
     private suspend fun fetchNewSpiderInfo(info: DownloadInfo): SpiderInfo? {
-        val token = info.token
-        if (token.isNullOrEmpty()) return null
-        val client = EhApplication.getOkHttpClient(context)
-        val gid = info.gid
-        val gd = try {
-            EhEngine.getGalleryDetail(null, client, EhUrl.getGalleryDetailUrl(gid, token, 0, false))
-        } catch (_: Throwable) {
-            null
-        } ?: return null
-        val pages = if (gd.SpiderInfoPages > 0) gd.SpiderInfoPages else info.pages
-        val previewPages = gd.SpiderInfoPreviewPages
-        if (pages <= 0 || previewPages <= 0) return null
-
-        val spi = SpiderInfo()
-        spi.gid = gid
-        spi.token = token
-        spi.pages = pages
-        spi.previewPages = previewPages
-        spi.pTokenMap = SparseArray(pages)
-        val firstSet = gd.SpiderInfoPreviewSet
-        if (firstSet != null && firstSet.size() > 0) {
-            spi.previewPerPage = firstSet.size()
-            accumulatePreviews(spi, firstSet)
-        }
-        for (i in 1 until previewPages) {
+        return SpiderTokenUtils.fetchSpiderInfoFromRemote(context, info) { i, previewPages ->
             ensureNotCancelled()
-            try {
-                val pair = EhEngine.getPreviewSet(
-                    null, client, EhUrl.getGalleryDetailUrl(gid, token, i, false)
-                )
-                accumulatePreviews(spi, pair.first)
-            } catch (_: Throwable) {
-                return null
-            }
             val pct = 10 + (i * 30) / maxOf(previewPages, 1)
             postProgress(
                 pct,
                 context.getString(R.string.pre_download_merge_fetching) + " ${i + 1}/$previewPages"
             )
         }
-        if (spi.pTokenMap.size() == 0) return null
-        return spi
-    }
-
-    private fun accumulatePreviews(spi: SpiderInfo, set: PreviewSet) {
-        for (i in 0 until set.size()) {
-            val r = GalleryPageUrlParser.parse(set.getPageUrlAt(i)) ?: continue
-            val pToken = r.pToken
-            if (!pToken.isNullOrEmpty() && pToken != SpiderInfo.TOKEN_FAILED) {
-                spi.pTokenMap.put(r.page, pToken)
-            }
-        }
-    }
-
-    private fun toHashSet(spi: SpiderInfo): HashSet<String> {
-        val set = HashSet<String>()
-        for (i in 0 until spi.pTokenMap.size()) {
-            val t = spi.pTokenMap.valueAt(i)
-            if (!t.isNullOrEmpty() && t != SpiderInfo.TOKEN_FAILED) {
-                set.add(t)
-            }
-        }
-        return set
-    }
-
-    private fun buildHashToNewIndex(spi: SpiderInfo): HashMap<String, Int> {
-        val map = HashMap<String, Int>()
-        for (i in 0 until spi.pTokenMap.size()) {
-            val t = spi.pTokenMap.valueAt(i)
-            if (!t.isNullOrEmpty()) {
-                map[t] = spi.pTokenMap.keyAt(i)
-            }
-        }
-        return map
     }
 
     /** 候选画廊的 hash 全集：优先复用缓存，其次 PtokensIndex，最后读 .ehviewer。 */
@@ -378,25 +289,13 @@ class PreDownloadMergeTask(
     private fun readCandidateHashSet(info: DownloadInfo): HashSet<String>? {
         val pi = EhDB.getPtokensIndex(info.gid)
         if (pi != null) {
-            val s = pi.getPtokens()
-            if (!s.isNullOrBlank()) {
-                val set = HashSet<String>()
-                for (part in s.split(",")) {
-                    val t = part.trim()
-                    if (t.isNotEmpty() && t != SpiderInfo.TOKEN_FAILED) set.add(t)
-                }
-                if (set.isNotEmpty()) return set
-            }
+            val set = SpiderTokenUtils.parsePtokenString(pi.getPtokens())
+            if (set.isNotEmpty()) return set
         }
         val dir = SpiderDen.getExistingGalleryDownloadDir(info) ?: return null
         val f = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null
         val spi = SpiderInfo.read(f) ?: return null
-        val set = HashSet<String>()
-        for (i in 0 until spi.pTokenMap.size()) {
-            val t = spi.pTokenMap.valueAt(i)
-            if (!t.isNullOrEmpty() && t != SpiderInfo.TOKEN_FAILED) set.add(t)
-        }
-        return if (set.isEmpty()) null else set
+        return SpiderTokenUtils.toHashSet(spi).takeIf { it.isNotEmpty() }
     }
 
     /** 剪切候选画廊中与新画廊 hash 相同的文件到目标目录，并清理候选记录。 */
@@ -600,9 +499,6 @@ class PreDownloadMergeTask(
 
     companion object {
         private const val TAG = "PreDownloadMergeTask"
-        private val DATE_REGEX = Regex(
-            "(\\d{4}[-./年]\\d{1,2}[-./月]\\d{1,2})|(\\d{1,2}[-./月]\\d{1,2}[-./日]\\d{2,4})"
-        )
     }
 }
 

@@ -147,7 +147,7 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
                 return Result.failure(e)
             }
             Log.e(TAG, "Scan failed", e)
-            appendTaskLog("ERROR: %s", e.message ?: "Unknown error")
+            appendTaskLog(context.getString(R.string.progressive_scan_error_log, e.message ?: context.getString(R.string.progressive_scan_unknown_error)))
             notifyError(e)
             Result.failure(e)
         }
@@ -171,7 +171,7 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
             val dir = SpiderDen.getGalleryDownloadDir(info)
             if (dir == null || !dir.exists() || !dir.isDirectory) {
                 val pct = if (totalFolders > 0) (i + 1) * 15 / totalFolders else 0
-                updateProgress(pct, "Scanning: ${i + 1}/$totalFolders")
+                updateProgress(pct, context.getString(R.string.progressive_scan_folder_progress, i + 1, totalFolders))
                 continue
             }
 
@@ -198,10 +198,10 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
             }
 
             val pct = if (totalFolders > 0) (i + 1) * 15 / totalFolders else 0
-            updateProgress(pct, "Scanning: ${i + 1}/$totalFolders")
+            updateProgress(pct, context.getString(R.string.progressive_scan_folder_progress, i + 1, totalFolders))
         }
 
-        appendTaskLog("Scanned %d folders, %d have .ehviewer", totalFolders, tempResults.size)
+        appendTaskLog(context.getString(R.string.progressive_scan_folder_log, totalFolders, tempResults.size))
 
         // Build global hash -> int mapping
         val hashToInt = HashMap<String, Int>()
@@ -213,7 +213,7 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
                 }
             }
         }
-        appendTaskLog("Unique hashes: %d", hashToInt.size)
+        appendTaskLog(context.getString(R.string.progressive_scan_unique_hashes_log, hashToInt.size))
 
         // Convert to int-based representation
         val result = tempResults.map { t ->
@@ -292,13 +292,13 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
 
                 if (checkedCandidates % 500 == 0L) {
                     val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
-                    updateProgress(pct, "Comparing: $checkedCandidates/$totalCandidates")
+                    updateProgress(pct, context.getString(R.string.progressive_scan_comparing, checkedCandidates, totalCandidates))
                 }
             }
 
             if (i % 100 == 0) {
                 val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
-                updateProgress(pct, "Index scan: ${i + 1}/$n")
+                updateProgress(pct, context.getString(R.string.progressive_scan_index_progress, i + 1, n))
             }
         }
 
@@ -306,8 +306,8 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         for (arr in hashToOwners) arr.clear()
 
         ensureNotCancelled()
-        updateProgress(80, "Building chains...")
-        appendTaskLog("Index: %d galleries, %d candidates checked", n, checkedCandidates)
+        updateProgress(80, context.getString(R.string.progressive_scan_building_chains))
+        appendTaskLog(context.getString(R.string.progressive_scan_index_log, n, checkedCandidates))
         return buildChainsFromComponents(sorted, uf, n)
     }
 
@@ -435,10 +435,10 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
         val scanTime = System.currentTimeMillis()
         if (ProgressivePlanManager.saveScanResults(scanResults, scanTime)) {
             Log.d(TAG, "Results saved to external ProgressiveScan dir")
-            appendTaskLog("Results saved (%d chains)", scanResults.size)
+            appendTaskLog(context.getString(R.string.progressive_scan_results_saved_log, scanResults.size))
         } else {
             Log.e(TAG, "Failed to save results")
-            appendTaskLog("ERROR: Failed to save results")
+            appendTaskLog(context.getString(R.string.progressive_scan_save_failed_log))
         }
     }
 }

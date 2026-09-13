@@ -128,6 +128,20 @@ public class GalleryInfo implements Parcelable {
     public ArrayList<String> tgList;
 
     /**
+     * This gallery has been replaced/updated; the current version (from API current_gid/current_key).
+     * -1L or null means not set.
+     */
+    public long currentGid = -1L;
+    public String currentKey;
+
+    /**
+     * This gallery has been merged into a parent gallery (from API parent_gid/parent_key).
+     * -1L or null means not set.
+     */
+    public long parentGid = -1L;
+    public String parentKey;
+
+    /**
      * language from title
      */
     public String simpleLanguage;
@@ -251,6 +265,10 @@ public class GalleryInfo implements Parcelable {
         dest.writeInt(this.favoriteSlot);
         dest.writeString(this.favoriteName);
         dest.writeList(this.tgList);
+        dest.writeLong(this.currentGid);
+        dest.writeString(this.currentKey);
+        dest.writeLong(this.parentGid);
+        dest.writeString(this.parentKey);
     }
 
     public GalleryInfo() {
@@ -277,6 +295,10 @@ public class GalleryInfo implements Parcelable {
         this.favoriteSlot = in.readInt();
         this.favoriteName = in.readString();
         this.tgList = in.readArrayList(String.class.getClassLoader());
+        this.currentGid = in.readLong();
+        this.currentKey = in.readString();
+        this.parentGid = in.readLong();
+        this.parentKey = in.readString();
     }
 
     public static final Creator<GalleryInfo> CREATOR = new Creator<>() {

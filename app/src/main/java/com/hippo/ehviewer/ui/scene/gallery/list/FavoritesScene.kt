@@ -68,6 +68,7 @@ import com.hippo.ehviewer.client.EhClient
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhRequest
 import com.hippo.ehviewer.client.EhUrl
+import com.hippo.ehviewer.client.MergedGalleryChecker
 import com.hippo.ehviewer.client.data.FavListUrlBuilder
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.parser.FavoritesParser
@@ -467,6 +468,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
     override fun onResume() {
         super.onResume()
         mFabLayout?.setShowFabFunctionName(Settings.getShowFabFunctionName())
+        // 返回列表时刷新一次，确保“已下载/已删除”等标注与下载列表及下载历史保持一致
+        mAdapter?.notifyDataSetChanged()
     }
 
     override fun onCreateDrawerView(
@@ -637,32 +640,56 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             val downloadManager = EhApplication.getDownloadManager(context)
             val isDownloaded = downloadManager.getDownloadState(gi.gid) == DownloadInfo.STATE_FINISH
 
-            val items = mutableListOf<String>()
             val unfavoriteLabel = getString(R.string.favorite_remove_from_favorites)
             val downloadLabel = getString(R.string.download)
-            items.add(unfavoriteLabel)
-            if (!isDownloaded) {
-                items.add(downloadLabel)
-            }
 
-            AlertDialog.Builder(getDialogContext()!!)
-                .setTitle(gi.title ?: gi.titleJpn)
-                .setItems(items.toTypedArray()) { _, which ->
-                    when (items[which]) {
-                        unfavoriteLabel -> {
-                            removeFavorite(gi)
-                        }
-                        downloadLabel -> {
-                            val activity = getActivity2()
-                            if (activity != null) {
-                                CommonOperations.startDownload(activity, listOf(gi), false)
-                            }
-                        }
-                    }
-                }
-                .show()
+            MergedGalleryChecker.check(context, gi) { target ->
+                showLongClickDialog(gi, isDownloaded, unfavoriteLabel, downloadLabel, target)
+            }
         }
         return true
+    }
+
+    private fun showLongClickDialog(
+        gi: GalleryInfo,
+        isDownloaded: Boolean,
+        unfavoriteLabel: String,
+        downloadLabel: String,
+        mergedTarget: MergedGalleryChecker.MergedTarget?
+    ) {
+        val dialogContext = getDialogContext() ?: return
+        val items = mutableListOf<String>()
+        items.add(unfavoriteLabel)
+        if (!isDownloaded) {
+            items.add(downloadLabel)
+        }
+        val jumpLabel: String
+        if (mergedTarget != null) {
+            jumpLabel = getString(R.string.jump_to_merged_gallery)
+            items.add(jumpLabel)
+        } else {
+            jumpLabel = ""
+        }
+
+        AlertDialog.Builder(dialogContext)
+            .setTitle(gi.title ?: gi.titleJpn)
+            .setItems(items.toTypedArray()) { _, which ->
+                when (items[which]) {
+                    unfavoriteLabel -> {
+                        removeFavorite(gi)
+                    }
+                    downloadLabel -> {
+                        val activity = getActivity2()
+                        if (activity != null) {
+                            CommonOperations.startDownload(activity, listOf(gi), false)
+                        }
+                    }
+                    jumpLabel -> {
+                        startScene(MergedGalleryChecker.createJumpAnnouncer(mergedTarget!!))
+                    }
+                }
+            }
+            .show()
     }
 
     @Implemented(SearchBarMover.Helper::class)
@@ -756,6 +783,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
     @Implemented(SearchBar.Helper::class)
     override fun onClickAdvance() {
+        // 恒定功能：高级搜索按钮 -> 关键字编辑器
+        mSearchBar?.showKeywordEditor()
     }
 
     override fun onExpand(expanded: Boolean) {

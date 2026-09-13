@@ -112,31 +112,58 @@ public class GalleryCacheManager {
         UniFile downloadDir = SpiderDen.getGalleryDownloadDir(new GalleryInfo() {{
             this.gid = gid;
         }});
-        
+
         if (downloadDir == null || !downloadDir.isDirectory()) {
             Log.d(TAG, "下载目录不存在: GID " + gid);
             return null;
         }
-        
+
+        return readGalleryCacheFromDir(gid, downloadDir);
+    }
+
+    /**
+     * 从指定下载目录读取画廊缓存
+     * @param gid 画廊ID
+     * @param downloadDir 下载目录的UniFile
+     * @return 缓存的GalleryDetail，如果不存在则返回null
+     */
+    @Nullable
+    public GalleryDetail readGalleryCache(long gid, @NonNull UniFile downloadDir) {
+        if (downloadDir == null || !downloadDir.isDirectory()) {
+            Log.d(TAG, "下载目录无效: GID " + gid);
+            return null;
+        }
+
+        return readGalleryCacheFromDir(gid, downloadDir);
+    }
+
+    /**
+     * 从指定下载目录读取画廊缓存的内部方法
+     * @param gid 画廊ID
+     * @param downloadDir 下载目录的UniFile
+     * @return 缓存的GalleryDetail，如果不存在则返回null
+     */
+    @Nullable
+    private GalleryDetail readGalleryCacheFromDir(long gid, @NonNull UniFile downloadDir) {
         UniFile cacheFile = downloadDir.findFile(GALLERY_CACHE_FILENAME);
         if (cacheFile == null) {
             Log.d(TAG, "缓存文件不存在: GID " + gid);
             return null;
         }
-        
+
         try {
             String jsonContent = readTextFile(cacheFile);
             if (jsonContent == null || jsonContent.isEmpty()) {
                 Log.w(TAG, "缓存文件内容为空: GID " + gid);
                 return null;
             }
-            
+
             JSONObject jsonObject = JSON.parseObject(jsonContent);
             if (jsonObject == null || jsonObject.getLongValue(KEY_GID) != gid) {
                 Log.w(TAG, "缓存文件内容无效或GID不匹配: GID " + gid);
                 return null;
             }
-            
+
             return parseJsonToGalleryDetail(jsonObject);
         } catch (Exception e) {
             Log.e(TAG, "读取画廊缓存失败: GID " + gid, e);

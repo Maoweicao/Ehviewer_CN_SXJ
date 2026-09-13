@@ -112,6 +112,11 @@ object HealthWatchdog {
                 val sinceProcessed = now - lastProcessedTime
 
                 if (sinceProcessed >= BLOCK_THRESHOLD_MS) {
+                    // 主线程阻塞持续中：周期性请求清除系统 ANR 弹窗（点击"等待"）。
+                    // 系统 ANR 弹窗通常在无响应约 5 秒后弹出，看门狗 3.5s 即预判阻塞，
+                    // 心跳 2s 一次的调用配合服务内部防抖正好覆盖弹窗出现前后的窗口期；
+                    // 服务内部会再校验设置开关与活跃后台任务数，平时不产生任何动作。
+                    AnrDialogDismissService.requestDismiss()
                     if (blocked.compareAndSet(false, true)) {
                         Log.w(TAG, "Main thread blocked for ${sinceProcessed}ms, dumping diagnostics")
                         requestDump("main_thread_blocked(${sinceProcessed}ms)", false)

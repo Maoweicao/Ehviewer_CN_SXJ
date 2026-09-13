@@ -8,6 +8,7 @@ import android.os.Looper;
 import android.util.Log;
 import android.view.View;
 import android.widget.CheckBox;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -60,6 +61,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
     private TextView emptyText;
     private LinearLayout stepButtons;
     private LinearLayout backupPanel;
+    private LinearLayout scanningPanel;
     private CheckBox cbBackup;
     private CheckBox cbDeleteMissing;
 
@@ -92,6 +94,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         btnConfirmMerge = findViewById(R.id.btn_confirm_merge);
         stepButtons = findViewById(R.id.step_buttons);
         backupPanel = findViewById(R.id.backup_panel);
+        scanningPanel = findViewById(R.id.scanning_panel);
         cbBackup = findViewById(R.id.cb_backup);
         cbDeleteMissing = findViewById(R.id.cb_delete_missing);
         recyclerView = findViewById(R.id.recycler_view);
@@ -128,6 +131,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
             progressBar.setProgress(activeTask.getProgressPercentage());
             recyclerView.setVisibility(View.GONE);
             emptyText.setVisibility(View.GONE);
+            scanningPanel.setVisibility(View.VISIBLE);
             btnGeneratePlan.setVisibility(View.GONE);
             btnConfirmMerge.setVisibility(View.GONE);
             backupPanel.setVisibility(View.GONE);
@@ -158,7 +162,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
                     String detail = info.getProgressDetail();
                     if (detail != null && !detail.isEmpty()) statusText.setText(detail);
                     if (info.isCompleted()) { activeTaskId = null; onScanComplete(); return; }
-                    if (info.isCancelled()) { activeTaskId = null; onScanFailed("Scan cancelled"); return; }
+                    if (info.isCancelled()) { activeTaskId = null; onScanFailed(getString(R.string.progressive_scan_cancelled)); return; }
                     if (info.getErrorMessage() != null) { activeTaskId = null; onScanFailed(info.getErrorMessage()); return; }
                 }
                 mainHandler.postDelayed(this, 500);
@@ -185,14 +189,14 @@ public class ProgressiveManagerActivity extends ToolbarActivity
                         activeTaskId = null; merging = false;
                         progressBar.setVisibility(View.GONE);
                         enableAllButtons(currentResults != null && !currentResults.isEmpty());
-                        statusText.setText("Merge cancelled");
+                        statusText.setText(R.string.progressive_merge_cancelled);
                         return;
                     }
                     if (info.getErrorMessage() != null) {
                         activeTaskId = null; merging = false;
                         progressBar.setVisibility(View.GONE);
                         enableAllButtons(currentResults != null && !currentResults.isEmpty());
-                        statusText.setText("Merge failed: " + info.getErrorMessage());
+                        statusText.setText(getString(R.string.progressive_merge_failed_detail, info.getErrorMessage()));
                         return;
                     }
                 }
@@ -324,13 +328,13 @@ public class ProgressiveManagerActivity extends ToolbarActivity
             statusText.setText(msg);
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
         } else {
-            Toast.makeText(this, "Failed to save merge plan", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, R.string.progressive_save_plan_failed, Toast.LENGTH_LONG).show();
         }
     }
 
     private void showConfirmMergeDialog() {
         if (currentPlan == null || currentPlan.getChains().isEmpty()) {
-            Toast.makeText(this, "No merge plan available", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.progressive_no_plan, Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -392,7 +396,8 @@ public class ProgressiveManagerActivity extends ToolbarActivity
                 } else if (info != null && (info.isCancelled() || info.getErrorMessage() != null)) {
                     merging = false;
                     enableAllButtons(currentResults != null && !currentResults.isEmpty());
-                    statusText.setText("Backup failed: " + (info.getErrorMessage() != null ? info.getErrorMessage() : "cancelled"));
+                    statusText.setText(getString(R.string.progressive_backup_failed_detail,
+                            info.getErrorMessage() != null ? info.getErrorMessage() : getString(R.string.progressive_scan_cancelled)));
                 } else {
                     mainHandler.postDelayed(this, 800);
                 }
@@ -504,6 +509,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         progressBar.setProgress(0);
         recyclerView.setVisibility(View.GONE);
         emptyText.setVisibility(View.GONE);
+        scanningPanel.setVisibility(View.VISIBLE);
         btnGeneratePlan.setVisibility(View.GONE);
         btnConfirmMerge.setVisibility(View.GONE);
         backupPanel.setVisibility(View.GONE);
@@ -519,6 +525,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
     private void onScanComplete() {
         scanning = false;
         progressBar.setVisibility(View.GONE);
+        scanningPanel.setVisibility(View.GONE);
 
         List<ProgressiveScanTask.ProgressiveChain> results = ProgressiveScanTask.loadResults();
         results = filterIgnored(results);
@@ -541,6 +548,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
     private void onScanFailed(String error) {
         scanning = false;
         progressBar.setVisibility(View.GONE);
+        scanningPanel.setVisibility(View.GONE);
         statusText.setText(getString(R.string.progressive_scan_error, error));
         Toast.makeText(this, getString(R.string.progressive_scan_error, error), Toast.LENGTH_LONG).show();
         enableAllButtons(currentResults != null && !currentResults.isEmpty());
@@ -591,7 +599,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
     @Override
     public void onMerge(long targetGid, List<Long> sourceGids) {
         if (sourceGids.isEmpty()) {
-            Toast.makeText(this, "No source folders to merge", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, R.string.progressive_no_source_folders, Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -652,7 +660,7 @@ public class ProgressiveManagerActivity extends ToolbarActivity
         long gid = mostComplete != null ? mostComplete.getGid() : chain.getFolders().get(0).getGid();
         DownloadInfo info = EhDB.getDownloadInfo(gid);
         if (info == null) {
-            Toast.makeText(this, "Download record not found for gid=" + gid, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, getString(R.string.progressive_scan_download_not_found, gid), Toast.LENGTH_SHORT).show();
             return;
         }
         Intent intent = new Intent(this, GalleryActivity.class);

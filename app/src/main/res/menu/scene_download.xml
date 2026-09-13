@@ -170,6 +170,14 @@
                         android:id="@+id/sort_by_state_queue_desc"
                         android:title="@string/sort_by_state_queue_desc"
                         app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/sort_by_remaining_pages_asc"
+                        android:title="@string/sort_by_remaining_pages_asc"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/sort_by_remaining_pages_desc"
+                        android:title="@string/sort_by_remaining_pages_desc"
+                        app:showAsAction="ifRoom"/>
                 </menu>
             </item>
 
@@ -201,6 +209,10 @@
                     <item
                         android:id="@+id/quick_filter_old_unfavorited"
                         android:title="@string/quick_filter_old_unfavorited"
+                        app:showAsAction="ifRoom"/>
+                    <item
+                        android:id="@+id/quick_filter_ai_generated"
+                        android:title="@string/quick_filter_ai_generated"
                         app:showAsAction="ifRoom"/>
                 </menu>
             </item>

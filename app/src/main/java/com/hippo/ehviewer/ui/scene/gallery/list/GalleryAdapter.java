@@ -35,11 +35,13 @@ import androidx.recyclerview.widget.StaggeredGridLayoutManager;
 import com.hippo.drawable.TriangleDrawable;
 import com.hippo.easyrecyclerview.MarginItemDecoration;
 import com.hippo.ehviewer.EhApplication;
+import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
+import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.ui.scene.GalleryHolder;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
@@ -236,6 +238,7 @@ abstract class GalleryAdapter extends RecyclerView.Adapter<GalleryHolder> {
                 }
                 holder.favourited.setVisibility((mShowFavourited && gi.favoriteSlot >= -1 && gi.favoriteSlot <= 10) ? View.VISIBLE : View.GONE);
                 holder.downloaded.setVisibility(mDownloadManager.containDownloadInfo(gi.gid) ? View.VISIBLE : View.GONE);
+                bindDeletedStatus(holder, gi.gid);
                 break;
             }
             case TYPE_GRID: {
@@ -257,6 +260,24 @@ abstract class GalleryAdapter extends RecyclerView.Adapter<GalleryHolder> {
 
         // Update transition name
         ViewCompat.setTransitionName(holder.thumb, TransitionNameFactory.getThumbTransitionName(gi.gid));
+    }
+
+    /**
+     * 读取下载历史：存在历史记录但已不在下载列表中（下载已被删除/移除）时
+     * 显示删除标记，提醒用户该画廊曾下载过，避免重复下载。
+     * 重复/递进合并的画廊由合并标记表示，不显示删除标记。
+     */
+    private void bindDeletedStatus(@NonNull GalleryHolder holder, long gid) {
+        if (holder.deleted == null) {
+            return;
+        }
+        DownloadHistory history = EhDB.getDownloadHistory(gid);
+        boolean merged = history != null
+                && (history.getDeletionType() == DownloadHistory.DELETION_DUPLICATE_MERGED
+                || history.getDeletionType() == DownloadHistory.DELETION_PROGRESSIVE_MERGED);
+        boolean deleted = history != null && !merged
+                && !mDownloadManager.containDownloadInfo(gid);
+        holder.deleted.setVisibility(deleted ? View.VISIBLE : View.GONE);
     }
 
     /**

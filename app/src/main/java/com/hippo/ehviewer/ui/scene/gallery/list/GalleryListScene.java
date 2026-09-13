@@ -75,7 +75,6 @@ import com.hippo.android.resource.AttrResources;
 import com.hippo.app.CheckBoxDialogBuilder;
 import com.hippo.app.EditTextDialogBuilder;
 import com.hippo.drawable.AddDeleteDrawable;
-import com.hippo.drawable.DrawerArrowDrawable;
 import com.hippo.drawerlayout.DrawerLayout;
 import com.hippo.easyrecyclerview.EasyRecyclerView;
 import com.hippo.easyrecyclerview.FastScroller;
@@ -91,6 +90,7 @@ import com.hippo.ehviewer.client.EhRequest;
 import com.hippo.ehviewer.client.EhTagDatabase;
 import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.client.MergedGalleryChecker;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.data.ListUrlBuilder;
 import com.hippo.ehviewer.client.data.userTag.UserTag;
@@ -222,7 +222,7 @@ public final class GalleryListScene extends BaseScene
     @Nullable
     public GalleryListHelper mHelper;
     @Nullable
-    private DrawerArrowDrawable mLeftDrawable;
+    private Drawable mLeftDrawable;
     @Nullable
     private Drawable mRightDrawable;
     @Nullable
@@ -724,10 +724,12 @@ public final class GalleryListScene extends BaseScene
 
         refreshLayout.setHeaderTranslationY(paddingTopSB);
 
-        mLeftDrawable = new DrawerArrowDrawable(context, AttrResources.getAttrColor(context, R.attr.drawableColorPrimary));
-        mRightDrawable = getResources().getDrawable(R.drawable.v_close_dark_x24);
+        // 左键固定为“搜索历史”，右键固定为“搜索”  —— 按钮功能恒定原则
+        mLeftDrawable = DrawableManager.getVectorDrawable(context, R.drawable.v_history_black_x24);
+        mRightDrawable = DrawableManager.getVectorDrawable(context, R.drawable.v_magnify_x24);
         mSearchBar.setLeftDrawable(mLeftDrawable);
         mSearchBar.setRightDrawable(mRightDrawable);
+        mSearchBar.setLeftButtonHistory(true);
         mSearchBar.setHelper(this);
         mSearchBar.setOnStateChangeListener(this);
         setSearchBarHint(context, mSearchBar);
@@ -1273,6 +1275,11 @@ public final class GalleryListScene extends BaseScene
     @Override
     public void onResume() {
         super.onResume();
+        // 返回列表时刷新一次，确保“已下载/已删除/已合并”等标注与下载列表及下载历史保持一致
+        // （例如在详情页/下载页删除下载后，历史记录仅在后台任务中写入，需要重新绑定才能显示删除标记）
+        if (mAdapter != null) {
+            mAdapter.notifyDataSetChanged();
+        }
         if (mBookmarksDraw == null) {
             return;
         }
@@ -1394,32 +1401,51 @@ public final class GalleryListScene extends BaseScene
         boolean pipSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE);
 
-        CharSequence[] items;
-        int[] icons;
+        MergedGalleryChecker.check(context, gi,
+                target -> showLongClickDialog(gi, view, downloaded, favourited, pipSupported, target));
+        return true;
+    }
+
+    private void showLongClickDialog(GalleryInfo gi, View view, boolean downloaded, boolean favourited,
+                                     boolean pipSupported, @Nullable MergedGalleryChecker.MergedTarget mergedTarget) {
+        final Context context = getEHContext();
+        final MainActivity activity = getActivity2();
+        if (null == context || null == activity || null == getDialogContext()) {
+            return;
+        }
+
+        List<CharSequence> items = new ArrayList<>();
+        List<Integer> icons = new ArrayList<>();
+        items.add(context.getString(R.string.read));
+        icons.add(R.drawable.v_book_open_x24);
+        items.add(context.getString(downloaded ? R.string.delete_downloads : R.string.download));
+        icons.add(downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24);
+        items.add(context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites));
+        icons.add(favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24);
+        final int indexPip;
         if (pipSupported) {
-            items = new CharSequence[]{
-                    context.getString(R.string.read),
-                    context.getString(downloaded ? R.string.delete_downloads : R.string.download),
-                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
-                    context.getString(R.string.pip_play),
-            };
-            icons = new int[]{
-                    R.drawable.v_book_open_x24,
-                    downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24,
-                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
-                    R.drawable.v_fullscreen_exit_x24,
-            };
+            items.add(context.getString(R.string.pip_play));
+            icons.add(R.drawable.v_fullscreen_exit_x24);
+            indexPip = items.size() - 1;
         } else {
-            items = new CharSequence[]{
-                    context.getString(R.string.read),
-                    context.getString(downloaded ? R.string.delete_downloads : R.string.download),
-                    context.getString(favourited ? R.string.remove_from_favourites : R.string.add_to_favourites),
-            };
-            icons = new int[]{
-                    R.drawable.v_book_open_x24,
-                    downloaded ? R.drawable.v_delete_x24 : R.drawable.v_download_x24,
-                    favourited ? R.drawable.v_heart_broken_x24 : R.drawable.v_heart_x24,
-            };
+            indexPip = -1;
+        }
+        final int indexJump;
+        if (mergedTarget != null) {
+            items.add(context.getString(R.string.jump_to_merged_gallery));
+            icons.add(R.drawable.v_merge_x24);
+            indexJump = items.size() - 1;
+        } else {
+            indexJump = -1;
+        }
+        final int indexRead = 0;
+        final int indexDownload = 1;
+        final int indexFavorites = 2;
+
+        CharSequence[] itemArray = items.toArray(new CharSequence[0]);
+        int[] iconArray = new int[icons.size()];
+        for (int i = 0; i < iconArray.length; i++) {
+            iconArray[i] = icons.get(i);
         }
 
         @SuppressLint("InflateParams") LinearLayout linearLayout = (LinearLayout) getLayoutInflater2().inflate(R.layout.gallery_item_dialog_coustom_title, null);
@@ -1438,7 +1464,7 @@ public final class GalleryListScene extends BaseScene
         textView.setText(EhUtils.getSuitableTitle(gi));
         textView.setOnClickListener(l -> {
             AppHelper.copyPlainText(EhUtils.getSuitableTitle(gi), getEHContext());
-            Toast toast = Toast.makeText(getEHContext(), "标题文本已复制", Toast.LENGTH_SHORT);
+            Toast toast = Toast.makeText(getEHContext(), R.string.title_text_copied, Toast.LENGTH_SHORT);
             toast.setGravity(Gravity.CENTER, 0, 0);
             toast.show();
         });
@@ -1452,35 +1478,32 @@ public final class GalleryListScene extends BaseScene
 //                .setTitle(EhUtils.getSuitableTitle(gi))
 //                .setView(imageViewNew)
                 .setCustomTitle(linearLayout)
-                .setAdapter(new SelectItemWithIconAdapter(context, items, icons), (dialog, which) -> {
-                    switch (which) {
-                        case 0: // Read
-                            Intent intent = new Intent(activity, GalleryActivity.class);
-                            intent.setAction(GalleryActivity.ACTION_EH);
-                            intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, gi);
-                            startActivity(intent);
-                            break;
-                        case 1: // Download
-                            if (downloaded) {
-                                DownloadDeleteHelper.showDeleteDialog(getDialogContext(), gi);
-                            } else {
-                                CommonOperations.startDownload(activity, gi, false);
-                            }
-                            break;
-                        case 2: // Favorites
-                            if (favourited) {
-                                CommonOperations.removeFromFavorites(activity, gi, new RemoveFromFavoriteListener(context, activity.getStageId(), getTag()));
-                            } else {
-                                CommonOperations.addToFavorites(activity, gi, new AddToFavoriteListener(context, activity.getStageId(), getTag()), false);
-                            }
-                            break;
-                        case 3: // PiP play
-                            Intent pipIntent = new Intent(activity, GalleryActivity.class);
-                            pipIntent.setAction(GalleryActivity.ACTION_EH);
-                            pipIntent.putExtra(GalleryActivity.KEY_GALLERY_INFO, gi);
+                .setAdapter(new SelectItemWithIconAdapter(context, itemArray, iconArray), (dialog, which) -> {
+                    if (which == indexRead) { // Read
+                        Intent intent = new Intent(activity, GalleryActivity.class);
+                        intent.setAction(GalleryActivity.ACTION_EH);
+                        intent.putExtra(GalleryActivity.KEY_GALLERY_INFO, gi);
+                        startActivity(intent);
+                    } else if (which == indexDownload) { // Download
+                        if (downloaded) {
+                            DownloadDeleteHelper.showDeleteDialog(getDialogContext(), gi);
+                        } else {
+                            CommonOperations.startDownload(activity, gi, false);
+                        }
+                    } else if (which == indexFavorites) { // Favorites
+                        if (favourited) {
+                            CommonOperations.removeFromFavorites(activity, gi, new RemoveFromFavoriteListener(context, activity.getStageId(), getTag()));
+                        } else {
+                            CommonOperations.addToFavorites(activity, gi, new AddToFavoriteListener(context, activity.getStageId(), getTag()), false);
+                        }
+                    } else if (which == indexPip) { // PiP play
+                        Intent pipIntent = new Intent(activity, GalleryActivity.class);
+                        pipIntent.setAction(GalleryActivity.ACTION_EH);
+                        pipIntent.putExtra(GalleryActivity.KEY_GALLERY_INFO, gi);
 //                            pipIntent.putExtra(GalleryActivity.KEY_ENTER_PIP, true);
-                            startActivity(pipIntent);
-                            break;
+                        startActivity(pipIntent);
+                    } else if (which == indexJump) { // Jump to merged gallery
+                        startScene(MergedGalleryChecker.createJumpAnnouncer(mergedTarget));
                     }
                 }).create();
         try {
@@ -1490,7 +1513,6 @@ public final class GalleryListScene extends BaseScene
             alertDialog = null;
             EhApplication.clearMemoryCacheSafely();
         }
-        return true;
     }
 
 
@@ -1992,10 +2014,8 @@ public final class GalleryListScene extends BaseScene
         if (null == mSearchBar) {
             return;
         }
-        mSearchBar.clearTagChips();
-        mSearchBar.setText("");
-        mSearchBar.resetManualControl();
-        setState(STATE_NORMAL);
+        // 恒定功能：右键（放大镜）触发搜索，而不是清空/关闭
+        mSearchBar.applySearch(true);
     }
 
     @Override
@@ -2069,25 +2089,15 @@ public final class GalleryListScene extends BaseScene
     @SuppressLint("RtlHardcoded")
     @Override
     public void onStateChange(SearchBar searchBar, int newState, int oldState, boolean animation) {
-        if (null == mLeftDrawable || null == mRightDrawable) {
+        // 历史入口同步：左侧历史按钮从普通态直接唤出搜索历史列表时，
+        // SearchBar 进入了列表态而场景仍是普通态，这里把场景同步为简单搜索态，
+        // 使返回键/FAB 等交互保持一致（不触发双击退出）。
+        if (mSearchBar != null && mSearchBar.isLeftButtonHistory()
+                && oldState == SearchBar.STATE_NORMAL
+                && newState == SearchBar.STATE_SEARCH_LIST
+                && mState == STATE_NORMAL) {
+            setState(STATE_SIMPLE_SEARCH, false);
             return;
-        }
-
-            switch (oldState) {
-            default:
-            case SearchBar.STATE_NORMAL:
-                mLeftDrawable.setArrow(animation ? ANIMATE_TIME : 0);
-                break;
-            case SearchBar.STATE_SEARCH:
-                if (newState == SearchBar.STATE_NORMAL) {
-                    mLeftDrawable.setMenu(animation ? ANIMATE_TIME : 0);
-                }
-                break;
-            case SearchBar.STATE_SEARCH_LIST:
-                if (newState == STATE_NORMAL) {
-                    mLeftDrawable.setMenu(animation ? ANIMATE_TIME : 0);
-                }
-                break;
         }
 
         if (newState == STATE_NORMAL || newState == STATE_SIMPLE_SEARCH) {

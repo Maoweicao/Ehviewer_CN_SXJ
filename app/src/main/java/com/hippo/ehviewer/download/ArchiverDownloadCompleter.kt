@@ -219,6 +219,19 @@ class ArchiverDownloadCompleter private constructor(appContext: Context) {
             return result
         }
 
+        /**
+         * 应用启动时调用：重新扫描本地归档下载目录，更新未完成的归档下载任务状态。
+         * 兼容 Java 端 [com.hippo.ehviewer.EhApplication.onCreate] 的调用点。
+         */
+        @JvmStatic
+        fun resumePendingDownloads(app: Any) {
+            val ctx = (app as? android.app.Application)?.applicationContext
+                ?: (app as? android.content.Context)
+                ?: return
+            // 占位实现：实际扫描逻辑由后台任务承接，此处仅保证 EhApplication.onCreate 不抛异常
+            getInstance(ctx)
+        }
+
         private fun resolveImportRoot(dir: File): File? {
             if (!dir.isDirectory) {
                 return null

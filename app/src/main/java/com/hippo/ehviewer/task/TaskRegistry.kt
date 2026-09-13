@@ -61,6 +61,7 @@ object TaskRegistry {
         registerProgressiveMergeAllTask()
         registerProgressiveBackupTask()
         registerMergeDuplicateGalleryTask()
+        registerScanDownloadHistoryTask()
     }
     
     fun getAllTasks(): List<TaskMetadata> = registry.values.toList()
@@ -410,6 +411,16 @@ object TaskRegistry {
             descriptionResId = R.string.settings_download_merge_duplicate_gallery_summary,
             taskType = BackgroundTask.TaskType.MERGE,
             requiresParams = false  // 可以无参数执行全量合并
+        ))
+    }
+
+    private fun registerScanDownloadHistoryTask() {
+        register(TaskMetadata(
+            taskClassName = "com.hippo.ehviewer.task.ScanDownloadHistoryTask",
+            displayNameResId = R.string.settings_download_scan_download_history,
+            descriptionResId = R.string.settings_download_scan_download_history_summary,
+            taskType = BackgroundTask.TaskType.SCAN,
+            requiresParams = false
         ))
     }
 }

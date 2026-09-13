@@ -18,6 +18,7 @@ package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
 
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.beerbelly.SimpleDiskCache;
 import com.hippo.ehviewer.Settings;
@@ -40,6 +41,7 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -75,6 +77,13 @@ public class PageApiHandler extends BaseApiHandler {
             return handlePageList(session, gid);
         }
 
+        // /api/v1/galleries/{gid}/pages/{page}/source - v3.0 §5.20.2 查询最优来源
+        if (path.matches("/api/v1/galleries/\\d+/pages/\\d+/source")) {
+            long gid = RequestParser.extractGid(path);
+            int page = RequestParser.extractPage(path);
+            return handleGetPageSource(session, gid, page);
+        }
+
         // /api/v1/galleries/{gid}/pages/{page} - 获取图片
         if (path.matches("/api/v1/galleries/\\d+/pages/\\d+")) {
             long gid = RequestParser.extractGid(path);
@@ -90,6 +99,19 @@ public class PageApiHandler extends BaseApiHandler {
         logRequest("POST", uri, session);
 
         String path = uri.split("\\?")[0];
+
+        // /api/v1/galleries/{gid}/resume-plan - v3.0 §5.20.1 跨设备补齐计划
+        if (path.matches("/api/v1/galleries/\\d+/resume-plan")) {
+            long gid = RequestParser.extractGid(path);
+            return handleResumePlan(session, gid);
+        }
+
+        // /api/v1/galleries/{gid}/pages/{page}/lab/fetch - v3.0 §5.20.3 触发跨设备补齐
+        if (path.matches("/api/v1/galleries/\\d+/pages/\\d+/lab/fetch")) {
+            long gid = RequestParser.extractGid(path);
+            int page = RequestParser.extractPage(path);
+            return handleLabFetch(session, gid, page);
+        }
 
         // /api/v1/galleries/{gid}/pages/{page}/upload - 上传页面图片
         if (path.matches("/api/v1/galleries/\\d+/pages/\\d+/upload")) {
@@ -238,13 +260,40 @@ public class PageApiHandler extends BaseApiHandler {
     private NanoHTTPD.Response handleGetPage(NanoHTTPD.IHTTPSession session, long gid, int page) {
         try {
             String mode = RequestParser.getQueryParameter(session, "mode");
-            
+
             // 将1-indexed页码转换为0-indexed（内部使用0-indexed）
             int pageIndex = page - 1;
             if (pageIndex < 0) pageIndex = 0;
-            
+
             DownloadInfo info = downloadManager.getDownloadInfo(gid);
-            
+
+            // §5.21.1 mode=lab：本机不触发 syncDownloadWhileReading 代理下载（避免浪费流量）
+            // 仅返回本机命中；LAN/remote 由客户端 ImageSourceChain 自行接力
+            if ("lab".equals(mode)) {
+                if (info != null) {
+                    UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
+                    if (downloadDir != null && downloadDir.isDirectory()) {
+                        UniFile imageFile = SpiderDen.findImageFile(downloadDir, pageIndex);
+                        if (imageFile != null) {
+                            TransferLogger.getInstance().d(TAG, "lab mode: serving local file: gid=" + gid + ", page=" + page);
+                            return serveLocalFile(imageFile, "local");
+                        }
+                    }
+                }
+                SimpleDiskCache cache = SpiderDen.getCache();
+                if (cache != null) {
+                    String key = EhCacheKeyFactory.getImageKey(gid, pageIndex);
+                    if (cache.contain(key)) {
+                        InputStreamPipe pipe = cache.getInputStreamPipe(key);
+                        if (pipe != null) {
+                            TransferLogger.getInstance().d(TAG, "lab mode: serving local cache: gid=" + gid + ", page=" + page);
+                            return serveFromCache(pipe, "local:cache");
+                        }
+                    }
+                }
+                return ResponseBuilder.notFound("Image (lab mode: not in local)");
+            }
+
             // 1. 检查本地下载目录
             if (info != null) {
                 UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
@@ -256,7 +305,7 @@ public class PageApiHandler extends BaseApiHandler {
                     }
                 }
             }
-            
+
             // 2. 检查缓存
             SimpleDiskCache cache = SpiderDen.getCache();
             if (cache != null) {
@@ -269,16 +318,16 @@ public class PageApiHandler extends BaseApiHandler {
                     }
                 }
             }
-            
+
             // 3. 检查是否需要代理下载
             if ("proxy".equals(mode) || Settings.getSyncDownloadWhileReading()) {
                 TransferLogger.getInstance().d(TAG, "Proxy downloading: gid=" + gid + ", page=" + page);
                 return proxyDownload(gid, pageIndex, info);
             }
-            
+
             // 4. 返回404
             return ResponseBuilder.notFound("Image");
-            
+
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Error getting page", e);
             return ResponseBuilder.internalError(e.getMessage());
@@ -289,24 +338,32 @@ public class PageApiHandler extends BaseApiHandler {
      * 从本地文件提供服务
      */
     private NanoHTTPD.Response serveLocalFile(UniFile file, String source) {
+        return serveLocalFile(file, source, "[" + source + "]");
+    }
+
+    /**
+     * 从本地文件提供服务（带完整来源链路）
+     */
+    private NanoHTTPD.Response serveLocalFile(UniFile file, String source, String chainHeader) {
         try {
             String mimeType = getMimeType(file.getName());
             long length = file.length();
-            
+
             InputStream stream = file.openInputStream();
-            
+
             NanoHTTPD.Response response = NanoHTTPD.newFixedLengthResponse(
                 NanoHTTPD.Response.Status.OK,
                 mimeType,
                 stream,
                 length
             );
-            
+
             response.addHeader("X-Image-Source", source);
+            response.addHeader("X-Lab-Source-Chain", chainHeader);
             response.addHeader("Cache-Control", "max-age=3600");
-            
+
             return response;
-            
+
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Error serving local file", e);
             return ResponseBuilder.internalError(e.getMessage());
@@ -317,21 +374,29 @@ public class PageApiHandler extends BaseApiHandler {
      * 从缓存提供服务
      */
     private NanoHTTPD.Response serveFromCache(InputStreamPipe pipe, String source) {
+        return serveFromCache(pipe, source, "[local," + source + "]");
+    }
+
+    /**
+     * 从缓存提供服务（带完整来源链路）
+     */
+    private NanoHTTPD.Response serveFromCache(InputStreamPipe pipe, String source, String chainHeader) {
         try {
             pipe.obtain();
             InputStream stream = pipe.open();
-            
+
             NanoHTTPD.Response response = NanoHTTPD.newChunkedResponse(
                 NanoHTTPD.Response.Status.OK,
                 "image/jpeg",
                 stream
             );
-            
+
             response.addHeader("X-Image-Source", source);
+            response.addHeader("X-Lab-Source-Chain", chainHeader);
             response.addHeader("Cache-Control", "max-age=3600");
-            
+
             return response;
-            
+
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Error serving from cache", e);
             return ResponseBuilder.internalError(e.getMessage());
@@ -453,6 +518,210 @@ public class PageApiHandler extends BaseApiHandler {
         }
     }
     
+    // ==================== v3.0 §5.20 跨设备接力 ====================
+
+    /**
+     * §5.20.1 POST /api/v1/galleries/{gid}/resume-plan
+     *
+     * 返回本机缺页列表 + union 进度 + 建议接力源。
+     */
+    private NanoHTTPD.Response handleResumePlan(NanoHTTPD.IHTTPSession session, long gid) {
+        if (!isLabEnabled()) {
+            return ResponseBuilder.forbidden("Lab is disabled");
+        }
+        try {
+            String body = RequestParser.readBody(session);
+            String strategy = "union";
+            String preferPeer = null;
+            if (body != null && !body.isEmpty()) {
+                try {
+                    JSONObject json = JSONObject.parseObject(body);
+                    if (json != null) {
+                        strategy = json.getString("strategy");
+                        if (strategy == null || strategy.isEmpty()) strategy = "union";
+                        preferPeer = json.getString("preferPeer");
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            int localDownloaded = info != null && info.finished > 0 ? info.finished : 0;
+
+            com.hippo.ehviewer.lab.union.GalleryUnionResolver resolver =
+                    com.hippo.ehviewer.lab.union.GalleryUnionResolver.getInstance(context);
+            int unionDownloaded = resolver.unionDownloadedPages(gid);
+            int unionPages = resolver.unionPages(gid);
+            List<Integer> missing = resolver.computeLocalMissing(gid, localDownloaded);
+            String suggestedSource = resolver.pickBestSource(gid);
+
+            // 查询 trusted peer 名称
+            String suggestedSourceName = null;
+            if (suggestedSource != null) {
+                com.hippo.ehviewer.lab.TrustedPeer peer =
+                        com.hippo.ehviewer.lab.TrustedPeerStore.getInstance(context)
+                                .findById(suggestedSource);
+                if (peer != null) suggestedSourceName = peer.getDeviceName();
+            }
+
+            JSONObject resp = new JSONObject();
+            resp.put("success", true);
+            resp.put("gid", gid);
+            String title = info != null ? info.title : "";
+            resp.put("title", title);
+            resp.put("total", Math.max(unionPages, info != null ? info.pages : 0));
+            resp.put("byDevice", new JSONArray());  // M3 起由客户端本地填充
+            resp.put("unionDownloadedPages", unionDownloaded);
+            resp.put("localDownloadedPages", localDownloaded);
+            JSONArray missingArr = new JSONArray();
+            for (Integer p : missing) missingArr.add(p);
+            resp.put("missingPages", missingArr);
+            resp.put("missingCount", missing.size());
+            resp.put("strategy", strategy);
+            if (preferPeer != null) resp.put("preferPeer", preferPeer);
+            resp.put("suggestedSource", suggestedSource);
+            resp.put("suggestedSourceName", suggestedSourceName);
+
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "Failed to build resume-plan for gid=" + gid, e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * §5.20.2 GET /api/v1/galleries/{gid}/pages/{page}/source
+     *
+     * 返回该页的最佳来源 + RTT 排序的 alternatives。本机总是 AVAILABLE/HAVE。
+     */
+    private NanoHTTPD.Response handleGetPageSource(NanoHTTPD.IHTTPSession session, long gid, int page) {
+        if (!isLabEnabled()) {
+            return ResponseBuilder.forbidden("Lab is disabled");
+        }
+        try {
+            JSONObject best = new JSONObject();
+            com.hippo.ehviewer.lab.LabManager lm = com.hippo.ehviewer.lab.LabManager.getInstance(context);
+            best.put("deviceId", lm.getSelfDeviceId());
+            best.put("deviceName", lm.getSelfDeviceName());
+            best.put("host", "127.0.0.1");
+            best.put("port", com.hippo.ehviewer.lab.TransferPortHelper.getPort(context));
+            best.put("httpUrl", "http://127.0.0.1:"
+                    + com.hippo.ehviewer.lab.TransferPortHelper.getPort(context)
+                    + "/api/v1/galleries/" + gid + "/pages/" + page + "?mode=lab");
+            best.put("rttMs", 0);
+            // 本机是否有：检查下载目录
+            boolean localHave = false;
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            if (info != null) {
+                com.hippo.unifile.UniFile downloadDir = com.hippo.ehviewer.spider.SpiderDen.getGalleryDownloadDir(info);
+                if (downloadDir != null && downloadDir.isDirectory()) {
+                    com.hippo.unifile.UniFile img = com.hippo.ehviewer.spider.SpiderDen.findImageFile(downloadDir, page - 1);
+                    if (img != null && img.isFile()) localHave = true;
+                }
+            }
+            best.put("availability", localHave ? "have" : "missing");
+
+            JSONArray alternatives = new JSONArray();
+            // 按 RTT 升序加入 LAN peer（不重复 best）
+            com.hippo.ehviewer.lab.source.LanImageFetcher lan =
+                    com.hippo.ehviewer.lab.source.LanImageFetcher.getInstance(context);
+            for (com.hippo.ehviewer.lab.TrustedPeer p : lan.listByRtt()) {
+                JSONObject alt = new JSONObject();
+                alt.put("deviceId", p.getDeviceId());
+                alt.put("deviceName", p.getDeviceName());
+                if (p.getHost() != null) alt.put("host", p.getHost());
+                alt.put("port", p.getPort());
+                alt.put("rttMs", p.getRttMs());
+                alt.put("availability", "unknown");  // 本机不主动探测，由客户端 PageRelaySession.fetchImage 失败时降级
+                alternatives.add(alt);
+            }
+
+            JSONObject resp = new JSONObject();
+            resp.put("gid", gid);
+            resp.put("page", page);
+            resp.put("bestSource", best);
+            resp.put("alternatives", alternatives);
+            resp.put("fallback", "remote_proxy");
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "Failed to get page source for gid=" + gid
+                    + ", page=" + page, e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    /**
+     * §5.20.3 POST /api/v1/galleries/{gid}/pages/{page}/lab/fetch
+     *
+     * 触发跨设备补齐：让源设备下载该页并 push 回本机。
+     */
+    private NanoHTTPD.Response handleLabFetch(NanoHTTPD.IHTTPSession session, long gid, int page) {
+        if (!isLabEnabled()) {
+            return ResponseBuilder.forbidden("Lab is disabled");
+        }
+        try {
+            String body = RequestParser.readBody(session);
+            int[] pages = new int[]{page};
+            String fromPeer = null;
+            String mode = "upload_back";
+            if (body != null && !body.isEmpty()) {
+                try {
+                    JSONObject json = JSONObject.parseObject(body);
+                    if (json != null) {
+                        JSONArray arr = json.getJSONArray("pages");
+                        if (arr != null && !arr.isEmpty()) {
+                            int n = arr.size();
+                            pages = new int[n];
+                            for (int i = 0; i < n; i++) pages[i] = arr.getIntValue(i);
+                        }
+                        fromPeer = json.getString("fromPeer");
+                        mode = json.getString("mode");
+                        if (mode == null) mode = "upload_back";
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // 调度 RelayInvoker
+            com.hippo.ehviewer.lab.relay.RelayInvoker invoker =
+                    com.hippo.ehviewer.lab.relay.RelayInvoker.getInstance(context);
+            com.hippo.ehviewer.lab.relay.RelayInvoker.InvokeResult result;
+            if (pages.length == 1) {
+                // 单页：通过 invokeFetch 单页路径
+                result = invoker.invokeFetch(gid, page - 1);
+            } else {
+                // 多页：暂时只调度首页（M5 完整支持）
+                result = invoker.invokeFetch(gid, page - 1);
+            }
+
+            JSONObject resp = new JSONObject();
+            resp.put("success", result == com.hippo.ehviewer.lab.relay.RelayInvoker.InvokeResult.STARTED);
+            resp.put("gid", gid);
+            resp.put("mode", mode);
+            JSONArray fetched = new JSONArray();
+            for (int p : pages) {
+                JSONObject item = new JSONObject();
+                item.put("page", p);
+                item.put("status", result == com.hippo.ehviewer.lab.relay.RelayInvoker.InvokeResult.STARTED
+                        ? "started" : "skipped");
+                fetched.add(item);
+            }
+            resp.put("fetched", fetched);
+            resp.put("totalRequested", pages.length);
+            resp.put("succeeded", result == com.hippo.ehviewer.lab.relay.RelayInvoker.InvokeResult.STARTED
+                    ? 1 : 0);
+            resp.put("failed", result == com.hippo.ehviewer.lab.relay.RelayInvoker.InvokeResult.STARTED
+                    ? 0 : 1);
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Exception e) {
+            TransferLogger.getInstance().e(TAG, "Failed to lab/fetch gid=" + gid
+                    + ", page=" + page, e);
+            return ResponseBuilder.internalError(e.getMessage());
+        }
+    }
+
+    private boolean isLabEnabled() {
+        return com.hippo.ehviewer.lab.LabManager.getInstance(context).isLabEnabled(null);
+    }
+
     /**
      * 获取MIME类型
      */

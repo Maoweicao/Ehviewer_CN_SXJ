@@ -797,6 +797,44 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         const val KEY_GID: String = "gid"
         const val KEY_GID_LIST: String = "gid_list"
 
+        /**
+         * 启动指定 GID 列表的批量下载。前台服务会自动拉起。
+         * Java/Kotlin 端均可调用：参数签名兼容 LongList 与 List<Long>。
+         */
+        @JvmStatic
+        @JvmOverloads
+        fun startRangeDownload(context: Context, gidList: com.hippo.lib.yorozuya.collect.LongList) {
+            val arr = LongArray(gidList.size())
+            for (i in 0 until gidList.size()) {
+                arr[i] = gidList.get(i)
+            }
+            startRangeDownload(context, arr)
+        }
+
+        @JvmStatic
+        fun startRangeDownload(context: Context, gids: LongArray) {
+            val intent = Intent(context, DownloadService::class.java).apply {
+                action = ACTION_START_RANGE
+                val list = ArrayList<Long>()
+                for (g in gids) list.add(g)
+                putExtra(KEY_GID_LIST, list)
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        /**
+         * 确保下载服务正在前台运行（用于外部触发批量下载前的前置检查）。
+         */
+        @JvmStatic
+        fun ensureRunning(context: Context) {
+            try {
+                androidx.core.content.ContextCompat.startForegroundService(
+                    context, Intent(context, DownloadService::class.java)
+                )
+            } catch (_: Throwable) {
+            }
+        }
+
         private const val TAG = "DownloadService"
         private const val PENDING_INTENT_FLAGS =
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE

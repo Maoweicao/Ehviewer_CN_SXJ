@@ -57,11 +57,20 @@ public class DownloadInfo extends GalleryInfo {
 	public static final int PHASE_DOWNLOAD = 1;
 	public static final int PHASE_VERIFY = 2;
 	public static final int PHASE_MERGE = 3;
+	// 等待列表预碰撞检测阶段：拉取同名等待项的图片 token 集并对比，
+	// 区分于 PHASE_MERGE（预下载合并），避免取消按钮误判。
+	public static final int PHASE_COLLISION_CHECK = 4;
 	public int phase = PHASE_IDLE;
 
-	// transient UI state: 预下载合并的实时步骤说明（不入库）
+	// transient UI state: 预下载合并/预碰撞检测的实时步骤说明（不入库）
 	@Transient
 	public String mergeDetail;
+
+	// 本地评分覆盖，0.0 - 5.0 星星刻度，-1 表示未设置。
+	// 该字段不入库（本地评分存储在 SharedPreferences，见 LocalRatingManager），
+	// 仅作为运行时缓存，并在 DownloadManager 初始化时填充。
+	@Transient
+	public float localRating = -1f;
 
 
 	@Generated
@@ -237,6 +246,25 @@ public class DownloadInfo extends GalleryInfo {
 		this.archiveUri = archiveUri;
 	}
 
+	public float getLocalRating() {
+		return localRating;
+	}
+
+	public void setLocalRating(float localRating) {
+		this.localRating = localRating;
+	}
+
+	public boolean hasLocalRating() {
+		return localRating > 0f;
+	}
+
+	/**
+	 * 有效评分：优先本地评分，其次在线评分。
+	 */
+	public float getEffectiveRating() {
+		return localRating > 0f ? localRating : rating;
+	}
+
 	@Override
 	public int describeContents() {
 		return 0;
@@ -250,6 +278,7 @@ public class DownloadInfo extends GalleryInfo {
 		dest.writeLong(this.time);
 		dest.writeString(this.label);
 		dest.writeString(this.archiveUri);
+		dest.writeFloat(this.localRating);
 	}
 
 	protected DownloadInfo(Parcel in) {
@@ -259,6 +288,11 @@ public class DownloadInfo extends GalleryInfo {
 		this.time = in.readLong();
 		this.label = in.readString();
 		this.archiveUri = in.readString();
+		try {
+			this.localRating = in.readFloat();
+		} catch (RuntimeException e) {
+			this.localRating = -1f;
+		}
 	}
 
 	public DownloadInfo(GalleryInfo galleryInfo) {
@@ -300,6 +334,7 @@ public class DownloadInfo extends GalleryInfo {
 		jsonObject.put("time", time);
 		jsonObject.put("total", total);
 		jsonObject.put("archiveUri", archiveUri);
+		jsonObject.put("localRating", localRating);
 		return jsonObject;
 	}
 
@@ -315,6 +350,7 @@ public class DownloadInfo extends GalleryInfo {
 		downloadInfo.time = object.getLongValue("time");
 		downloadInfo.total = object.getIntValue("total");
 		downloadInfo.archiveUri = object.getString("archiveUri");
+		downloadInfo.localRating = object.getFloatValue("localRating");
 		return downloadInfo;
 	}
 

@@ -69,6 +69,9 @@ public class AuthManager {
         WHITELIST_PATHS.add("/swagger");
         WHITELIST_PATHS.add("/openapi.yaml");
         WHITELIST_PATHS.add("/openapi");
+        // 实验室（v3.0）：拓扑与配对码探测无需认证，便于新设备探查
+        WHITELIST_PATHS.add("/api/v1/lab/topology");
+        WHITELIST_PATHS.add("/api/v1/lab/trusted-peers/pair-info");
     }
     
     private AuthMode authMode;

@@ -55,6 +55,18 @@ public class GalleryApiParser {
             }
             gi.simpleTags = tags;
             gi.pages = NumberUtils.parseIntSafely(g.getString("filecount"), 0);
+            if (g.has("current_gid")) {
+                gi.currentGid = NumberUtils.parseLongSafely(g.getString("current_gid"), -1);
+            }
+            if (g.has("current_key")) {
+                gi.currentKey = ParserUtils.trim(g.getString("current_key"));
+            }
+            if (g.has("parent_gid")) {
+                gi.parentGid = NumberUtils.parseLongSafely(g.getString("parent_gid"), -1);
+            }
+            if (g.has("parent_key")) {
+                gi.parentKey = ParserUtils.trim(g.getString("parent_key"));
+            }
             gi.generateSLang();
         }
     }

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
@@ -16,15 +17,17 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <!-- 标题 -->
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="16dp"
                 android:gravity="center"
-                android:text="@string/dialog_search_download_title"
+                android:text="@string/download_search_dialog_title"
                 android:textSize="18sp"
                 android:textStyle="bold" />
 
+            <!-- 搜索栏 -->
             <com.hippo.ehviewer.widget.SearchBar
                 android:id="@+id/download_search_bar"
                 style="@style/CardView.Normal"
@@ -33,73 +36,311 @@
                 android:layout_marginBottom="12dp"
                 android:hint="@string/download_search_hint" />
 
-            <com.hippo.ehviewer.widget.AdvanceSearchTable
-                android:id="@+id/advance_search_table"
+            <!-- 分区1: 搜索选项 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_search_options"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp" />
+                android:layout_marginBottom="8dp"
+                app:sectionExpanded="true"
+                app:sectionTitle="@string/section_search_options">
 
-            <LinearLayout
-                android:id="@+id/category_filter_toggle_row"
+                <com.hippo.ehviewer.widget.AdvanceSearchTable
+                    android:id="@+id/advance_search_table"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <!-- 分区2: 评分与页数 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_rating_pages"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:background="@drawable/bg_border_rounded"
-                android:clickable="true"
-                android:focusable="true"
-                android:gravity="center_vertical"
-                android:minHeight="44dp"
-                android:orientation="horizontal"
-                android:paddingHorizontal="12dp"
-                android:paddingVertical="8dp">
+                android:layout_marginBottom="8dp"
+                app:sectionExpanded="true"
+                app:sectionTitle="@string/section_rating_and_pages">
 
-                <TextView
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="@string/dialog_category_filter_label"
-                    android:textSize="14sp"
-                    android:textStyle="bold" />
+                    android:orientation="vertical">
 
-                <TextView
-                    android:id="@+id/category_filter_toggle_icon"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="+"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
-            </LinearLayout>
+                    <!-- 星级范围选择 -->
+                    <com.hippo.ehviewer.widget.RatingRangeView
+                        android:id="@+id/rating_range_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp" />
 
-            <LinearLayout
-                android:id="@+id/category_filter_content_container"
+                    <!-- 页数范围 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <CheckBox
+                            android:id="@+id/pages_range_checkbox"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/pages_setting" />
+
+                        <EditText
+                            android:id="@+id/pages_from_input"
+                            android:layout_width="64dp"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/range_from_hint"
+                            android:inputType="number"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginHorizontal="8dp"
+                            android:text="@string/search_sp_to"
+                            android:textColor="?android:attr/textColorPrimary" />
+
+                        <EditText
+                            android:id="@+id/pages_to_input"
+                            android:layout_width="64dp"
+                            android:layout_height="wrap_content"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/range_to_hint"
+                            android:inputType="number"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:text="@string/search_sp_suffix"
+                            android:textColor="?android:attr/textColorSecondary" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <!-- 分区3: 高级筛选 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_advanced_filter"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:layout_marginBottom="12dp"
-                android:orientation="vertical"
-                android:visibility="gone">
+                android:layout_marginBottom="8dp"
+                app:sectionCollapsible="true"
+                app:sectionExpanded="false"
+                app:sectionTitle="@string/section_advanced_filter">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- 创建时间范围 -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="4dp"
+                        android:text="@string/filter_time_range"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:orientation="horizontal">
+
+                        <EditText
+                            android:id="@+id/time_from_input"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/filter_time_hint"
+                            android:inputType="date"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginHorizontal="8dp"
+                            android:text="@string/range_separator"
+                            android:textColor="?android:attr/textColorPrimary" />
+
+                        <EditText
+                            android:id="@+id/time_to_input"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/filter_time_hint"
+                            android:inputType="date"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                    </LinearLayout>
+
+                    <!-- 文件大小范围 -->
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="4dp"
+                        android:text="@string/filter_size_range"
+                        android:textColor="?android:attr/textColorSecondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="12dp"
+                        android:orientation="horizontal">
+
+                        <EditText
+                            android:id="@+id/size_from_input"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/filter_size_hint"
+                            android:inputType="numberDecimal"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginHorizontal="8dp"
+                            android:text="@string/range_separator"
+                            android:textColor="?android:attr/textColorPrimary" />
+
+                        <EditText
+                            android:id="@+id/size_to_input"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:background="@drawable/bg_edit_text_underline"
+                            android:hint="@string/filter_size_hint"
+                            android:inputType="numberDecimal"
+                            android:maxLines="1"
+                            android:padding="8dp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="4dp"
+                            android:text="MB/GB"
+                            android:textColor="?android:attr/textColorSecondary" />
+
+                    </LinearLayout>
+
+                    <!-- 仅显示重复 -->
+                    <CheckBox
+                        android:id="@+id/duplicate_only_checkbox"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/filter_duplicate_only" />
+
+                </LinearLayout>
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <!-- 分区4: 下载状态 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_download_status"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:sectionCollapsible="true"
+                app:sectionExpanded="false"
+                app:sectionTitle="@string/section_download_status">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <!-- 全选/取消全选按钮 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/select_all_status_button"
+                            style="@style/Widget.AppCompat.Button.Borderless"
+                            android:layout_width="0dp"
+                            android:layout_height="32dp"
+                            android:layout_weight="1"
+                            android:text="@string/select_all"
+                            android:textSize="12sp" />
+
+                        <Button
+                            android:id="@+id/select_none_status_button"
+                            style="@style/Widget.AppCompat.Button.Borderless"
+                            android:layout_width="0dp"
+                            android:layout_height="32dp"
+                            android:layout_weight="1"
+                            android:text="@string/deselect_all"
+                            android:textSize="12sp" />
+
+                    </LinearLayout>
+
+                    <!-- 状态复选框列表 -->
+                    <androidx.recyclerview.widget.RecyclerView
+                        android:id="@+id/status_recycler_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_border_rounded"
+                        android:nestedScrollingEnabled="false"
+                        android:padding="8dp" />
+
+                </LinearLayout>
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <!-- 分区5: 分类筛选 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_category"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:sectionExpanded="true"
+                app:sectionTitle="@string/section_category">
 
                 <com.hippo.ehviewer.ui.scene.download.part.DownloadCategoryTable
                     android:id="@+id/category_table"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content" />
-            </LinearLayout>
 
-            <TextView
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <!-- 分区6: 排序方式 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_sort"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginBottom="8dp"
-                android:text="@string/dialog_sort_method_label"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                app:sectionExpanded="true"
+                app:sectionTitle="@string/section_sort">
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/search_sort_recycler_view"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="8dp"
-                android:background="@drawable/bg_border_rounded"
-                android:nestedScrollingEnabled="false"
-                android:padding="8dp" />
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/search_sort_recycler_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="@drawable/bg_border_rounded"
+                    android:nestedScrollingEnabled="false"
+                    android:padding="8dp" />
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
@@ -124,8 +365,8 @@
             style="@style/Widget.AppCompat.Button"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/search"
-            android:layout_marginStart="8dp" />
+            android:layout_marginStart="8dp"
+            android:text="@string/search" />
 
     </LinearLayout>
 

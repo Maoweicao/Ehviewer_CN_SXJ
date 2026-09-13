@@ -37,6 +37,7 @@ import com.hippo.ehviewer.BackgroundTaskManager;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.network.NetworkLogger;
 import com.hippo.ehviewer.network.NetworkSecurityManager;
 import com.hippo.ehviewer.network.NetworkStateManager;
@@ -47,6 +48,7 @@ import com.hippo.ehviewer.service.PerformanceMonitorService;
 import com.hippo.ehviewer.ui.DirPickerActivity;
 import com.hippo.unifile.UniFile;
 import com.hippo.ehviewer.ui.PerformanceLogActivity;
+import com.hippo.ehviewer.ui.ResourceViewerActivity;
 import com.hippo.ehviewer.ui.wifi.WiFiClientActivity;
 import com.hippo.ehviewer.ui.wifi.WiFiServerActivity;
 import com.hippo.ehviewer.ui.task.BackgroundTaskActivity;
@@ -90,9 +92,13 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private static final String KEY_RECYCLE_BIN = "recycle_bin";
     private static final String KEY_NETWORK_LOG = "network_log_enabled";
     private static final String KEY_BACKGROUND_CONCURRENT_TASKS = "background_concurrent_tasks";
+    private static final String KEY_NETWORK_GLOBAL_CONCURRENCY = "network_global_concurrency";
     private static final String KEY_PERFORMANCE_MONITOR = "performance_monitor_enabled";
     private static final String KEY_PERFORMANCE_MONITOR_LOG = "performance_monitor_log";
+    private static final String KEY_RESOURCE_VIEWER = "resource_viewer";
     private static final String KEY_PRE_ANR_DETECTION = "pre_anr_detection_enabled";
+    private static final String KEY_ANR_AUTO_DISMISS = "anr_auto_dismiss_enabled";
+    private static final String KEY_ANR_AUTO_DISMISS_ACCESSIBILITY = "anr_auto_dismiss_enable_accessibility";
     private static final String KEY_EXPORT_DIAGNOSTIC = "export_diagnostic";
     private static final String KEY_TRAFFIC_CAPTURE = "traffic_capture_enabled";
     private static final String KEY_TRAFFIC_CAPTURE_PAGE = "traffic_capture_page";
@@ -128,9 +134,13 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         Preference recycleBin = findPreference(KEY_RECYCLE_BIN);
         Preference networkLog = findPreference(KEY_NETWORK_LOG);
         Preference backgroundConcurrentTasks = findPreference(KEY_BACKGROUND_CONCURRENT_TASKS);
+        Preference networkGlobalConcurrency = findPreference(KEY_NETWORK_GLOBAL_CONCURRENCY);
         Preference performanceMonitor = findPreference(KEY_PERFORMANCE_MONITOR);
         Preference performanceMonitorLog = findPreference(KEY_PERFORMANCE_MONITOR_LOG);
+        Preference resourceViewer = findPreference(KEY_RESOURCE_VIEWER);
         Preference preAnrDetection = findPreference(KEY_PRE_ANR_DETECTION);
+        Preference anrAutoDismiss = findPreference(KEY_ANR_AUTO_DISMISS);
+        Preference anrAutoDismissAccessibility = findPreference(KEY_ANR_AUTO_DISMISS_ACCESSIBILITY);
         Preference exportDiagnostic = findPreference(KEY_EXPORT_DIAGNOSTIC);
         Preference trafficCapture = findPreference(KEY_TRAFFIC_CAPTURE);
         Preference trafficCapturePage = findPreference(KEY_TRAFFIC_CAPTURE_PAGE);
@@ -170,6 +180,9 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         if (backgroundConcurrentTasks != null) {
             backgroundConcurrentTasks.setOnPreferenceChangeListener(this);
         }
+        if (networkGlobalConcurrency != null) {
+            networkGlobalConcurrency.setOnPreferenceChangeListener(this);
+        }
 
         if (performanceMonitor != null) {
             performanceMonitor.setOnPreferenceChangeListener(this);
@@ -177,9 +190,18 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         if (performanceMonitorLog != null) {
             performanceMonitorLog.setOnPreferenceClickListener(this);
         }
+        if (resourceViewer != null) {
+            resourceViewer.setOnPreferenceClickListener(this);
+        }
 
         if (preAnrDetection != null) {
             preAnrDetection.setOnPreferenceChangeListener(this);
+        }
+        if (anrAutoDismiss != null) {
+            anrAutoDismiss.setOnPreferenceChangeListener(this);
+        }
+        if (anrAutoDismissAccessibility != null) {
+            anrAutoDismissAccessibility.setOnPreferenceClickListener(this);
         }
         if (exportDiagnostic != null) {
             exportDiagnostic.setOnPreferenceClickListener(this);
@@ -261,13 +283,31 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                 return gotoRecycleBinActivity();
             case KEY_PERFORMANCE_MONITOR_LOG:
                 return gotoPerformanceLogActivity();
+            case KEY_RESOURCE_VIEWER:
+                return gotoResourceViewerActivity();
             case KEY_TRAFFIC_CAPTURE_PAGE:
                 return gotoCaptureActivity();
             case KEY_EXPORT_DIAGNOSTIC:
                 return exportDiagnostic();
+            case KEY_ANR_AUTO_DISMISS_ACCESSIBILITY:
+                return gotoAccessibilitySettings();
             default:
                 return false;
         }
+    }
+
+    private boolean gotoAccessibilitySettings() {
+        Activity activity = getActivity();
+        try {
+            // 注意不能直接 import android.provider.Settings：
+            // 本文件已 import com.hippo.ehviewer.Settings，故使用全限定名
+            Intent intent = new Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open accessibility settings", e);
+            Toast.makeText(activity, R.string.settings_advanced_anr_auto_dismiss_accessibility_failed, Toast.LENGTH_SHORT).show();
+        }
+        return true;
     }
 
     private boolean gotoWiFiClientActivity() {
@@ -326,6 +366,13 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private boolean gotoPerformanceLogActivity() {
         Activity activity = getActivity();
         Intent intent = new Intent(activity, PerformanceLogActivity.class);
+        activity.startActivity(intent);
+        return true;
+    }
+
+    private boolean gotoResourceViewerActivity() {
+        Activity activity = getActivity();
+        Intent intent = new Intent(activity, ResourceViewerActivity.class);
         activity.startActivity(intent);
         return true;
     }
@@ -516,6 +563,20 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
             Toast.makeText(getContext(), R.string.settings_advanced_background_concurrent_tasks_applied, Toast.LENGTH_SHORT).show();
             return true;
         }
+        if (KEY_NETWORK_GLOBAL_CONCURRENCY.equals(key)) {
+            int limit;
+            try {
+                limit = Integer.parseInt(String.valueOf(newValue));
+            } catch (Exception e) {
+                return false;
+            }
+
+            Settings.putNetworkGlobalConcurrency(limit);
+            // 即时生效：动态限流器扩容立即补许可，缩容渐进收敛
+            EhEngine.updateNetworkConcurrencyLimit(Settings.getNetworkGlobalConcurrency());
+            Toast.makeText(getContext(), R.string.settings_advanced_network_global_concurrency_applied, Toast.LENGTH_SHORT).show();
+            return true;
+        }
         if (KEY_PERFORMANCE_MONITOR.equals(key)) {
             boolean enabled = Boolean.TRUE.equals(newValue);
             Settings.putPerformanceMonitorEnabled(enabled);
@@ -549,6 +610,15 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                 HealthWatchdog.INSTANCE.stop();
                 Toast.makeText(getContext(), R.string.settings_advanced_pre_anr_detection_disabled, Toast.LENGTH_SHORT).show();
             }
+            return true;
+        }
+        if (KEY_ANR_AUTO_DISMISS.equals(key)) {
+            boolean enabled = Boolean.TRUE.equals(newValue);
+            Settings.putAnrAutoDismissEnabled(enabled);
+            Toast.makeText(getContext(),
+                    enabled ? R.string.settings_advanced_anr_auto_dismiss_enabled
+                            : R.string.settings_advanced_anr_auto_dismiss_disabled,
+                    Toast.LENGTH_SHORT).show();
             return true;
         }
         if (KEY_VPN_AWARE_MODE.equals(key)) {

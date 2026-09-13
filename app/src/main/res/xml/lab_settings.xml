@@ -39,6 +39,9 @@
         <com.hippo.ehviewer.preference.ProgressiveManagerPreference
             android:key="lab_progressive_manager" />
 
+        <com.hippo.ehviewer.preference.RelayCenterPreference
+            android:key="lab_relay_center" />
+
     </PreferenceCategory>
 
 </PreferenceScreen>

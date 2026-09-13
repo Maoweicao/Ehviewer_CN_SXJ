@@ -564,8 +564,18 @@ public class DownloadApiHandler extends BaseApiHandler {
         for (Long gid : gids) {
             gidList.add(gid);
         }
+        // 收集 DownloadInfo 对象（必须在从内存移除前完成）
+        List<DownloadInfo> infoList = new ArrayList<>();
+        for (Long gid : gids) {
+            DownloadInfo info = downloadManager.getDownloadInfo(gid);
+            if (info != null) {
+                infoList.add(info);
+            }
+        }
+        // 从内存列表中移除（即时刷新 UI）
+        downloadManager.removeFromMemoryRange(gidList);
         DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
-                context, downloadManager, gidList, deleteFiles, null);
+                context, downloadManager, infoList, deleteFiles, null);
         BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);
         return ResponseBuilder.accepted(deleteTaskJson(handle));
     }
