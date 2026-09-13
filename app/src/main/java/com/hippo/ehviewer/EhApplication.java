@@ -52,14 +52,7 @@ import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.data.EhNewsDetail;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.userTag.UserTagList;
-import com.hippo.ehviewer.download.ArchiverDownloadCompleter;
-import com.hippo.ehviewer.download.SystemDownloadCompleteReceiver;
-import com.hippo.ehviewer.download.DownloadLogger;
-import com.hippo.ehviewer.network.NetworkHealthTracker;
-import com.hippo.ehviewer.network.NetworkLogger;
-import com.hippo.ehviewer.network.NetworkSecurityManager;
-import com.hippo.ehviewer.network.NetworkStateManager;
-import com.hippo.ehviewer.service.HealthWatchdog;
+import com.hippo.ehviewer.download.ArchiverDownloader;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
@@ -93,8 +86,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import javax.net.ssl.SSLContext;
@@ -151,13 +143,7 @@ public class EhApplication extends RecordingApplication {
 
     private boolean initialized = false;
 
-    // Bounded shared pool: the previous unbounded cached pool spawned 300+
-    // threads under load (thread explosion -> OOM / system-wide slowdown).
-    // All current users submit short fire-and-forget UI-related tasks;
-    // CallerRunsPolicy provides natural backpressure in pathological bursts.
-    private final ExecutorService executorService = new ThreadPoolExecutor(
-            4, 16, 60L, TimeUnit.SECONDS, new LinkedBlockingQueue<>(256),
-            new ThreadPoolExecutor.CallerRunsPolicy());
+    private final ExecutorService executorService = Executors.newCachedThreadPool();
 
     public static EhApplication getInstance() {
         return instance;
@@ -191,19 +177,12 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
-        EhDB.initialize(this);
-        DownloadedFileManager.initialize(this);
-        DownloadLogger.initialize(this);
-        ArchiverDownloadCompleter.resumePendingDownloads(this);
-        SystemDownloadCompleteReceiver.ensureRegisteredAndResume(this);
+        ArchiverDownloader.resumePending(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
         AppConfig.initialize(this);
-        NetworkLogger.INSTANCE.init(this);
-        NetworkStateManager.INSTANCE.init(this);
-        NetworkSecurityManager.INSTANCE.init();
-        BackgroundTaskManager.initialize(this);
         SpiderDen.initialize(this);
+        EhDB.initialize(this);
         EhEngine.initialize();
         BitmapUtils.initialize(this);
 //        Image1.initialize(this);
@@ -213,8 +192,6 @@ public class EhApplication extends RecordingApplication {
 //        A7Zip.loadLibrary(A7ZipExtractLite.LIBRARY, libname -> ReLinker.loadLibrary(EhApplication.this, libname));
         // 64位适配
         A7Zip.initialize(this);
-        com.hippo.ehviewer.task.automation.AutomationManager.getInstance(this).initialize();
-        com.hippo.ehviewer.task.automation.EventTriggerDispatcher.getInstance(this).initialize();
         if (EhDB.needMerge()) {
             EhDB.mergeOldDB(this);
         }
@@ -251,13 +228,6 @@ public class EhApplication extends RecordingApplication {
                 } catch (Throwable ignored) {
                 }
 
-                // Rebuild ptoken index if empty (cold start after DB upgrade)
-                try {
-                    com.hippo.ehviewer.task.PtokenIndexRebuilder.rebuildIfNeeded();
-                } catch (Throwable t) {
-                    ExceptionUtils.throwIfFatal(t);
-                }
-
                 return null;
             }
         }.executeOnExecutor(IoThreadPoolExecutor.Companion.getInstance());
@@ -280,12 +250,6 @@ public class EhApplication extends RecordingApplication {
         }
 
         initialized = true;
-
-        // 启动无响应预判看门狗（默认常驻，可在设置中关闭）
-        // 放在 initialized 之后，避免启动阶段主线程繁忙造成误报
-        if (Settings.getPreAnrDetectionEnabled()) {
-            HealthWatchdog.INSTANCE.start();
-        }
     }
 
     private void clearTempDir() {
@@ -322,55 +286,12 @@ public class EhApplication extends RecordingApplication {
         }
     }
 
-    public static void clearMemoryCacheSafely() {
-        try {
-            EhApplication app = getInstance();
-            if (app != null) {
-                app.clearMemoryCache();
-            }
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to clear memory cache", t);
-        }
-    }
-
-    /**
-     * Called when network changes to flush connections and DNS cache.
-     */
-    public static void onNetworkChanged() {
-        try {
-            EhApplication app = getInstance();
-            if (app != null) {
-                OkHttpClient client = getOkHttpClient(app);
-                if (client != null) {
-                    client.connectionPool().evictAll();
-                }
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to flush connections on network change", e);
-        }
-    }
-
     @Override
     public void onTrimMemory(int level) {
         super.onTrimMemory(level);
 
-        // 分级响应内存压力
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE) {
-            // Level 5+: 清理 GalleryDetail 缓存（轻量级释放）
-            if (null != mGalleryDetailCache) {
-                mGalleryDetailCache.evictAll();
-            }
-        }
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            // Level 10+: 清理图片内存缓存（重量级释放）
             clearMemoryCache();
-        }
-
-        // 内存紧张时主动落盘诊断，争取在进程被回收前保留现场
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
-            HealthWatchdog.INSTANCE.requestDump("trim_memory_critical_" + level, true);
-        } else if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            HealthWatchdog.INSTANCE.requestDump("trim_memory_" + level, false);
         }
     }
 
@@ -489,7 +410,7 @@ public class EhApplication extends RecordingApplication {
                             throw new NullPointerException(e.getMessage());
                         }
                     })
-.addNetworkInterceptor(chain -> {
+                    .addNetworkInterceptor(chain -> {
                         Response response = chain.proceed(chain.request());
                         // 同步Cookie到WebView
                         if (response.headers("Set-Cookie") != null) {
@@ -504,11 +425,9 @@ public class EhApplication extends RecordingApplication {
                                 Log.e(TAG, "CookieManager/WebView sync skipped", t);
                             }
                         }
-return response;
-                        })
-                    .addInterceptor(com.hippo.ehviewer.network.TrafficCaptureManager.INSTANCE.createInterceptor())
-                    .proxySelector(getEhProxySelector(application))
-                    .eventListenerFactory(NetworkHealthTracker.INSTANCE.createEventListenerFactory());
+                        return response;
+                    })
+                    .proxySelector(getEhProxySelector(application));
             if (Settings.getDF() && AppHelper.checkVPN(context)) {
                 if (Build.VERSION.SDK_INT < 29) {
                     Security.insertProviderAt(Conscrypt.newProvider(), 1);
@@ -548,7 +467,6 @@ return response;
                 }
             }
             application.mOkHttpClient = builder.build();
-            NetworkHealthTracker.INSTANCE.setConnectionPool(application.mOkHttpClient.connectionPool());
         }
 
         return application.mOkHttpClient;
@@ -576,9 +494,7 @@ return response;
                             throw new NullPointerException(e.getMessage());
                         }
                     })
-                    .addInterceptor(com.hippo.ehviewer.network.TrafficCaptureManager.INSTANCE.createInterceptor())
-                    .proxySelector(getEhProxySelector(application))
-                    .eventListenerFactory(NetworkHealthTracker.INSTANCE.createEventListenerFactory());
+                    .proxySelector(getEhProxySelector(application));
             if (Settings.getDF() && AppHelper.checkVPN(context)) {
                 if (Build.VERSION.SDK_INT < 29) {
                     Security.insertProviderAt(Conscrypt.newProvider(), 1);
@@ -617,7 +533,6 @@ return response;
                 }
             }
             application.mImageOkHttpClient = builder.build();
-            NetworkHealthTracker.INSTANCE.setConnectionPool(application.mImageOkHttpClient.connectionPool());
         }
 
         return application.mImageOkHttpClient;
@@ -730,10 +645,6 @@ return response;
 
     public void unregisterActivity(Activity activity) {
         mActivityList.remove(activity);
-    }
-
-    public int getActiveActivityCount() {
-        return mActivityList.size();
     }
 
     @Nullable

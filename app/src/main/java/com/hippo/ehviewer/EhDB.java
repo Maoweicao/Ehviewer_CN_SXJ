@@ -25,7 +25,6 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteOpenHelper;
-import android.text.TextUtils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -35,7 +34,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.client.data.GalleryInfo;
-import com.hippo.ehviewer.client.data.ListUrlBuilder;import com.hippo.ehviewer.dao.BlackList;
+import com.hippo.ehviewer.client.data.ListUrlBuilder;
+import com.hippo.ehviewer.dao.BlackList;
 import com.hippo.ehviewer.dao.BlackListDao;
 import com.hippo.ehviewer.dao.DaoMaster;
 import com.hippo.ehviewer.dao.DaoSession;
@@ -45,23 +45,13 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.dao.DownloadLabelDao;
 import com.hippo.ehviewer.dao.DownloadsDao;
-import com.hippo.ehviewer.dao.DownloadHistory;
-import com.hippo.ehviewer.dao.DownloadHistoryDao;
 import com.hippo.ehviewer.dao.Filter;
-import com.hippo.ehviewer.dao.GalleryAiInfo;
-import com.hippo.ehviewer.dao.GalleryAiInfoDao;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.dao.GalleryTagsDao;
-import com.hippo.ehviewer.dao.GalleryVersionMap;
-import com.hippo.ehviewer.dao.GalleryVersionMapDao;
 import com.hippo.ehviewer.dao.HistoryDao;
 import com.hippo.ehviewer.dao.HistoryInfo;
 import com.hippo.ehviewer.dao.LocalFavoriteInfo;
 import com.hippo.ehviewer.dao.LocalFavoritesDao;
-import com.hippo.ehviewer.dao.PtokensIndex;
-import com.hippo.ehviewer.dao.PtokensIndexDao;
-import com.hippo.ehviewer.dao.SystemDownloadTask;
-import com.hippo.ehviewer.dao.SystemDownloadTaskDao;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.dao.QuickSearchDao;
 import com.hippo.ehviewer.download.DownloadManager;
@@ -82,13 +72,10 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 public class EhDB {
 
@@ -98,19 +85,13 @@ public class EhDB {
 
     private static DaoSession sDaoSession;
 
-    // Cache for download dirnames to reduce synchronized contention
-    private static final ConcurrentHashMap<Long, String> sDownloadDirnameCache = new ConcurrentHashMap<>();
-
     private static boolean sHasOldDB;
     private static boolean sNewDB;
 
     private static class DBOpenHelper extends DaoMaster.OpenHelper {
-        
-        private final WeakReference<Context> mContextRef;
 
         public DBOpenHelper(Context context, String name, SQLiteDatabase.CursorFactory factory) {
             super(context, name, factory);
-            mContextRef = new WeakReference<>(context);
         }
 
         @Override
@@ -121,252 +102,85 @@ public class EhDB {
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            android.util.Log.i("EhDB", "Upgrading database from version " + oldVersion + " to " + newVersion);
-            
-            // 备份数据库
-            Context context = mContextRef.get();
-            if (context != null) {
-                boolean backupSuccess = backupDatabase(context);
-                android.util.Log.i("EhDB", "Database backup " + (backupSuccess ? "successful" : "failed"));
-                
-                if (!backupSuccess) {
-                    android.util.Log.e("EhDB", "Database backup failed, aborting upgrade");
-                    return;
-                }
-            }
-            
-            try {
-                // 执行升级
-                if (oldVersion < 7) {
-                    // 添加DOWNLOADED_FILES表
-                    android.util.Log.i("EhDB", "Creating DOWNLOADED_FILES table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
-                            "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
-                            "\"GID\" INTEGER NOT NULL ," +
-                            "\"FILENAME\" TEXT NOT NULL ," +
-                            "\"MD5\" TEXT," +
-                            "\"PATH\" TEXT NOT NULL ," +
-                            "\"SIZE\" INTEGER," +
-                            "\"DOWNLOAD_TIME\" INTEGER NOT NULL ," +
-                            "\"LAST_ACCESSED\" INTEGER," +
-                            "\"STATUS\" INTEGER NOT NULL );");
-                    android.util.Log.i("EhDB", "DOWNLOADED_FILES table created successfully");
-                }
-                
-                if (oldVersion < 8) {
-                    // 添加GALLERY_VERSION_MAP表
-                    android.util.Log.i("EhDB", "Creating GALLERY_VERSION_MAP table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"GALLERY_VERSION_MAP\" (" +
-                            "\"_id\" INTEGER PRIMARY KEY AUTOINCREMENT ," +
-                            "\"CURRENT_GID\" INTEGER NOT NULL ," +
-                            "\"ORIGINAL_GID\" INTEGER NOT NULL ," +
-                            "\"TITLE\" TEXT," +
-                            "\"CREATE_TIME\" INTEGER NOT NULL ," +
-                            "\"UPDATE_TIME\" INTEGER NOT NULL );");
-                    
-                    android.util.Log.i("EhDB", "GALLERY_VERSION_MAP table created successfully");
-                    
-                    // 确保DOWNLOADED_FILES表存在（以防从旧版本升级）
-                    android.util.Log.i("EhDB", "Ensuring DOWNLOADED_FILES table exists");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
-                            "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
-                            "\"GID\" INTEGER NOT NULL ," +
-                            "\"FILENAME\" TEXT NOT NULL ," +
-                            "\"MD5\" TEXT," +
-                            "\"PATH\" TEXT NOT NULL ," +
-                            "\"SIZE\" INTEGER," +
-                            "\"DOWNLOAD_TIME\" INTEGER NOT NULL ," +
-                            "\"LAST_ACCESSED\" INTEGER," +
-                            "\"STATUS\" INTEGER NOT NULL );");
-                }
-                
-                // 执行旧的升级逻辑
-                if (oldVersion <= 2) {
-                    db.execSQL("CREATE TABLE " + "\"FILTER2\" (" +
-                            "\"_id\" INTEGER PRIMARY KEY ," +
-                            "\"MODE\" INTEGER NOT NULL ," +
-                            "\"TEXT\" TEXT," +
-                            "\"ENABLE\" INTEGER);");
-                    db.execSQL("INSERT INTO \"FILTER2\" (" +
-                            "_id, MODE, TEXT, ENABLE)" +
-                            "SELECT _id, MODE, TEXT, 1 FROM [FILTER];");
-                    db.execSQL("DROP TABLE [FILTER]");
-                    db.execSQL("ALTER TABLE FILTER2 RENAME TO [FILTER]");
-                }
-                
-                if (oldVersion <= 3) {
-                    db.execSQL("CREATE TABLE " + "\"QUICK_SEARCH2\" (" +
-                            "\"_id\" INTEGER PRIMARY KEY ," +
-                            "\"NAME\" TEXT," +
-                            "\"MODE\" INTEGER NOT NULL ," +
-                            "\"CATEGORY\" INTEGER NOT NULL ," +
-                            "\"KEYWORD\" TEXT," +
-                            "\"ADVANCE_SEARCH\" INTEGER NOT NULL ," +
-                            "\"MIN_RATING\" INTEGER NOT NULL ," +
-                            "\"PAGE_FROM\" INTEGER NOT NULL ," +
-                            "\"PAGE_TO\" INTEGER NOT NULL ," +
-                            "\"TIME\" INTEGER NOT NULL );");
-                    db.execSQL("INSERT INTO \"QUICK_SEARCH2\" (" +
-                            "_id, NAME, MODE, CATEGORY, KEYWORD, ADVANCE_SEARCH, MIN_RATING, PAGE_FROM, PAGE_TO, TIME)" +
-                            "SELECT _id, NAME, MODE, CATEGORY, KEYWORD, ADVANCE_SEARCH, MIN_RATING, -1, -1, TIME FROM QUICK_SEARCH;");
-                    db.execSQL("DROP TABLE QUICK_SEARCH");
-                    db.execSQL("ALTER TABLE QUICK_SEARCH2 RENAME TO QUICK_SEARCH");
-                }
-                
-                if (oldVersion <= 4) {
-                    db.execSQL("DROP TABLE IF EXISTS \"Black_List\"");
-                    db.execSQL("CREATE TABLE " + "\"Black_List\" (" + //
-                            "\"_id\" INTEGER PRIMARY KEY AUTOINCREMENT ," + // 0: id
-                            "\"BADGAYNAME\" TEXT," + // 1: badgayname
-                            "\"REASON\" TEXT," + // 2: reason
-                            "\"ANGRYWITH\" TEXT," + // 3: angrywith
-                            "\"ADD_TIME\" TEXT," + // 4: add_time
-                            "\"MODE\" INTEGER);");
-                }
-                
-                if (oldVersion <= 5) {
-                    db.execSQL("DROP TABLE IF EXISTS \"Gallery_Tags\"");
-                    db.execSQL("CREATE TABLE " + "\"Gallery_Tags\" (" + //
-                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ," + // 0: gid
-                            "\"ROWS\" TEXT," + // 1: rows
-                            "\"ARTIST\" TEXT," + // 2: artist
-                            "\"COSPLAYER\" TEXT," + // 3: cosplayer
-                            "\"CHARACTER\" TEXT," + // 4: character
-                            "\"FEMALE\" TEXT," + // 5: female
-                            "\"GROUP\" TEXT," + // 6: group
-                            "\"LANGUAGE\" TEXT," + // 7: language
-                            "\"MALE\" TEXT," + // 8: male
-                            "\"MISC\" TEXT," + // 9: misc
-                            "\"MIXED\" TEXT," + // 10: mixed
-                            "\"OTHER\" TEXT," + // 11: other
-                            "\"PARODY\" TEXT," + // 12: parody
-                            "\"RECLASS\" TEXT," + // 13: reclass
-                            "\"CREATE_TIME\" INTEGER," + // 14: create_time
-                            "\"UPDATE_TIME\" INTEGER);"); // 15: update_time
-                }
-                
-                if (oldVersion <= 6) {
-                    try {
-                        db.execSQL("ALTER TABLE \"DOWNLOADS\" ADD COLUMN \"ARCHIVE_URI\" TEXT");
-                    } catch (Exception e) {
-                        // Column might already exist, ignore the error
-                        Log.w("EhDB", "Failed to add ARCHIVE_URI column, might already exist", e);
-                        Analytics.recordException(e);
-                    }
-                }
-
-                if (oldVersion < 10) {
-                    android.util.Log.i("EhDB", "Creating PTOKENS_INDEX table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"PTOKENS_INDEX\" (" +
-                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ," +
-                            "\"PTOKENS\" TEXT," +
-                            "\"PAGES\" INTEGER NOT NULL ," +
-                            "\"UPDATED_AT\" INTEGER NOT NULL );");
-                    android.util.Log.i("EhDB", "PTOKENS_INDEX table created successfully");
-                }
-
-                if (oldVersion < 11) {
-                    android.util.Log.i("EhDB", "Creating SYSTEM_DOWNLOAD_TASKS table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"SYSTEM_DOWNLOAD_TASKS\" (" +
-                            "\"DOWNLOAD_ID\" INTEGER PRIMARY KEY NOT NULL ," +
-                            "\"GID\" INTEGER NOT NULL ," +
-                            "\"PAGE_INDEX\" INTEGER NOT NULL ," +
-                            "\"RESOLVED_URL\" TEXT," +
-                            "\"STATUS\" TEXT NOT NULL ," +
-                            "\"RETRY_COUNT\" INTEGER NOT NULL ," +
-                            "\"CREATED_AT\" INTEGER NOT NULL );");
-                    android.util.Log.i("EhDB", "SYSTEM_DOWNLOAD_TASKS table created successfully");
-                }
-
-                if (oldVersion < 12) {
-                    android.util.Log.i("EhDB", "Creating DOWNLOAD_HISTORY table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOAD_HISTORY\" (" +
-                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ,\"TOKEN\" TEXT,\"TITLE\" TEXT,\"TITLE_JPN\" TEXT," +
-                            "\"FILE_PATH\" TEXT,\"COMPLETED_AT\" INTEGER NOT NULL ,\"LAST_DOWNLOADED_AT\" INTEGER NOT NULL ," +
-                            "\"DOWNLOAD_COUNT\" INTEGER NOT NULL ,\"DELETION_TYPE\" INTEGER NOT NULL ," +
-                            "\"MERGED_TARGET_GID\" INTEGER NOT NULL ,\"DELETED_AT\" INTEGER NOT NULL );");
-                }
-
-                if (oldVersion < 13) {
-                    android.util.Log.i("EhDB", "Creating GALLERY_AI_INFO table");
-                    db.execSQL("CREATE TABLE IF NOT EXISTS \"GALLERY_AI_INFO\" (" +
-                            "\"GID\" INTEGER PRIMARY KEY NOT NULL ,\"SUMMARY\" TEXT,\"TAGS\" TEXT," +
-                            "\"DESCRIPTIONS\" TEXT,\"AESTHETIC_SCORE\" REAL NOT NULL ,\"UPDATED_AT\" INTEGER NOT NULL );");
-                }
-                
-                android.util.Log.i("EhDB", "Database upgrade completed successfully");
-                
-            } catch (Exception e) {
-                android.util.Log.e("EhDB", "Error during database upgrade", e);
-                
-                // 升级失败，尝试还原数据库
-                if (context != null) {
-                    android.util.Log.i("EhDB", "Attempting to restore database due to upgrade failure");
-                    File backupDir = new File(context.getCacheDir(), "db_backup");
-                    File[] backupFiles = backupDir.listFiles();
-                    
-                    if (backupFiles != null && backupFiles.length > 0) {
-                        // 找到最新的备份文件
-                        File latestBackup = backupFiles[0];
-                        for (File backup : backupFiles) {
-                            if (backup.getName().compareTo(latestBackup.getName()) > 0) {
-                                latestBackup = backup;
-                            }
-                        }
-                        
-                        boolean restoreSuccess = restoreDatabase(context, latestBackup.getName());
-                        android.util.Log.i("EhDB", "Database restore " + (restoreSuccess ? "successful" : "failed"));
-                    }
-                }
-            }
+            upgradeDB(db, oldVersion);
         }
+    }
 
-        @Override
-        public void onDowngrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            android.util.Log.i("EhDB", "Downgrading database from version " + oldVersion + " to " + newVersion);
-            
-            // 备份数据库
-            Context context = mContextRef.get();
-            if (context != null) {
-                boolean backupSuccess = backupDatabase(context);
-                android.util.Log.i("EhDB", "Database backup " + (backupSuccess ? "successful" : "failed"));
-            }
-            
-            try {
-                // 处理降级：删除新版本的表或列，但保留核心表
-                if (oldVersion > 8 && newVersion == 8) {
-                    // 如果未来有版本 9+，在这里处理降级到版本 8
-                    android.util.Log.i("EhDB", "Downgrade from future version to 8");
+    private static void upgradeDB(SQLiteDatabase db, int oldVersion) {
+        switch (oldVersion) {
+//            case 1: // 1 to 2, add FILTER
+//                FilterDao.createTable(db, true);
+            case 2: // 2 to 3, add ENABLE column to table FILTER
+                db.execSQL("CREATE TABLE " + "\"FILTER2\" (" +
+                        "\"_id\" INTEGER PRIMARY KEY ," +
+                        "\"MODE\" INTEGER NOT NULL ," +
+                        "\"TEXT\" TEXT," +
+                        "\"ENABLE\" INTEGER);");
+                db.execSQL("INSERT INTO \"FILTER2\" (" +
+                        "_id, MODE, TEXT, ENABLE)" +
+                        "SELECT _id, MODE, TEXT, 1 FROM [FILTER];");
+                db.execSQL("DROP TABLE [FILTER]");
+                db.execSQL("ALTER TABLE FILTER2 RENAME TO [FILTER]");
+            case 3: // 3 to 4, add PAGE_FROM and PAGE_TO column to QUICK_SEARCH
+                db.execSQL("CREATE TABLE " + "\"QUICK_SEARCH2\" (" +
+                        "\"_id\" INTEGER PRIMARY KEY ," +
+                        "\"NAME\" TEXT," +
+                        "\"MODE\" INTEGER NOT NULL ," +
+                        "\"CATEGORY\" INTEGER NOT NULL ," +
+                        "\"KEYWORD\" TEXT," +
+                        "\"ADVANCE_SEARCH\" INTEGER NOT NULL ," +
+                        "\"MIN_RATING\" INTEGER NOT NULL ," +
+                        "\"PAGE_FROM\" INTEGER NOT NULL ," +
+                        "\"PAGE_TO\" INTEGER NOT NULL ," +
+                        "\"TIME\" INTEGER NOT NULL );");
+                db.execSQL("INSERT INTO \"QUICK_SEARCH2\" (" +
+                        "_id, NAME, MODE, CATEGORY, KEYWORD, ADVANCE_SEARCH, MIN_RATING, PAGE_FROM, PAGE_TO, TIME)" +
+                        "SELECT _id, NAME, MODE, CATEGORY, KEYWORD, ADVANCE_SEARCH, MIN_RATING, -1, -1, TIME FROM QUICK_SEARCH;");
+                db.execSQL("DROP TABLE QUICK_SEARCH");
+                db.execSQL("ALTER TABLE QUICK_SEARCH2 RENAME TO QUICK_SEARCH");
+            case 4:
+                db.execSQL("DROP TABLE IF EXISTS \"Black_List\"");
+                db.execSQL("CREATE TABLE " + "\"Black_List\" (" + //
+                        "\"_id\" INTEGER PRIMARY KEY AUTOINCREMENT ," + // 0: id
+                        "\"BADGAYNAME\" TEXT," + // 1: badgayname
+                        "\"REASON\" TEXT," + // 2: reason
+                        "\"ANGRYWITH\" TEXT," + // 3: angrywith
+                        "\"ADD_TIME\" TEXT," + // 4: add_time
+                        "\"MODE\" INTEGER);");
+            case 5:
+                db.execSQL("DROP TABLE IF EXISTS \"Gallery_Tags\"");
+                db.execSQL("CREATE TABLE " + "\"Gallery_Tags\" (" + //
+                        "\"GID\" INTEGER PRIMARY KEY NOT NULL ," + // 0: gid
+                        "\"ROWS\" TEXT," + // 1: rows
+                        "\"ARTIST\" TEXT," + // 2: artist
+                        "\"COSPLAYER\" TEXT," + // 3: cosplayer
+                        "\"CHARACTER\" TEXT," + // 4: character
+                        "\"FEMALE\" TEXT," + // 5: female
+                        "\"GROUP\" TEXT," + // 6: group
+                        "\"LANGUAGE\" TEXT," + // 7: language
+                        "\"MALE\" TEXT," + // 8: male
+                        "\"MISC\" TEXT," + // 9: misc
+                        "\"MIXED\" TEXT," + // 10: mixed
+                        "\"OTHER\" TEXT," + // 11: other
+                        "\"PARODY\" TEXT," + // 12: parody
+                        "\"RECLASS\" TEXT," + // 13: reclass
+                        "\"CREATE_TIME\" INTEGER," + // 14: create_time
+                        "\"UPDATE_TIME\" INTEGER);"); // 15: update_time
+            case 6: // 6 to 7, add ARCHIVE_URI column to DOWNLOADS table
+                try {
+                    db.execSQL("ALTER TABLE \"DOWNLOADS\" ADD COLUMN \"ARCHIVE_URI\" TEXT");
+                } catch (Exception e) {
+                    // Column might already exist, ignore the error
+                    Log.w("EhDB", "Failed to add ARCHIVE_URI column, might already exist", e);
+                    Analytics.recordException(e);
                 }
-                
-                // 注意：不删除 DOWNLOADED_FILES 表，它是版本 7 的一部分
-                // 只有版本 8+ 添加的新特性才在降级时删除
-                
-                android.util.Log.i("EhDB", "Database downgrade completed successfully");
-                
-            } catch (Exception e) {
-                android.util.Log.e("EhDB", "Error during database downgrade", e);
-                
-                // 降级失败，尝试还原数据库
-                if (context != null) {
-                    android.util.Log.i("EhDB", "Attempting to restore database due to downgrade failure");
-                    File backupDir = new File(context.getCacheDir(), "db_backup");
-                    File[] backupFiles = backupDir.listFiles();
-                    
-                    if (backupFiles != null && backupFiles.length > 0) {
-                        // 找到最新的备份文件
-                        File latestBackup = backupFiles[0];
-                        for (File backup : backupFiles) {
-                            if (backup.getName().compareTo(latestBackup.getName()) > 0) {
-                                latestBackup = backup;
-                            }
-                        }
-                        
-                        boolean restoreSuccess = restoreDatabase(context, latestBackup.getName());
-                        android.util.Log.i("EhDB", "Database restore " + (restoreSuccess ? "successful" : "failed"));
-                    }
+            case 7: // 7 to 8, add LOCATION column to Gallery_Tags
+                try {
+                    db.execSQL("ALTER TABLE \"Gallery_Tags\" ADD COLUMN \"LOCATION\" TEXT");
+                } catch (Exception e) {
+                    Log.w("EhDB", "Failed to add LOCATION column, might already exist", e);
+                    Analytics.recordException(e);
                 }
-            }
         }
     }
 
@@ -391,107 +205,20 @@ public class EhDB {
 
         @Override
         public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-            // 处理数据库升级
-            // 暂时不添加新表，避免启动问题
         }
     }
 
     public static void initialize(Context context) {
-        Log.i(TAG, "Initializing EhDB...");
         sHasOldDB = context.getDatabasePath("data").exists();
-        Log.i(TAG, "Old database exists: " + sHasOldDB);
 
         DBOpenHelper helper = new DBOpenHelper(
                 context.getApplicationContext(), "eh.db", null);
 
-        Log.i(TAG, "Getting writable database...");
         SQLiteDatabase db = helper.getWritableDatabase();
-        Log.i(TAG, "Database obtained, version: " + db.getVersion() + 
-              ", path: " + db.getPath() + ", isOpen: " + db.isOpen());
-        
         DaoMaster daoMaster = new DaoMaster(db);
-        Log.i(TAG, "DaoMaster created, schema version: " + DaoMaster.SCHEMA_VERSION);
 
         sDaoSession = daoMaster.newSession();
-        Log.i(TAG, "DaoSession created");
-        
         MAX_HISTORY_COUNT = Settings.getHistoryInfoSize();
-        Log.i(TAG, "EhDB initialization completed");
-    }
-
-    /**
-     * 获取DaoSession
-     */
-    public static DaoSession getDaoSession() {
-        return sDaoSession;
-    }
-
-    /**
-     * 备份数据库
-     */
-    public static boolean backupDatabase(Context context) {
-        try {
-            File dbFile = context.getDatabasePath("eh.db");
-            if (!dbFile.exists()) {
-                return false;
-            }
-
-            File backupDir = new File(context.getCacheDir(), "db_backup");
-            if (!backupDir.exists()) {
-                backupDir.mkdirs();
-            }
-
-            String timestamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss").format(new java.util.Date());
-            File backupFile = new File(backupDir, "ehviewer_backup_" + timestamp + ".db");
-
-            // 复制数据库文件
-            java.nio.channels.FileChannel source = new java.io.FileInputStream(dbFile).getChannel();
-            java.nio.channels.FileChannel destination = new java.io.FileOutputStream(backupFile).getChannel();
-            destination.transferFrom(source, 0, source.size());
-            source.close();
-            destination.close();
-
-            return true;
-        } catch (Exception e) {
-            android.util.Log.e("EhDB", "Error backing up database", e);
-            return false;
-        }
-    }
-
-    /**
-     * 还原数据库
-     */
-    public static boolean restoreDatabase(Context context, String backupFileName) {
-        try {
-            File backupDir = new File(context.getCacheDir(), "db_backup");
-            File backupFile = new File(backupDir, backupFileName);
-            if (!backupFile.exists()) {
-                return false;
-            }
-
-            File dbFile = context.getDatabasePath("eh.db");
-            
-            // 关闭数据库连接
-            if (sDaoSession != null) {
-                sDaoSession.clear();
-                sDaoSession = null;
-            }
-
-            // 复制备份文件
-            java.nio.channels.FileChannel source = new java.io.FileInputStream(backupFile).getChannel();
-            java.nio.channels.FileChannel destination = new java.io.FileOutputStream(dbFile).getChannel();
-            destination.transferFrom(source, 0, source.size());
-            source.close();
-            destination.close();
-
-            // 重新初始化数据库
-            initialize(context);
-
-            return true;
-        } catch (Exception e) {
-            android.util.Log.e("EhDB", "Error restoring database", e);
-            return false;
-        }
     }
 
     public static boolean needMerge() {
@@ -706,140 +433,13 @@ public class EhDB {
                 Analytics.recordException(e);
             }
         }
-        // Fix state: downgrade DOWNLOAD to WAIT so interrupted downloads can resume
-        // STATE_WAIT items are preserved so they stay in the download queue
+        // Fix state
         for (DownloadInfo info : list) {
-            if (info.state == DownloadInfo.STATE_DOWNLOAD) {
-                info.state = DownloadInfo.STATE_WAIT;
+            if (info.state == DownloadInfo.STATE_WAIT || info.state == DownloadInfo.STATE_DOWNLOAD) {
+                info.state = DownloadInfo.STATE_NONE;
             }
-            // STATE_WAIT stays as WAIT — no reset to NONE
         }
         return list;
-    }
-
-    @Nullable
-    public static synchronized DownloadInfo getDownloadInfo(long gid) {
-        try {
-            return sDaoSession.getDownloadsDao().load(gid);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-            return null;
-        }
-    }
-
-    // -------- SystemDownloadTask (Android system DownloadManager mapping) --------
-
-    @Nullable
-    public static synchronized SystemDownloadTask getSystemDownloadTask(long downloadId) {
-        try {
-            return sDaoSession.getSystemDownloadTaskDao().load(downloadId);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-            return null;
-        }
-    }
-
-    @Nullable
-    public static synchronized List<SystemDownloadTask> getSystemDownloadTasksForGid(long gid) {
-        try {
-            return sDaoSession.getSystemDownloadTaskDao().queryBuilder()
-                    .where(SystemDownloadTaskDao.Properties.Gid.eq(gid))
-                    .list();
-        } catch (Exception e) {
-            Analytics.recordException(e);
-            return null;
-        }
-    }
-
-    @Nullable
-    public static synchronized List<SystemDownloadTask> getActiveSystemDownloadTasks() {
-        try {
-            return sDaoSession.getSystemDownloadTaskDao().queryBuilder()
-                    .whereOr(SystemDownloadTaskDao.Properties.Status.eq(SystemDownloadTask.STATUS_PENDING),
-                            SystemDownloadTaskDao.Properties.Status.eq(SystemDownloadTask.STATUS_RUNNING))
-                    .list();
-        } catch (Exception e) {
-            Analytics.recordException(e);
-            return null;
-        }
-    }
-
-    public static synchronized void putSystemDownloadTask(SystemDownloadTask task) {
-        try {
-            sDaoSession.getSystemDownloadTaskDao().insertOrReplace(task);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
-    }
-
-    public static synchronized void deleteSystemDownloadTask(long downloadId) {
-        try {
-            sDaoSession.getSystemDownloadTaskDao().deleteByKey(downloadId);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
-    }
-
-    public static synchronized void deleteSystemDownloadTasksForGid(long gid) {
-        try {
-            sDaoSession.getSystemDownloadTaskDao().queryBuilder()
-                    .where(SystemDownloadTaskDao.Properties.Gid.eq(gid))
-                    .buildDelete()
-                    .executeDeleteWithoutDetachingEntities();
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
-    }
-
-    // -------- GalleryAiInfo (AI 图片分析，用于下载列表按描述搜索) --------
-
-    public static synchronized void putGalleryAiInfo(GalleryAiInfo info) {
-        try {
-            sDaoSession.getGalleryAiInfoDao().insertOrReplace(info);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
-    }
-
-    @Nullable
-    public static synchronized GalleryAiInfo queryGalleryAiInfo(long gid) {
-        try {
-            return sDaoSession.getGalleryAiInfoDao().load(gid);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-            return null;
-        }
-    }
-
-    /**
-     * 按关键词搜索所有 AI 分析信息（summary / tags / descriptions 模糊匹配）
-     */
-    @NonNull
-    public static synchronized List<GalleryAiInfo> searchGalleryAiInfosByKeyword(String keyword) {
-        List<GalleryAiInfo> result = new ArrayList<>();
-        if (TextUtils.isEmpty(keyword)) {
-            return result;
-        }
-        try {
-            String key = keyword.trim();
-            String like = "%" + key + "%";
-            result = sDaoSession.getGalleryAiInfoDao().queryBuilder()
-                    .whereOr(GalleryAiInfoDao.Properties.Summary.like(like),
-                            GalleryAiInfoDao.Properties.Tags.like(like),
-                            GalleryAiInfoDao.Properties.Descriptions.like(like))
-                    .list();
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
-        return result;
-    }
-
-    public static synchronized void deleteGalleryAiInfo(long gid) {
-        try {
-            sDaoSession.getGalleryAiInfoDao().deleteByKey(gid);
-        } catch (Exception e) {
-            Analytics.recordException(e);
-        }
     }
 
     public static synchronized void moveDownloadInfo(List<DownloadInfo> infos, int fromPosition, int toPosition){
@@ -881,131 +481,11 @@ public class EhDB {
     }
 
     @Nullable
-    public static synchronized DownloadHistory getDownloadHistory(long gid) {
-        return sDaoSession.getDownloadHistoryDao().load(gid);
-    }
-
-    public static synchronized boolean hasDownloadHistory(long gid) {
-        return sDaoSession.getDownloadHistoryDao().load(gid) != null;
-    }
-
-    public static synchronized long getDownloadHistoryCount() {
-        return sDaoSession.getDownloadHistoryDao().count();
-    }
-
-    public static synchronized void recordDownloadCompleted(DownloadInfo info, @Nullable String filePath) {
-        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
-        DownloadHistory history = dao.load(info.gid);
-        long now = System.currentTimeMillis();
-        if (history == null) {
-            history = new DownloadHistory();
-            history.setGid(info.gid);
-            history.setCompletedAt(now);
-            history.setDownloadCount(0);
-        }
-        history.setToken(info.token);
-        history.setTitle(info.title);
-        history.setTitleJpn(info.titleJpn);
-        history.setFilePath(filePath);
-        history.setLastDownloadedAt(now);
-        history.setDownloadCount(history.getDownloadCount() + 1);
-        history.setDeletionType(DownloadHistory.DELETION_NONE);
-        history.setMergedTargetGid(0);
-        history.setDeletedAt(0);
-        dao.insertOrReplace(history);
-    }
-
-    public static synchronized void markDownloadHistoryDeleted(long gid, int deletionType, long mergedTargetGid) {
-        DownloadHistory history = sDaoSession.getDownloadHistoryDao().load(gid);
-        if (history == null) return;
-        history.setDeletionType(deletionType);
-        history.setMergedTargetGid(mergedTargetGid);
-        history.setDeletedAt(System.currentTimeMillis());
-        sDaoSession.getDownloadHistoryDao().update(history);
-    }
-
-    /**
-     * 将画廊标记为重复/递进关系而被跳过的记录。
-     * 与 markDownloadHistoryDeleted 不同，此方法会在历史记录不存在时自动创建一条，
-     * 以便旧任务从未下载完成也能在下载历史中标记为重复画廊。
-     */
-    public static synchronized void recordDownloadAsDuplicate(DownloadInfo info, int deletionType, long mergedTargetGid) {
-        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
-        DownloadHistory history = dao.load(info.gid);
-        long now = System.currentTimeMillis();
-        if (history == null) {
-            history = new DownloadHistory();
-            history.setGid(info.gid);
-            history.setCompletedAt(now);
-            history.setDownloadCount(0);
-        }
-        history.setToken(info.token);
-        history.setTitle(info.title);
-        history.setTitleJpn(info.titleJpn);
-        history.setFilePath(getDownloadDirname(info.gid));
-        history.setLastDownloadedAt(now);
-        history.setDownloadCount(history.getDownloadCount() + 1);
-        history.setDeletionType(deletionType);
-        history.setMergedTargetGid(mergedTargetGid);
-        history.setDeletedAt(now);
-        dao.insertOrReplace(history);
-    }
-
-    /**
-     * 删除画廊时记录到下载历史（总是创建/更新一条记录，deletionType=DELETION_NORMAL）。
-     * 与 markDownloadHistoryDeleted 不同，此方法在历史记录不存在时会自动创建，
-     * 适用于删除时无论下载是否完成都记录删除事实。
-     */
-    public static synchronized void recordDownloadDeleted(DownloadInfo info, long mergedTargetGid) {
-        recordDownloadAsDuplicate(info, DownloadHistory.DELETION_NORMAL, mergedTargetGid);
-    }
-
-    /**
-     * 扫描下载目录时，为磁盘上仍存在的画廊补建下载历史记录。
-     * 仅在 DOWNLOAD_HISTORY 中不存在该 gid 时创建，避免覆盖已有历史；
-     * 已删除/合并的画廊无法从磁盘恢复，因此这里总是记为 DELETION_NONE。
-     *
-     * @param gid      画廊 GID
-     * @param token    画廊 token
-     * @param title    画廊标题（旧格式 .ehviewer 可读到，VERSION2 无则为 null）
-     * @param dirname  画廊所在下载目录名
-     */
-    public static synchronized void recordDownloadHistoryFromScan(long gid, @Nullable String token,
-            @Nullable String title, @Nullable String dirname) {
-        DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
-        if (dao.load(gid) != null) {
-            return;
-        }
-        long now = System.currentTimeMillis();
-        DownloadHistory history = new DownloadHistory();
-        history.setGid(gid);
-        history.setToken(token);
-        history.setTitle(title);
-        history.setTitleJpn(null);
-        history.setFilePath(dirname);
-        history.setCompletedAt(now);
-        history.setLastDownloadedAt(now);
-        history.setDownloadCount(1);
-        history.setDeletionType(DownloadHistory.DELETION_NONE);
-        history.setMergedTargetGid(0);
-        history.setDeletedAt(0);
-        dao.insert(history);
-    }
-
-    @Nullable
     public static synchronized String getDownloadDirname(long gid) {
-        // Check cache first
-        String cached = sDownloadDirnameCache.get(gid);
-        if (cached != null) {
-            return cached;
-        }
-
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
         DownloadDirname raw = dao.load(gid);
         if (raw != null) {
-            String dirname = raw.getDirname();
-            sDownloadDirnameCache.put(gid, dirname);
-            return dirname;
+            return raw.getDirname();
         } else {
             return null;
         }
@@ -1026,15 +506,11 @@ public class EhDB {
             raw.setDirname(dirname);
             dao.insert(raw);
         }
-        // Update cache
-        sDownloadDirnameCache.put(gid, dirname);
     }
 
     public static synchronized void removeDownloadDirname(long gid) {
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
         dao.deleteByKey(gid);
-        // Remove from cache
-        sDownloadDirnameCache.remove(gid);
     }
 
     public static synchronized void updateDownloadDirname(long removeGid, long newGid, String dirname) {
@@ -1050,158 +526,10 @@ public class EhDB {
             raw.setDirname(dirname);
             dao.insert(raw);
         }
-        // Update cache
-        sDownloadDirnameCache.remove(removeGid);
-        sDownloadDirnameCache.put(newGid, dirname);
     }
 
     public static synchronized void clearDownloadDirname() {
         DownloadDirnameDao dao = sDaoSession.getDownloadDirnameDao();
-        dao.deleteAll();
-        // Clear cache
-        sDownloadDirnameCache.clear();
-    }
-
-    // ==================== GalleryVersionMap ====================
-
-    public static synchronized GalleryVersionMap getGalleryVersionMap(long currentGid) {
-        // 临时禁用
-        return null;
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        List<GalleryVersionMap> list = dao.queryBuilder()
-                .where(GalleryVersionMapDao.Properties.CurrentGid.eq(currentGid))
-                .list();
-        return list.isEmpty() ? null : list.get(0);
-        */
-    }
-
-    public static synchronized List<GalleryVersionMap> getAllVersionsOfGallery(long originalGid) {
-        // 临时禁用
-        return new ArrayList<>();
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        return dao.queryBuilder()
-                .where(GalleryVersionMapDao.Properties.OriginalGid.eq(originalGid))
-                .orderDesc(GalleryVersionMapDao.Properties.UpdateTime)
-                .list();
-        */
-    }
-
-    public static synchronized void putGalleryVersionMap(GalleryVersionMap map) {
-        // 临时禁用
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        GalleryVersionMap existing = dao.load(map.getId());
-        if (existing != null) {
-            // Update
-            map.setUpdateTime(System.currentTimeMillis());
-            dao.update(map);
-        } else {
-            // Insert
-            map.setCreateTime(System.currentTimeMillis());
-            map.setUpdateTime(System.currentTimeMillis());
-            dao.insert(map);
-        }
-        */
-    }
-
-    public static synchronized GalleryVersionMap addGalleryVersionMap(long currentGid, long originalGid, String title) {
-        // 临时禁用
-        return null;
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        
-        // 检查是否已存在
-        List<GalleryVersionMap> existing = dao.queryBuilder()
-                .where(GalleryVersionMapDao.Properties.CurrentGid.eq(currentGid))
-                .list();
-        if (!existing.isEmpty()) {
-            return existing.get(0);
-        }
-        
-        GalleryVersionMap map = new GalleryVersionMap(currentGid, originalGid, title);
-        map.setId(dao.insert(map));
-        return map;
-        */
-    }
-
-    public static synchronized void removeGalleryVersionMap(long currentGid) {
-        // 临时禁用
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        List<GalleryVersionMap> list = dao.queryBuilder()
-                .where(GalleryVersionMapDao.Properties.CurrentGid.eq(currentGid))
-                .list();
-        for (GalleryVersionMap map : list) {
-            dao.delete(map);
-        }
-        */
-    }
-
-    public static synchronized void clearGalleryVersionMap() {
-        // 临时禁用
-        /*
-        GalleryVersionMapDao dao = sDaoSession.getGalleryVersionMapDao();
-        dao.deleteAll();
-        */
-    }
-
-    // ==================== PtokensIndex ====================
-
-    public static synchronized PtokensIndex getPtokensIndex(long gid) {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        return dao.load(gid);
-    }
-
-    public static synchronized List<PtokensIndex> getAllPtokensIndex() {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        return dao.loadAll();
-    }
-
-    /**
-     * 获取 ptoken 索引表的总行数。
-     * 避免为了判断是否为空而使用 {@link #getAllPtokensIndex()} 全量载入内存。
-     */
-    public static synchronized long getPtokensIndexCount() {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        return dao.count();
-    }
-
-    /**
-     * 分批获取 ptoken 索引，避免一次把整张表载入内存导致 OOM。
-     *
-     * @param offset 起始偏移
-     * @param limit  本批最大条数
-     * @return 该批次的索引条目（可能少于 limit）
-     */
-    public static synchronized List<PtokensIndex> getPtokensIndexBatch(int offset, int limit) {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        return dao.queryBuilder().orderAsc(PtokensIndexDao.Properties.Gid)
-                .offset(offset).limit(limit).list();
-    }
-
-    public static synchronized void putPtokensIndex(long gid, String ptokens, int pages) {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        PtokensIndex existing = dao.load(gid);
-        if (existing != null) {
-            existing.setPtokens(ptokens);
-            existing.setPages(pages);
-            existing.setUpdatedAt(System.currentTimeMillis());
-            dao.update(existing);
-        } else {
-            PtokensIndex entry = new PtokensIndex(gid, ptokens, pages, System.currentTimeMillis());
-            dao.insert(entry);
-        }
-    }
-
-    public static synchronized void removePtokensIndex(long gid) {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
-        dao.deleteByKey(gid);
-    }
-
-    public static synchronized void clearPtokensIndex() {
-        PtokensIndexDao dao = sDaoSession.getPtokensIndexDao();
         dao.deleteAll();
     }
 
@@ -1509,8 +837,7 @@ public class EhDB {
     public static synchronized void putHistoryInfo(GalleryInfo galleryInfo) {
         HistoryDao dao = sDaoSession.getHistoryDao();
         HistoryInfo info = dao.load(galleryInfo.gid);
-        boolean isNew = (info == null);
-        if (!isNew) {
+        if (null != info) {
             // Update time
             info.time = System.currentTimeMillis();
             dao.update(info);
@@ -1528,31 +855,6 @@ public class EhDB {
                         .limit(-1).offset(MAX_HISTORY_COUNT).list();
             }
             dao.deleteInTx(list);
-        }
-        if (isNew) {
-            notifyHistoryAdded(galleryInfo.gid);
-        }
-    }
-
-    private static final List<HistoryListener> sHistoryListeners = new CopyOnWriteArrayList<>();
-
-    public interface HistoryListener {
-        void onHistoryAdded(long gid);
-    }
-
-    public static void addHistoryListener(HistoryListener listener) {
-        if (listener != null && !sHistoryListeners.contains(listener)) {
-            sHistoryListeners.add(listener);
-        }
-    }
-
-    public static void removeHistoryListener(HistoryListener listener) {
-        sHistoryListeners.remove(listener);
-    }
-
-    private static void notifyHistoryAdded(long gid) {
-        for (HistoryListener l : sHistoryListeners) {
-            l.onHistoryAdded(gid);
         }
     }
 
@@ -1673,73 +975,6 @@ public class EhDB {
         }
     }
 
-    public static synchronized boolean exportLegacyDB(Context context, File file) {
-        final String ehExportName = "eh.legacy.export.db";
-
-        // Ensure source database has ARCHIVE_URI column
-        try {
-            sDaoSession.getDatabase().execSQL("ALTER TABLE \"DOWNLOADS\" ADD COLUMN \"ARCHIVE_URI\" TEXT");
-        } catch (Exception e) {
-            Log.d(TAG, "ARCHIVE_URI column already exists or failed to add", e);
-        }
-
-        // Delete old export db
-        context.deleteDatabase(ehExportName);
-
-        DBOpenHelper helper = new DBOpenHelper(context.getApplicationContext(), ehExportName, null);
-
-        try {
-            // Copy data to a export db
-            try (SQLiteDatabase db = helper.getWritableDatabase()) {
-                DaoMaster daoMaster = new DaoMaster(db);
-                DaoSession exportSession = daoMaster.newSession();
-                if (! copyDao(sDaoSession.getDownloadsDao(), exportSession.getDownloadsDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getDownloadLabelDao(), exportSession.getDownloadLabelDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getDownloadDirnameDao(), exportSession.getDownloadDirnameDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getHistoryDao(), exportSession.getHistoryDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getQuickSearchDao(), exportSession.getQuickSearchDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getLocalFavoritesDao(), exportSession.getLocalFavoritesDao()))
-                    return false;
-                if (!copyDao(sDaoSession.getBookmarksBao(), exportSession.getBookmarksBao()))
-                    return false;
-                if (!copyDao(sDaoSession.getFilterDao(), exportSession.getFilterDao()))
-                    return false;
-
-                // Set schema version to 7 for compatibility with old BiLi PC Gamer version
-                db.setVersion(7);
-            }
-
-            // Copy export db to data dir
-            File dbFile = context.getDatabasePath(ehExportName);
-            if (dbFile == null || !dbFile.isFile()) {
-                return false;
-            }
-            InputStream is = null;
-            OutputStream os = null;
-            try {
-                is = new FileInputStream(dbFile);
-                os = new FileOutputStream(file);
-                IOUtils.copy(is, os);
-                return true;
-            } catch (IOException e) {
-                e.printStackTrace();
-            } finally {
-                IOUtils.closeQuietly(is);
-                IOUtils.closeQuietly(os);
-            }
-            // Delete failed file
-            file.delete();
-            return false;
-        } finally {
-            context.deleteDatabase(ehExportName);
-        }
-    }
-
     /**
      * @param file The db file
      * @return error string, null for no error
@@ -1751,9 +986,7 @@ public class EhDB {
             int newVersion = DaoMaster.SCHEMA_VERSION;
             int oldVersion = db.getVersion();
             if (oldVersion < newVersion) {
-                // 使用DBOpenHelper进行升级
-                DBOpenHelper helper = new DBOpenHelper(context, file.getPath(), null);
-                helper.onUpgrade(db, oldVersion, newVersion);
+                upgradeDB(db, oldVersion);
                 db.setVersion(newVersion);
             } else if (oldVersion > newVersion) {
                 return context.getString(R.string.cant_read_the_file);
