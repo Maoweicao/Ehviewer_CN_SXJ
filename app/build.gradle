@@ -35,7 +35,7 @@ android {
         //noinspection ExpiredTargetSdkVersion
         targetSdkVersion 30
         versionCode 111
-        versionName "2.0.2.3"
+        versionName "2.0.2.4"
         buildConfigField 'String', 'BUILD_TIME', "\"${new Date().format('yyyy-MM-dd HH:mm:ss')}\""
         vectorDrawables.useSupportLibrary = true
         resourceConfigurations += ['zh', 'zh-rCN', 'zh-rHK', 'zh-rTW', 'es', 'ja', 'ko', 'fr', 'de', 'th']
@@ -89,7 +89,7 @@ android {
             buildConfigField 'String', 'FILE_PROVIDER_AUTHORITY', releaseFileProviderAuthority
         }
         debug {
-            applicationIdSuffix ".debug1"
+            applicationIdSuffix ".debug"
             buildConfigField 'String', 'FILE_PROVIDER_AUTHORITY', '"com.hippo.ehviewer.debug.fileprovider"'
         }
     }
