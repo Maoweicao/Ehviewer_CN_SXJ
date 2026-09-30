@@ -174,12 +174,8 @@
     <dimen name="top_list_top5_recycler_height">260dp</dimen>
     <dimen name="top_list_section_padding">16dp</dimen>
     <dimen name="top_list_section_margin">8dp</dimen>
-    <dimen name="top_list_entry_rank_size">36dp</dimen>
-    <dimen name="top_list_entry_decoration_size">40dp</dimen>
-    <dimen name="top_list_entry_decoration_padding">8dp</dimen>
-    <dimen name="top_list_entry_corner">12dp</dimen>
-    <dimen name="top_list_entry_margin_v">8dp</dimen>
-    <dimen name="top_list_entry_margin_h">12dp</dimen>
+    <!-- 榜单条目改为表单式平铺行，排名 badge 相应缩小 -->
+    <dimen name="top_list_entry_rank_size">28dp</dimen>
     <dimen name="top_list_subtab_height">42dp</dimen>
 
     <!--  底部弹窗相关  -->

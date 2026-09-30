@@ -53,26 +53,24 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         final int rank = position + 1;
 
         // ---- Rank badge (#1, #2, ... with gold/silver/bronze for top 3) ----
-        holder.rankText.setVisibility(View.VISIBLE);
-        holder.rankCrown.setVisibility(View.GONE);
+        // 行样式是表单式平铺，badge 只作为左侧排名标记，不再撑起卡片
+        holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
         switch (rank) {
             case 1:
                 holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_gold);
-                holder.rankText.setText(R.string.top_list_rank_prefix);
-                holder.rankText.setText("#1");
                 holder.rankCrown.setVisibility(View.VISIBLE);
                 break;
             case 2:
                 holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_silver);
-                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                holder.rankCrown.setVisibility(View.GONE);
                 break;
             case 3:
                 holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_bronze);
-                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                holder.rankCrown.setVisibility(View.GONE);
                 break;
             default:
                 holder.rankContainer.setBackgroundResource(R.drawable.bg_rank_normal);
-                holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
+                holder.rankCrown.setVisibility(View.GONE);
                 break;
         }
 

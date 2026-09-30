@@ -1,30 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- 表单样式的榜单条目：左侧保留金银铜排名 badge，右侧标题，底部细分隔线，无卡片外框。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    style="@style/CardView.Reactive"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginHorizontal="@dimen/top_list_entry_margin_h"
-    android:layout_marginVertical="@dimen/top_list_entry_margin_v"
+    android:background="?attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
-    android:foreground="?attr/selectableItemBackground">
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:minHeight="52dp"
+        android:minHeight="48dp"
         android:orientation="horizontal"
         android:paddingStart="16dp"
+        android:paddingTop="10dp"
         android:paddingEnd="16dp"
-        android:paddingVertical="12dp">
+        android:paddingBottom="10dp">
 
         <FrameLayout
             android:id="@+id/top_list_rank_container"
             android:layout_width="@dimen/top_list_entry_rank_size"
             android:layout_height="@dimen/top_list_entry_rank_size"
-            android:layout_marginEnd="14dp"
+            android:layout_marginEnd="12dp"
             android:background="@drawable/bg_rank_normal">
 
             <TextView
@@ -33,14 +34,14 @@
                 android:layout_height="wrap_content"
                 android:layout_gravity="center"
                 android:textColor="#FFFFFF"
-                android:textSize="13sp"
+                android:textSize="12sp"
                 android:textStyle="bold"
                 tools:text="#1" />
 
             <ImageView
                 android:id="@+id/top_list_rank_crown"
-                android:layout_width="18dp"
-                android:layout_height="18dp"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
                 android:layout_gravity="center"
                 android:contentDescription="@null"
                 android:src="@drawable/v_crown_white_x24"
@@ -53,9 +54,15 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:ellipsize="end"
-            android:maxLines="3"
+            android:maxLines="2"
             android:textColor="?attr/textColorThemePrimary"
             android:textSize="14sp"
-            tools:text="[Yoshimotto] Seishori ka no Kawakami san [Dejitaruban Gentai Omake-tsuki] [Chinese]" />
+            tools:text="[Yoshimotto] Seishori ka no Kawakami san [Dejitaruban Gentai Omake-tsuki]" />
     </LinearLayout>
-</androidx.cardview.widget.CardView>
+
+    <com.hippo.ehviewer.widget.DividerView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        app:dividerColor="?attr/dividerColor" />
+
+</LinearLayout>
