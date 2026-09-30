@@ -32,6 +32,17 @@
         <item>@string/rating_reviewing_toplists</item>
     </string-array>
 
+    <!-- 排行榜分类 tab 图标，与 top_list_type 一一对应 -->
+    <array name="top_list_type_icons">
+        <item>@drawable/v_gallery_x24</item>
+        <item>@drawable/v_uploader_x24</item>
+        <item>@drawable/v_tag_x24</item>
+        <item>@drawable/v_fire_black_x24</item>
+        <item>@drawable/v_graph_x24</item>
+        <item>@drawable/v_broom_x24</item>
+        <item>@drawable/v_rating_x24</item>
+    </array>
+
     <string-array name="top_list_history_list_test_data">
         <item>@string/gallery_toplists</item>
         <item>@string/uploader_toplists</item>

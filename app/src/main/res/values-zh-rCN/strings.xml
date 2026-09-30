@@ -1667,6 +1667,9 @@ SSID: %1$s
     <string name="settings_transfer_summary">管理数据传输设置</string>
     <string name="download_selected_confirm">您确定要下载选中的%1$d个画廊吗？</string>
     <string name="download_selected_result">已成功下载 %1$d/%2$d 个画廊</string>
+        <string name="multi_select_selected_count">已选择 %1$d 个</string>
+    <string name="multi_select_no_gallery">该条目无画廊数据，无法勾选</string>
+    <string name="multi_select_loading_details">正在加载画廊详情，请稍候再试</string>
     <string name="no_gallery_selected">请先选择要下载的画廊。</string>
     <string name="gallery_deleted_alert">画廊已删除</string>
     <string name="gallery_deleted_message">该画廊已在E-Hentai上删除，但本地缓存信息仍被保留。</string>
