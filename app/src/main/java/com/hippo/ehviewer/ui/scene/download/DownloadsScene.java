@@ -122,6 +122,7 @@ import com.hippo.ehviewer.ui.dialog.SelectItemWithIconAdapter;
 import com.hippo.ehviewer.ui.scene.ToolbarScene;
 import com.hippo.ehviewer.ui.scene.download.part.CheckboxAdapter;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadAdapter;
+import com.hippo.ehviewer.ui.scene.download.part.DownloadAlbumImporter;
 import com.hippo.ehviewer.ui.scene.download.part.DownloadCategoryTable;
 import com.hippo.ehviewer.ui.scene.download.part.MyPageChangeListener;
 import com.hippo.ehviewer.transfer.core.TransferClientManager;
@@ -345,6 +346,50 @@ public class DownloadsScene extends ToolbarScene
     private final ActivityResultLauncher<Intent> filePickerLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             this::handleSelectedFile
+    );
+
+    /** 本地相册（图片文件夹）导入器，来自上游 2.0.2.5 */
+    private final DownloadAlbumImporter mAlbumImporter = new DownloadAlbumImporter(new DownloadAlbumImporter.Host() {
+        @Override
+        public Context getEHContext() {
+            return DownloadsScene.this.getEHContext();
+        }
+
+        @Override
+        public String getString(int resId) {
+            return DownloadsScene.this.getString(resId);
+        }
+
+        @Override
+        public void runOnUiThread(Runnable runnable) {
+            DownloadsScene.this.runOnUiThread(runnable);
+        }
+
+        @Override
+        public void updateForLabel() {
+            DownloadsScene.this.updateForLabel();
+        }
+
+        @Override
+        public void updateView() {
+            DownloadsScene.this.updateView();
+        }
+
+        @Override
+        public DownloadManager getDownloadManager() {
+            return DownloadsScene.this.mDownloadManager;
+        }
+
+        @Override
+        public String getLabel() {
+            return DownloadsScene.this.mLabel;
+        }
+    });
+
+    @NonNull
+    private final ActivityResultLauncher<Intent> folderPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            mAlbumImporter::handleSelectedFolder
     );
 
     @Override
@@ -1183,6 +1228,9 @@ public class DownloadsScene extends ToolbarScene
                 return true;
             case R.id.import_local_archive:
                 importLocalArchive();
+                return true;
+            case R.id.import_local_album:
+                mAlbumImporter.importLocalAlbum(folderPickerLauncher);
                 return true;
             case R.id.action_relay_center: {
                 Intent intent = new Intent(activity, com.hippo.ehviewer.ui.transfer.TransferActivity.class);

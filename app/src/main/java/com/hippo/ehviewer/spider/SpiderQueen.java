@@ -257,6 +257,22 @@ public final class SpiderQueen implements Runnable {
         sStartPageInFlight.remove(gid);
     }
 
+    /**
+     * Reset the in-memory reading progress for an existing gallery reader.
+     * The caller runs on the main thread, alongside the queen map lifecycle.
+     */
+    @UiThread
+    public static void resetReadingProgress(long gid) {
+        SpiderQueen queen = sQueenMap.get(gid);
+        if (queen == null) {
+            return;
+        }
+        SpiderInfo spiderInfo = queen.mSpiderInfo.get();
+        if (spiderInfo != null) {
+            spiderInfo.startPage = 0;
+        }
+    }
+
     public static int findStartPage(@NonNull Context context, @NonNull GalleryInfo galleryInfo) {
         int cached = getCachedStartPage(galleryInfo.gid);
         if (cached >= 0) {

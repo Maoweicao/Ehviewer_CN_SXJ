@@ -265,4 +265,9 @@
         android:title="@string/repair_thumbnail_menu"
         app:showAsAction="never"/>
 
+    <item
+        android:id="@+id/import_local_album"
+        android:title="@string/import_local_album"
+        app:showAsAction="never"/>
+
 </menu>

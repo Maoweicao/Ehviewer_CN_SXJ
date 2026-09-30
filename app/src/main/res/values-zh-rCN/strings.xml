@@ -610,6 +610,13 @@
     <string name="reset_reading_progress_message">是否重置所有已下载画廊的阅读进度？</string>
     <string name="download_service_label">EhViewer下载服务</string>
     <string name="download_speed_text">%1$s</string>
+    <string name="reset_reading_progress_processing">正在重置阅读进度...</string>
+    <string name="reset_reading_progress_done">阅读进度重置完毕</string>
+    <string name="archiver_download_service_label">EhViewer 档案下载</string>
+    <string name="archiver_download_pause">暂停</string>
+    <string name="archiver_download_resume">继续</string>
+    <string name="archiver_download_paused">已暂停</string>
+    <string name="archiver_download_restart_no_range">服务器不支持断点续传，将重新下载</string>
     <string name="download_speed_text_2">%1$s，剩余 %2$s</string>
     <string name="phase_copying">本地复制中...</string>
     <string name="phase_copying_notification">正在本地复制文件...</string>
@@ -801,6 +808,12 @@
     <string name="settings_read_screen_rotation_portrait">竖屏</string>
     <string name="settings_read_screen_rotation_landscape">横屏</string>
     <string name="settings_read_screen_rotation_sensor">自动旋转</string>
+    <string name="settings_read_refresh_rate">刷新率</string>
+    <string name="settings_read_refresh_rate_default">系统默认</string>
+    <string name="settings_read_refresh_rate_60">60 Hz</string>
+    <string name="settings_read_refresh_rate_90">90 Hz</string>
+    <string name="settings_read_refresh_rate_120">120 Hz</string>
+    <string name="settings_read_refresh_rate_max">屏幕最高</string>
     <string name="settings_read_reading_direction">阅读方向</string>
     <string name="settings_read_reading_direction_left_to_right">从左到右</string>
     <string name="settings_read_reading_direction_right_to_Left">从右到左</string>
@@ -1559,11 +1572,6 @@ SSID: %1$s
     <string name="settings_download_timeout_summary">%1$s（秒），下载单张图片的最大允许时间</string>
     <string name="have_new_version">点击查看新版画廊</string>
     <string name="archiver_downloading">归档下载中 %1$s</string>
-    <string name="archiver_download_service_label">EhViewer 档案下载</string>
-    <string name="archiver_download_pause">暂停</string>
-    <string name="archiver_download_resume">继续</string>
-    <string name="archiver_download_paused">已暂停</string>
-    <string name="archiver_download_restart_no_range">服务器不支持断点续传，将重新下载</string>
     <string name="order">排序</string>
     <string name="sort_by_pub_time">发布时间</string>
     <string name="sort_by_fav_time">收藏时间</string>
@@ -2033,6 +2041,13 @@ SSID: %1$s
     <string name="pip_restore">还原</string>
     <string name="pip_prev">上一页</string>
     <string name="pip_next">下一页</string>
+    <string name="import_local_album">导入本地相册</string>
+    <string name="import_album_title">选择图片文件夹</string>
+    <string name="import_album_processing">正在导入相册…</string>
+    <string name="import_album_failed">相册导入失败</string>
+    <string name="import_album_no_images">所选文件夹中没有支持的图片</string>
+    <string name="import_album_already_imported">相册已导入</string>
+    <string name="import_album_success">成功导入 %d 张图片</string>
 
     <!-- Lab 实验室功能 -->
     <string name="settings_lab">实验室</string>
