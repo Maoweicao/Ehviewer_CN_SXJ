@@ -606,6 +606,10 @@ public class EhEngine {
         String referer = EhUrl.getReferer();
         String origin = EhUrl.getOrigin();
         Log.d(TAG, url);
+        // 调试：注意 gtoken 这个形参收的其实是 ptoken，调用方（ProgressScene）
+        // 传进来的必须是 /g/{gid}/{ptoken}/{page} 里的 ptoken，不能是 gtoken。
+        Log.i("TopListJump", "gtoken req url=" + url + " gid=" + gid
+                + " ptokenArg=" + gtoken + " page=" + page + " body=" + json);
         Request request = new EhRequestBuilder(url, referer, origin)
                 .post(requestBody)
                 .build();
@@ -625,9 +629,14 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            // 调试：gtoken 接口的原始响应，失败时（未登录/igneous 过期/token 不对）
+            // 错误信息只在这里面，配合 `adb logcat -s TopListJump:V` 查看。
+            Log.i("TopListJump", "gtoken resp code=" + code + " body=" + body);
             return GalleryTokenApiParser.parse(body);
         } catch (Throwable e) {
             ExceptionUtils.throwIfFatal(e);
+            Log.i("TopListJump", "gtoken FAILED gid=" + gid + " token=" + gtoken
+                    + " code=" + code + " body=" + body + " err=" + e);
             throwException(call, code, headers, body, e);
             throw e;
         }

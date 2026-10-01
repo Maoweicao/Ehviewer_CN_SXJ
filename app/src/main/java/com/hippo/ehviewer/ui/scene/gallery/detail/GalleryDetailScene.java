@@ -29,6 +29,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
+import android.util.Log;
 import android.util.Pair;
 import android.view.Gravity;
 import android.view.LayoutInflater;
@@ -375,6 +376,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         } else if (ACTION_GID_TOKEN.equals(action)) {
             mGid = args.getLong(KEY_GID);
             mToken = args.getString(KEY_TOKEN);
+            // 调试：确认详情页最终拿到的 gid/token，配合 `adb logcat -s TopListJump:V`
+            // 可以和 TopListParser 解析出来的值对一下。
+            Log.i("TopListJump", "GalleryDetailScene ACTION_GID_TOKEN gid=" + mGid
+                    + " token=" + mToken);
         } else if (ACTION_DOWNLOAD_GALLERY_INFO.equals(action)) {
             try {
                 mDownloadInfo = args.getParcelable(KEY_GALLERY_INFO);

@@ -19,6 +19,7 @@ package com.hippo.ehviewer.ui.scene;
 import android.content.Context;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -117,12 +118,20 @@ public final class ProgressScene extends BaseScene implements View.OnClickListen
             mGid = args.getLong(KEY_GID, -1);
             mPToken = args.getString(KEY_PTOKEN, null);
             mPage = args.getInt(KEY_PAGE, -1);
+            // 调试：参数无效时这里会直接 return false，界面上表现为"无内容"。
+            // 配合 `adb logcat -s TopListJump:V` 可以看到是哪个参数不对。
             if (mGid == -1 || mPToken == null || mPage == -1) {
+                Log.i("TopListJump", "ProgressScene REJECT gid=" + mGid
+                        + " ptoken=" + mPToken + " page=" + mPage
+                        + " (gid==-1 || ptoken==null || page==-1 之一成立)");
                 return false;
             }
+            Log.i("TopListJump", "ProgressScene accept gid=" + mGid
+                    + " ptoken=" + mPToken + " page=" + mPage);
             return true;
         }
 
+        Log.i("TopListJump", "ProgressScene unknown action=" + mAction);
         return false;
     }
 
@@ -210,6 +219,7 @@ public final class ProgressScene extends BaseScene implements View.OnClickListen
     }
 
     private void onGetGalleryTokenSuccess(String result) {
+        Log.i("TopListJump", "gtoken OK gid=" + mGid + " newToken=" + result);
         Bundle arg = new Bundle();
         arg.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_GID_TOKEN);
         arg.putLong(GalleryDetailScene.KEY_GID, mGid);
@@ -220,6 +230,7 @@ public final class ProgressScene extends BaseScene implements View.OnClickListen
     }
 
     private void onGetGalleryTokenFailure(Exception e) {
+        Log.i("TopListJump", "gtoken onFailure gid=" + mGid + " ptoken=" + mPToken + " err=" + e);
         mValid = false;
 
         Context context = getEHContext();

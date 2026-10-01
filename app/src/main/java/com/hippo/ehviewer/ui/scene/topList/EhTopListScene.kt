@@ -608,19 +608,31 @@ class EhTopListScene : BaseScene() {
     /**
      * 非多选模式下点击条目的行为：
      * 画廊排行榜（有 gid+token）直接进画廊详情；其余关键词榜单按关键词搜索。
+     *
+     * 调试：整条链路都打了 `TopListJump` tag 的日志，
+     * 用 `adb logcat -s TopListJump:V` 可以完整反推跳转过程。
      */
     private fun openTopListItem(topListItem: TopListItem, searchType: Int) {
-        // 有 gid+token 就直接进画廊详情。
-        // 注意 KEY_PTOKEN 必须传 token（gtoken），不能传 tag —— tag 在 TopListParser
-        // 里是 null，ProgressScene 收到 null ptoken 会直接判定参数无效并显示"无内容"。
+        logJump("openTopListItem: searchType=$searchType value=${topListItem.value} " +
+            "href=${topListItem.href} gid=${topListItem.gid} token=${topListItem.token} " +
+            "tag=${topListItem.tag}")
+
         val gid = topListItem.gid?.toLongOrNull()
         val token = topListItem.token
         if (gid != null && !token.isNullOrEmpty()) {
+            // toplist 的 href 形如 /g/596447/3894f02c20/，末尾那段**本身就是 gtoken**，
+            // 所以直接用 ACTION_GID_TOKEN 进详情，和 GalleryListScene / EhUrlOpener /
+            // ClipboardUtil 处理 /g/{gid}/{gtoken} 的方式一致。
+            //
+            // 不能走 ProgressScene.ACTION_GALLERY_TOKEN —— 那个是给
+            // /g/{gid}/{ptoken}/{page} 用的，ptoken 不是 gtoken，要拿它去
+            // api.php 换 gtoken 必然失败。
             val args = Bundle()
-            args.putString(ProgressScene.KEY_ACTION, ProgressScene.ACTION_GALLERY_TOKEN)
-            args.putLong(ProgressScene.KEY_GID, gid)
-            args.putString(ProgressScene.KEY_PTOKEN, token)
-            args.putInt(ProgressScene.KEY_PAGE, 0)
+            args.putString(GalleryDetailScene.KEY_ACTION, GalleryDetailScene.ACTION_GID_TOKEN)
+            args.putLong(GalleryDetailScene.KEY_GID, gid)
+            args.putString(GalleryDetailScene.KEY_TOKEN, token)
+            logJump("-> branch=galleryDetail action=${GalleryDetailScene.ACTION_GID_TOKEN} " +
+                "gid=$gid token=$token (gtoken 直用，不过 API)")
             val announcer = Announcer(GalleryDetailScene::class.java).setArgs(args)
             startScene(announcer)
             return
@@ -629,6 +641,7 @@ class EhTopListScene : BaseScene() {
         // 关键词榜单：href 若是可识别的画廊/页面链接，交给统一的 URL 解析
         if (!topListItem.href.isNullOrEmpty()) {
             val announcer = createAnnouncerFromClipboardUrl(topListItem.href)
+            logJump("-> branch=urlParse href=${topListItem.href} resolved=${announcer != null}")
             if (announcer != null) {
                 startScene(announcer)
                 return
@@ -647,7 +660,21 @@ class EhTopListScene : BaseScene() {
         }
         urlBuilder.mode = ListUrlBuilder.MODE_NORMAL
         urlBuilder.keyword = keyword
+        logJump("-> branch=keywordSearch userRanked=${isUserRankedCategory()} keyword=$keyword")
         GalleryListScene.startScene(this, urlBuilder)
+    }
+
+    /**
+     * 排行榜跳转链路的调试日志。
+     *
+     * 抓取方式：`adb logcat -s TopListJump:V`
+     *
+     * 埋点覆盖：TopListParser（解析出的 gid/token）→ EhTopListScene.openTopListItem
+     * （选了哪条分支、传了什么参数）→ ProgressScene（收到的参数、gtoken 请求与响应）
+     * → GalleryDetailScene（最终拿到的 action/gid/token）。
+     */
+    private fun logJump(msg: String) {
+        Log.i(JUMP_LOG_TAG, msg)
     }
 
     /**
@@ -775,5 +802,8 @@ class EhTopListScene : BaseScene() {
     companion object {
         const val KEY_ACTION = "action"
         const val ACTION_TOP_LIST = "action_top_list"
+
+        /** 排行榜跳转调试日志的统一 tag，配合 `adb logcat -s TopListJump:V` 使用。 */
+        const val JUMP_LOG_TAG = "TopListJump"
     }
 }
