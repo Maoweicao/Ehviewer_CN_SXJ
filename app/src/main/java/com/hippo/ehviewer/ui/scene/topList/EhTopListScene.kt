@@ -421,7 +421,7 @@ class EhTopListScene : BaseScene() {
         val rv = recyclerView ?: return
         val ctx = ehContext ?: return
         val info = detail[mCategory] ?: return
-        // searchType 0 = GALLERY, anything else = UPLOADER-like (ListUrlBuilder.MODE_UPLOADER).
+        // searchType 0 = 画廊排行榜（进画廊详情），1 = 关键词/用户名榜单（按关键词搜索）
         val searchType = if (info.type == EhTopListDetail.ListType.GALLERY) 0 else 1
         val adapter = EhTopListAdapterView(
             ctx, info, this, searchType, mTimeBucket, galleryCache, selectedGids, multiSelectMode
@@ -606,26 +606,28 @@ class EhTopListScene : BaseScene() {
     }
 
     /**
-     * 非多选模式下点击条目的原始行为：
+     * 非多选模式下点击条目的行为：
      * 画廊排行榜（有 gid+token）直接进画廊详情；其余关键词榜单按关键词搜索。
      */
     private fun openTopListItem(topListItem: TopListItem, searchType: Int) {
-        val urlBuilder = ListUrlBuilder()
-        if (searchType == 0) {
-            urlBuilder.mode = ListUrlBuilder.MODE_NORMAL
-        } else {
-            urlBuilder.mode = ListUrlBuilder.MODE_UPLOADER
-        }
-
-        if (!topListItem.gid.isNullOrEmpty() && !topListItem.token.isNullOrEmpty()) {
+        // 有 gid+token 就直接进画廊详情。
+        // 注意 KEY_PTOKEN 必须传 token（gtoken），不能传 tag —— tag 在 TopListParser
+        // 里是 null，ProgressScene 收到 null ptoken 会直接判定参数无效并显示"无内容"。
+        val gid = topListItem.gid?.toLongOrNull()
+        val token = topListItem.token
+        if (gid != null && !token.isNullOrEmpty()) {
             val args = Bundle()
             args.putString(ProgressScene.KEY_ACTION, ProgressScene.ACTION_GALLERY_TOKEN)
-            args.putLong(ProgressScene.KEY_GID, topListItem.gid.toLong())
-            args.putString(ProgressScene.KEY_PTOKEN, topListItem.tag)
+            args.putLong(ProgressScene.KEY_GID, gid)
+            args.putString(ProgressScene.KEY_PTOKEN, token)
+            args.putInt(ProgressScene.KEY_PAGE, 0)
             val announcer = Announcer(GalleryDetailScene::class.java).setArgs(args)
             startScene(announcer)
             return
-        } else if (topListItem.href != null) {
+        }
+
+        // 关键词榜单：href 若是可识别的画廊/页面链接，交给统一的 URL 解析
+        if (!topListItem.href.isNullOrEmpty()) {
             val announcer = createAnnouncerFromClipboardUrl(topListItem.href)
             if (announcer != null) {
                 startScene(announcer)
@@ -633,8 +635,33 @@ class EhTopListScene : BaseScene() {
             }
         }
 
-        urlBuilder.keyword = topListItem.value
+        // 兜底：按关键词搜索。走 e-hentai.org 的关键词接口，
+        // 上传者榜单用 "uploader:xxx" 前缀，和主画廊列表点作者名一致。
+        val urlBuilder = ListUrlBuilder()
+        val keyword = if (isUserRankedCategory() && !topListItem.value.isNullOrEmpty()) {
+            ListUrlBuilder.UPLOADER_KEYWORD_PREFIX + topListItem.value
+        } else {
+            topListItem.value
+        }
+        urlBuilder.mode = ListUrlBuilder.MODE_NORMAL
+        urlBuilder.keyword = keyword
         GalleryListScene.startScene(this, urlBuilder)
+    }
+
+    /**
+     * 这些榜单排的是"人"（上传者 / 被追踪者 / 清理者等），条目是用户名而不是画廊，
+     * 点击时按 uploader:xxx 关键词搜索，而不是按画廊名搜索。
+     */
+    private fun isUserRankedCategory(): Boolean {
+        return when (ehTopListDetail?.get(mCategory)?.type) {
+            EhTopListDetail.ListType.UPLOADER,
+            EhTopListDetail.ListType.EH_TRACKER,
+            EhTopListDetail.ListType.CLEANUP,
+            EhTopListDetail.ListType.RATING_AND_REVIEWING,
+            EhTopListDetail.ListType.HENTAI_HOME,
+            EhTopListDetail.ListType.TAGGING -> true
+            else -> false
+        }
     }
 
     // ---------------- 多选下载 ----------------

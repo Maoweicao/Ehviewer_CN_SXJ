@@ -195,8 +195,28 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
             return;
         }
         holder.kindIcon.setImageResource(
-                isUploaderCategory() ? R.drawable.ic_toplist_user : R.drawable.ic_toplist_gallery_name);
+                isUserRankedCategory() ? R.drawable.ic_toplist_user : R.drawable.ic_toplist_gallery_name);
         holder.kindIcon.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * 这些榜单排的是"人"（上传者 / 被追踪者 / 清理者等），条目是用户名而非画廊，
+     * 所以用人物图标而不是画廊图标。
+     * 画廊排行榜本身走画廊行（有缩略图），不会走到这里。
+     */
+    private boolean isUserRankedCategory() {
+        switch (ehTopListInfo.type) {
+            case UPLOADER:
+            case EH_TRACKER:
+            case CLEANUP:
+            case RATING_AND_REVIEWING:
+            case HENTAI_HOME:
+            case TAGGING:
+                return true;
+            case GALLERY:
+            default:
+                return false;
+        }
     }
 
     private boolean isUploaderCategory() {

@@ -232,18 +232,9 @@ public class EhUrl {
      */
     @NonNull
     public static String getTopListUrl() {
+        // 排行榜只有 e-hentai.org 有入口（exhentai.org 不提供 toplist.php），
+        // 所以这里固定走里站，不跟随 Settings.getGallerySite()。
         return URL_TOP_LIST_E;
-        /**
-         * 里站没排行榜入口？？？
-         * 妈的绝了
-         */
-//        switch (Settings.getGallerySite()) {
-//            default:
-//            case SITE_E:
-//                return URL_TOP_LIST_E;
-//            case SITE_EX:
-//                return URL_TOP_LIST_EX;
-//        }
     }
 
     /**

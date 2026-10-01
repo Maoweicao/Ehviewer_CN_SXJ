@@ -1805,10 +1805,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             return;
         }
         if (null != gd.uploader) {
-            ListUrlBuilder lub = new ListUrlBuilder();
-            lub.setMode(ListUrlBuilder.MODE_UPLOADER);
-            lub.setKeyword(gd.uploader);
-            GalleryListScene.startScene(this, lub);
+            ListUrlBuilder lub = ListUrlBuilder.buildUploaderSearch(gd.uploader);
+            if (lub != null) {
+                GalleryListScene.startScene(this, lub);
+            }
         }
     }
 
@@ -1906,10 +1906,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                         lub.setKeyword(gd.titleJpn);
                         GalleryListScene.startScene(this, lub);
                     } else if (label.equals(uploaderLabel)) {
-                        ListUrlBuilder lub = new ListUrlBuilder();
-                        lub.setMode(ListUrlBuilder.MODE_UPLOADER);
-                        lub.setKeyword(gd.uploader);
-                        GalleryListScene.startScene(this, lub);
+                        ListUrlBuilder lub = ListUrlBuilder.buildUploaderSearch(gd.uploader);
+                        if (lub != null) {
+                            GalleryListScene.startScene(this, lub);
+                        }
                     }
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -1974,10 +1974,10 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             if (TextUtils.isEmpty(uploader)) {
                 return;
             }
-            ListUrlBuilder lub = new ListUrlBuilder();
-            lub.setMode(ListUrlBuilder.MODE_UPLOADER);
-            lub.setKeyword(uploader);
-            GalleryListScene.startScene(this, lub);
+            ListUrlBuilder lub = ListUrlBuilder.buildUploaderSearch(uploader);
+            if (lub != null) {
+                GalleryListScene.startScene(this, lub);
+            }
         } else if (mCategory == v) {
             int category = getCategory();
             if (category == -1) {

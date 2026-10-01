@@ -96,6 +96,8 @@ public class SearchLayout extends EasyRecyclerView implements CompoundButton.OnC
     private int mSearchMode = SEARCH_MODE_NORMAL;
     private boolean mEnableAdvance = false;
     private String mLanguageTag = null;
+    /** 本次搜索是否为"按上传者搜索"，决定关键词是否加 uploader: 前缀 */
+    private boolean uploaderSearchMode = false;
 
     private View mNormalView;
     private CategoryTable mCategoryTable;
@@ -359,6 +361,7 @@ public class SearchLayout extends EasyRecyclerView implements CompoundButton.OnC
         switch (mSearchMode) {
             case SEARCH_MODE_NORMAL:
                 int nsMode = mNormalSearchMode.getCheckedRadioButtonId();
+                uploaderSearchMode = false;
                 switch (nsMode) {
                     default:
                     case R.id.search_normal_search:
@@ -368,7 +371,9 @@ public class SearchLayout extends EasyRecyclerView implements CompoundButton.OnC
                         urlBuilder.setMode(ListUrlBuilder.MODE_SUBSCRIPTION);
                         break;
                     case R.id.search_specify_uploader:
-                        urlBuilder.setMode(ListUrlBuilder.MODE_UPLOADER);
+                        // 按上传者搜索统一走 uploader:xxx 关键词，见 ListUrlBuilder#buildUploaderSearch
+                        urlBuilder.setMode(ListUrlBuilder.MODE_NORMAL);
+                        uploaderSearchMode = true;
                         break;
                     case R.id.search_specify_tag:
                         urlBuilder.setMode(ListUrlBuilder.MODE_TAG);
@@ -376,6 +381,13 @@ public class SearchLayout extends EasyRecyclerView implements CompoundButton.OnC
                 }
                 // 追加语言快捷标签
                 String finalQuery = query == null ? "" : query;
+                if (uploaderSearchMode) {
+                    // 上传者搜索：加 uploader: 前缀，与站内搜索框语法一致
+                    finalQuery = TextUtils.isEmpty(finalQuery)
+                            ? ListUrlBuilder.UPLOADER_KEYWORD_PREFIX
+                            : ListUrlBuilder.UPLOADER_KEYWORD_PREFIX + finalQuery;
+                    SearchDebugLog.d("GallerySearch", "uploader search -> '" + finalQuery + "'");
+                }
                 if (mLanguageTag != null && !mLanguageTag.isEmpty()) {
                     finalQuery = TextUtils.isEmpty(finalQuery) ? "language:" + mLanguageTag
                             : finalQuery + " language:" + mLanguageTag;

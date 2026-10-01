@@ -148,6 +148,34 @@ public class ListUrlBuilder implements Cloneable, Parcelable {
         mKeyword = keyword;
     }
 
+    /**
+     * 构造"按上传者搜索画廊"的 builder。
+     *
+     * <p>统一走 MODE_NORMAL + {@code uploader:xxx} 关键词，而不是
+     * {@link #MODE_UPLOADER} 的 {@code /uploader/xxx} 路径式 URL：
+     * E-Hentai 的站内搜索框本身就支持 {@code uploader:名称} 这种写法，
+     * 走搜索接口比走路径更稳，也顺带避免了不同画廊站（e/ex）路径不一致的问题。
+     *
+     * @param uploader 上传者名称，为空时返回 null，调用方需自行判空
+     */
+    @Nullable
+    public static ListUrlBuilder buildUploaderSearch(@Nullable String uploader) {
+        if (uploader == null) {
+            return null;
+        }
+        String name = uploader.trim();
+        if (name.isEmpty()) {
+            return null;
+        }
+        ListUrlBuilder builder = new ListUrlBuilder();
+        builder.setMode(MODE_NORMAL);
+        builder.setKeyword(UPLOADER_KEYWORD_PREFIX + name);
+        return builder;
+    }
+
+    /** 按上传者搜索时的关键词前缀，与 E-Hentai 站内搜索的 {@code uploader:} 语法一致。 */
+    public static final String UPLOADER_KEYWORD_PREFIX = "uploader:";
+
     public void setFollow(String follow) {
         mFollow = follow;
     }
