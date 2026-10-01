@@ -26,15 +26,16 @@ import com.hippo.ehviewer.widget.TileThumb;
  * 排行榜列表适配器。
  *
  * <p>画廊排行榜（{@code gallery_toplists}）是唯一带 gid+token 的分类，能拿到画廊详情，
- * 因此用卡片布局（缩略图 + 标题 + uploader + 评分 + 页数 + 勾选角标）。
+ * 因此显示缩略图 + 标题 + uploader + 评分 + 页数。
  * 其余 6 个分类是关键词榜单（上传者名/标签名等），服务器不下发 gid，
- * 拉不到画廊信息，继续用表单式文字行。
+ * 拉不到画廊信息，只显示标题文字。
+ * 两种行都是平铺列表样式 + 底部细分隔线，都带金银铜排名 badge。
  */
 abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.EhTopListViewHolder> {
 
-    /** 画廊卡片条目 */
+    /** 画廊行条目（带缩略图） */
     private static final int TYPE_GALLERY = 0;
-    /** 关键词文字条目 */
+    /** 关键词文字行条目 */
     private static final int TYPE_TEXT = 1;
 
     private static final String TAG = EhTopListAdapter.class.getSimpleName();
@@ -83,10 +84,10 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
     }
 
     /**
-     * 该条目能否降级为画廊卡片：需要 gid+token，且（详情已拉到 或 正在拉）。
-     * 详情还没到时先按卡片骨架渲染，拿到数据后由 Scene 触发刷新。
+     * 该条目是否用带缩略图的画廊行：需要 gid+token。
+     * 详情还没到时先按行骨架渲染（占位图），拿到数据后由 Scene 触发刷新。
      */
-    private boolean useGalleryCard(TopListItem item) {
+    private boolean useGalleryRow(TopListItem item) {
         if (!isGalleryCategory()) {
             return false;
         }
@@ -100,7 +101,7 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         if (bucket == null || position >= bucket.length()) {
             return TYPE_TEXT;
         }
-        return useGalleryCard(bucket.get(position)) ? TYPE_GALLERY : TYPE_TEXT;
+        return useGalleryRow(bucket.get(position)) ? TYPE_GALLERY : TYPE_TEXT;
     }
 
     @NonNull
@@ -123,8 +124,8 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         final TopListItem item = bucket.get(position);
         final int rank = position + 1;
 
-        if (holder.galleryCard) {
-            bindGalleryCard(holder, item, rank);
+        if (holder.galleryRow) {
+            bindGalleryRow(holder, item, rank);
         } else {
             bindTextRow(holder, item, rank);
         }
@@ -132,7 +133,7 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         holder.itemView.setOnClickListener(v -> onItemClick(item, searchType));
         // 长按：非多选时进入多选模式（仅画廊排行榜）
         holder.itemView.setOnLongClickListener(v -> {
-            if (holder.galleryCard) {
+            if (holder.galleryRow) {
                 return onLongClick(item);
             }
             return false;
@@ -140,10 +141,11 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
     }
 
     /**
-     * 画廊卡片：缩略图 + 标题 + uploader + 评分 + 页数。
-     * 详情未就绪时退化为只显示榜单原始文本，不显示空缩略图。
+     * 画廊排行榜行：金银铜 badge + 缩略图 + 标题 + uploader + 评分 + 页数。
+     * 详情未就绪时缩略图用占位图、次要信息隐藏，不留空行。
      */
-    private void bindGalleryCard(@NonNull EhTopListViewHolder holder, TopListItem item, int rank) {
+    private void bindGalleryRow(@NonNull EhTopListViewHolder holder, TopListItem item, int rank) {
+        bindRankBadge(holder, rank);
         holder.title.setText(item.value);
 
         long gid = 0;
@@ -179,6 +181,12 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
 
     /** 关键词文字行：表单式平铺，保留金银铜排名 badge */
     private void bindTextRow(@NonNull EhTopListViewHolder holder, TopListItem item, int rank) {
+        bindRankBadge(holder, rank);
+        holder.title.setText(item.value);
+    }
+
+    /** 金银铜排名 badge：#1 金色带皇冠，#2 银，#3 铜，其余普通色。两种行布局共用。 */
+    private void bindRankBadge(@NonNull EhTopListViewHolder holder, int rank) {
         holder.rankText.setText(context.getString(R.string.top_list_rank_prefix, rank));
         switch (rank) {
             case 1:
@@ -198,7 +206,6 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
                 holder.rankCrown.setVisibility(View.GONE);
                 break;
         }
-        holder.title.setText(item.value);
     }
 
     /** 多选勾选角标（仅画廊卡片有该控件，文字行走普通点击） */
@@ -243,8 +250,8 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
     }
 
     public static class EhTopListViewHolder extends RecyclerView.ViewHolder {
-        /** true = 画廊卡片布局，false = 关键词文字行布局 */
-        public final boolean galleryCard;
+        /** true = 画廊排行榜行布局（带缩略图），false = 关键词文字行布局 */
+        public final boolean galleryRow;
 
         // 文字行 / 卡片各自的标题控件（布局不同，id 不同）
         public TextView title;
@@ -260,16 +267,20 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         // 多选勾选角标，只有卡片布局有，文字行为 null
         public final ImageView selected;
 
-        public EhTopListViewHolder(@NonNull View itemView, boolean galleryCard) {
+        public EhTopListViewHolder(@NonNull View itemView, boolean galleryRow) {
             super(itemView);
-            this.galleryCard = galleryCard;
-            if (galleryCard) {
+            this.galleryRow = galleryRow;
+            if (galleryRow) {
                 this.selected = itemView.findViewById(R.id.gallery_selected);
                 this.title = itemView.findViewById(R.id.gallery_title);
                 this.thumb = itemView.findViewById(R.id.gallery_thumb);
                 this.uploader = itemView.findViewById(R.id.gallery_uploader);
                 this.rating = itemView.findViewById(R.id.gallery_rating);
                 this.pages = itemView.findViewById(R.id.gallery_pages);
+                // 画廊行同样保留金银铜 badge
+                this.rankContainer = itemView.findViewById(R.id.top_list_rank_container);
+                this.rankText = itemView.findViewById(R.id.top_list_rank_text);
+                this.rankCrown = itemView.findViewById(R.id.top_list_rank_crown);
             } else {
                 this.selected = null;
                 this.rankContainer = itemView.findViewById(R.id.top_list_rank_container);

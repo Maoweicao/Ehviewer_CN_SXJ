@@ -1,35 +1,64 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  画廊排行榜条目：左缩略图 + 右标题/uploader/评分/页数，右上角多选勾选角标。
+  画廊排行榜条目：平铺列表行，不使用 CardView 卡片外框。
+  左侧金银铜排名 badge + 缩略图，右侧标题/uploader/评分/页数，底部细分隔线。
   仅用于 gallery_toplists（唯一带 gid+token、能拉到画廊详情的分类）；
-  其余 6 个关键词榜单继续用 item_top_list_entry.xml 的文字行。
+  其余 6 个关键词榜单继续用 item_top_list_entry.xml。
 -->
-<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
-    style="@style/CardView.Normal"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:layout_marginStart="12dp"
-    android:layout_marginTop="4dp"
-    android:layout_marginEnd="12dp"
-    android:layout_marginBottom="4dp"
+    android:background="?attr/selectableItemBackground"
     android:clickable="true"
     android:focusable="true"
-    android:foreground="?attr/selectableItemBackground">
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
-        android:minHeight="88dp"
+        android:minHeight="80dp"
         android:orientation="horizontal"
-        android:padding="10dp">
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp">
+
+        <!-- 金银铜排名 badge，与文字行保持一致 -->
+        <FrameLayout
+            android:id="@+id/top_list_rank_container"
+            android:layout_width="@dimen/top_list_entry_rank_size"
+            android:layout_height="@dimen/top_list_entry_rank_size"
+            android:layout_marginEnd="10dp"
+            android:background="@drawable/bg_rank_normal">
+
+            <TextView
+                android:id="@+id/top_list_rank_text"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="12sp"
+                android:textStyle="bold"
+                tools:text="#1" />
+
+            <ImageView
+                android:id="@+id/top_list_rank_crown"
+                android:layout_width="14dp"
+                android:layout_height="14dp"
+                android:layout_gravity="center"
+                android:contentDescription="@null"
+                android:src="@drawable/v_crown_white_x24"
+                android:visibility="gone" />
+        </FrameLayout>
 
         <com.hippo.ehviewer.widget.TileThumb
             android:id="@+id/gallery_thumb"
-            android:layout_width="56dp"
-            android:layout_height="72dp"
+            android:layout_width="44dp"
+            android:layout_height="60dp"
+            android:layout_marginEnd="12dp"
             android:scaleType="centerCrop"
             app:retryType="none"
             tools:ignore="ContentDescription" />
@@ -37,7 +66,6 @@
         <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -55,7 +83,7 @@
                 android:id="@+id/gallery_uploader"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="2dp"
                 android:ellipsize="end"
                 android:maxLines="1"
                 android:textColor="?android:attr/textColorSecondary"
@@ -65,7 +93,7 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="2dp"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
@@ -89,10 +117,15 @@
             android:id="@+id/gallery_selected"
             android:layout_width="24dp"
             android:layout_height="24dp"
-            android:layout_gravity="top"
+            android:layout_marginStart="8dp"
             android:contentDescription="@null"
             android:src="@drawable/v_check_dark_x24"
             android:visibility="gone" />
     </LinearLayout>
 
-</androidx.cardview.widget.CardView>
+    <com.hippo.ehviewer.widget.DividerView
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        app:dividerColor="?attr/dividerColor" />
+
+</LinearLayout>

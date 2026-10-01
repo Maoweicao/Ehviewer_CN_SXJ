@@ -53,19 +53,9 @@
                 android:id="@+id/top_list_recycler_view"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:nestedScrollingEnabled="false"></androidx.recyclerview.widget.RecyclerView>
-
-            <!-- 多选模式入口 FAB，仅画廊排行榜显示 -->
-            <com.google.android.material.floatingactionbutton.FloatingActionButton
-                android:id="@+id/top_list_multi_select_fab"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom|end"
-                android:layout_margin="16dp"
-                android:contentDescription="@string/multi_select_mode_enabled"
-                android:visibility="gone"
-                app:backgroundTint="?attr/widgetColorThemePrimary"
-                app:srcCompat="@drawable/v_check_all_dark_x24" />
+                android:clipToPadding="false"
+                android:nestedScrollingEnabled="false"
+                android:paddingBottom="88dp"></androidx.recyclerview.widget.RecyclerView>
 
             <!-- 多选下载底部操作条，仅画廊排行榜可进入多选 -->
             <LinearLayout
@@ -152,4 +142,17 @@
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>
+
+    <!-- 浮动多选 FAB：脱离滚动容器，固定在右下角，不随列表滚动 -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/top_list_multi_select_fab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="16dp"
+        android:contentDescription="@string/multi_select_mode_enabled"
+        android:visibility="gone"
+        app:backgroundTint="?attr/widgetColorThemePrimary"
+        app:srcCompat="@drawable/v_check_all_dark_x24" />
+
 </FrameLayout>
