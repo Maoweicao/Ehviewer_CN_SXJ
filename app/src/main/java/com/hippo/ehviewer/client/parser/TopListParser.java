@@ -86,6 +86,15 @@ public class TopListParser {
             TopListItem topListItem = new TopListItem();
             topListItem.value = element.text();
             topListItem.href = element.attr("href");
+            // 画廊榜单的 href 形如 /g/1234567/a1b2c3d4e5，从中取出 gid/token，
+            // 这样画廊排行榜才能拉缩略图并支持多选下载；关键词榜单解析不出就留空。
+            GalleryDetailUrlParser.Result result = GalleryDetailUrlParser.parse(topListItem.href, false);
+            if (result != null) {
+                topListItem.gid = String.valueOf(result.gid);
+                topListItem.token = result.token;
+                // pt 链接没有 token，gallery 榜单用不到；其他榜单的 tag 也一并留空
+                topListItem.tag = null;
+            }
             topListItems[i] = topListItem;
         }
         topListItemArray.itemArray = topListItems;

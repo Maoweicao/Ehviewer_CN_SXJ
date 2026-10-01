@@ -15,6 +15,7 @@ import androidx.annotation.IntDef
 import androidx.appcompat.app.AlertDialog
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.tabs.TabLayout
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.R
@@ -36,6 +37,7 @@ import com.hippo.ehviewer.ui.scene.ProgressScene
 import com.hippo.ehviewer.ui.scene.gallery.detail.GalleryDetailScene
 import com.hippo.ehviewer.ui.scene.gallery.list.GalleryListScene
 import com.hippo.ehviewer.util.ClipboardUtil.createAnnouncerFromClipboardUrl
+import com.hippo.lib.yorozuya.ResourcesUtils
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.util.ExceptionUtils
@@ -106,11 +108,17 @@ class EhTopListScene : BaseScene() {
     private var topListAdapter: EhTopListAdapterView? = null
     private var downloadBar: View? = null
     private var downloadBarCount: TextView? = null
+    private var multiSelectFab: FloatingActionButton? = null
+    private var selectedIconColor = 0
+    private var unselectedIconColor = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val ehContext = ehContext ?: return
         client = EhApplication.getEhClient(ehContext)
+        // 提前算出图标着色，onCreateView2 里逐个 tab 应用
+        selectedIconColor = resolveThemeColor(R.attr.widgetColorThemePrimary, 0xFF2196F3.toInt())
+        unselectedIconColor = resolveThemeColor(R.attr.textColorThemePrimary, 0xFF888888.toInt())
     }
 
     override fun onCreateView2(
@@ -161,6 +169,26 @@ class EhTopListScene : BaseScene() {
                     toggleMultiSelectMode()
                 }
             }
+
+        // 多选模式入口 FAB：只有画廊排行榜能进入多选，其他 6 个分类是关键词榜单
+        val fab = root.findViewById<View>(R.id.top_list_multi_select_fab) as? FloatingActionButton
+        multiSelectFab = fab
+        fab?.setOnClickListener {
+            if (multiSelectMode) {
+                downloadSelected()
+            } else {
+                toggleMultiSelectMode()
+            }
+        }
+        updateMultiSelectFabVisibility()
+    }
+
+    /** 画廊排行榜之外不显示多选 FAB（关键词榜单没有 gid，无法多选下载） */
+    private fun updateMultiSelectFabVisibility() {
+        val fab = multiSelectFab ?: return
+        val isGallery = ehTopListDetail?.get(mCategory)
+            ?.type == EhTopListDetail.ListType.GALLERY
+        fab.visibility = if (isGallery && state != STATE_EMPTY) View.VISIBLE else View.GONE
     }
 
     private fun retryLoad() {
@@ -190,6 +218,7 @@ class EhTopListScene : BaseScene() {
         val tabs = categoryTabLayout ?: return
         val array = resources.getStringArray(R.array.top_list_type)
         val iconArray = resources.obtainTypedArray(R.array.top_list_type_icons)
+        val iconTint = getColorStateListFromTheme()
         for (i in 0 until CATEGORY_TAB_COUNT) {
             val tab = tabs.newTab()
             if (i < array.size) {
@@ -197,14 +226,20 @@ class EhTopListScene : BaseScene() {
             }
             if (i < iconArray.length()) {
                 // 分类 tab 配图标做视觉装饰；时间分段 tab 保持纯文字
-                tab.setIcon(iconArray.getDrawable(i))
+                val icon = iconArray.getDrawable(i)
+                if (icon != null) {
+                    // 部分图标是硬编码 fillColor（如 v_fire_black_x24 的黑色），
+                    // 预先整体染成未选中色，tabIconTint 之后仍可覆盖成选中色
+                    icon.setTint(unselectedIconColor)
+                    tab.icon = icon
+                }
             }
             tab.tag = i
             tabs.addTab(tab)
         }
         iconArray.recycle()
-        // 图标默认是深色实心矢量，跟随文字颜色走，避免未选中态突兀
-        tabs.tabIconTint = getColorStateListFromTheme()
+        // 图标跟随 tab 选中态着色：选中主题色，未选中普通文字色
+        tabs.tabIconTint = iconTint
         tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) {
                 val pos = (tab.tag as? Int) ?: 0
@@ -231,25 +266,15 @@ class EhTopListScene : BaseScene() {
             intArrayOf(android.R.attr.state_selected),
             intArrayOf(),
         )
-        val selected = resolveThemeColor(R.attr.widgetColorThemePrimary, 0xFF2196F3.toInt())
-        val unselected = resolveThemeColor(
-            com.hippo.ehviewer.R.attr.textColorThemePrimary, 0xFF888888.toInt()
+        return ColorStateList(
+            states,
+            intArrayOf(selectedIconColor, unselectedIconColor)
         )
-        return ColorStateList(states, intArrayOf(selected, unselected))
     }
 
     private fun resolveThemeColor(attrRes: Int, fallback: Int): Int {
         val context = ehContext ?: return fallback
-        val typedValue = TypedValue()
-        return if (context.theme.resolveAttribute(attrRes, typedValue, true)) {
-            if (typedValue.resourceId != 0) {
-                androidx.core.content.ContextCompat.getColor(context, typedValue.resourceId)
-            } else {
-                typedValue.data
-            }
-        } else {
-            fallback
-        }
+        return ResourcesUtils.getAttrColor(context, attrRes)
     }
 
     private fun bindTimeBucketTabLayout(root: View) {
@@ -293,6 +318,7 @@ class EhTopListScene : BaseScene() {
         topListAdapter = null
         downloadBar = null
         downloadBarCount = null
+        multiSelectFab = null
     }
 
     override fun onBackPressed() {
@@ -349,6 +375,7 @@ class EhTopListScene : BaseScene() {
         ehTopListDetail = detail
         if (isEmptyDetail(detail)) {
             showEmptyState(false)
+            multiSelectFab?.visibility = View.GONE
         } else {
             rebindListAdapter()
             adjustViewVisibility(STATE_NORMAL, true)
@@ -389,6 +416,15 @@ class EhTopListScene : BaseScene() {
         rv.adapter = adapter
         topListAdapter = adapter
         emptyStateView?.visibility = View.GONE
+        // 换分类时多选状态不再适用，退出并刷新 FAB
+        if (multiSelectMode) {
+            multiSelectMode = false
+            selectedGids.clear()
+            selectedGalleries.clear()
+            downloadBar?.visibility = View.GONE
+        }
+        updateMultiSelectFabVisibility()
+        updateMultiSelectFabState()
         // 画廊排行榜才需要拉详情，其余 6 类是关键词榜单，服务器不下发 gid
         if (info.type == EhTopListDetail.ListType.GALLERY) {
             requestGalleryDetails(adapter)
@@ -646,10 +682,24 @@ class EhTopListScene : BaseScene() {
         val bar = downloadBar ?: return
         if (!multiSelectMode || selectedGids.isEmpty()) {
             bar.visibility = View.GONE
-            return
+        } else {
+            bar.visibility = View.VISIBLE
+            downloadBarCount?.text =
+                getString(R.string.multi_select_selected_count, selectedGids.size)
         }
-        bar.visibility = View.VISIBLE
-        downloadBarCount?.text = getString(R.string.multi_select_selected_count, selectedGids.size)
+        updateMultiSelectFabState()
+    }
+
+    /** 多选模式下 FAB 图标切成"下载"，未选中时保持"全选"进入多选 */
+    private fun updateMultiSelectFabState() {
+        val fab = multiSelectFab ?: return
+        fab.setImageResource(
+            if (multiSelectMode && selectedGids.isNotEmpty()) {
+                R.drawable.v_download_dark_x24
+            } else {
+                R.drawable.v_check_all_dark_x24
+            }
+        )
     }
 
     /** 底部下载条：把已选中的画廊交给统一下载入口，和主画廊列表一致 */
