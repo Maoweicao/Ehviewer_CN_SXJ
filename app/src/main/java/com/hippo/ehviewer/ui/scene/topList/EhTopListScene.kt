@@ -226,13 +226,9 @@ class EhTopListScene : BaseScene() {
             }
             if (i < iconArray.length()) {
                 // 分类 tab 配图标做视觉装饰；时间分段 tab 保持纯文字
-                val icon = iconArray.getDrawable(i)
-                if (icon != null) {
-                    // 部分图标是硬编码 fillColor（如 v_fire_black_x24 的黑色），
-                    // 预先整体染成未选中色，tabIconTint 之后仍可覆盖成选中色
-                    icon.setTint(unselectedIconColor)
-                    tab.icon = icon
-                }
+                // 图标自身 fillColor 已是 ?attr/widgetColorThemePrimary，
+                // 这里不再单独染色，统一交给 tabIconTint 处理选中/未选中态
+                tab.icon = iconArray.getDrawable(i)
             }
             tab.tag = i
             tabs.addTab(tab)

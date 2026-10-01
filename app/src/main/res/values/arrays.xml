@@ -32,15 +32,19 @@
         <item>@string/rating_reviewing_toplists</item>
     </string-array>
 
-    <!-- 排行榜分类 tab 图标，与 top_list_type 一一对应 -->
+    <!--
+      排行榜分类 tab 图标，与 top_list_type 一一对应。
+      专用 ic_toplist_* 系列，与界面其他位置的通用 v_*_x24 区分开。
+      这些图标的 fillColor 均为 ?attr/widgetColorThemePrimary，可随深浅色主题变化。
+    -->
     <array name="top_list_type_icons">
-        <item>@drawable/v_gallery_x24</item>
-        <item>@drawable/v_uploader_x24</item>
-        <item>@drawable/v_tag_x24</item>
-        <item>@drawable/v_fire_black_x24</item>
-        <item>@drawable/v_graph_x24</item>
-        <item>@drawable/v_broom_x24</item>
-        <item>@drawable/v_rating_x24</item>
+        <item>@drawable/ic_toplist_gallery</item>
+        <item>@drawable/ic_toplist_uploader</item>
+        <item>@drawable/ic_toplist_tag</item>
+        <item>@drawable/ic_toplist_hentai_home</item>
+        <item>@drawable/ic_toplist_ehtracker</item>
+        <item>@drawable/ic_toplist_cleanup</item>
+        <item>@drawable/ic_toplist_rating</item>
     </array>
 
     <string-array name="top_list_history_list_test_data">
