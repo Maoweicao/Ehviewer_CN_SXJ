@@ -23,9 +23,9 @@
         android:layout_width="22dp"
         android:layout_height="22dp"
         android:contentDescription="@null"
-        android:src="@drawable/ic_toplist_gallery"
         app:tint="@color/top_list_tab_icon"
-        tools:ignore="ContentDescription" />
+        tools:ignore="ContentDescription"
+        tools:src="@drawable/ic_toplist_gallery" />
 
     <TextView
         android:id="@+id/top_list_tab_text"

@@ -22,22 +22,6 @@
         <item>@string/sort_by_pub_time</item>
     </string-array>
 
-    <!--
-      排行榜分类 tab 的 drawable 资源 id 列表，与 top_list_type 一一对应。
-      用 integer-array 存 id 而不是 <array>@drawable/x</array>：
-      后者在部分 AAPT/AGP 组合下会被编译成字符串类型，
-      TypedArray.getDrawable() 静默返回 null，图标就完全不显示。
-    -->
-    <integer-array name="top_list_type_icon_ids" translatable="false">
-        <item>@drawable/ic_toplist_gallery</item>
-        <item>@drawable/ic_toplist_uploader</item>
-        <item>@drawable/ic_toplist_tag</item>
-        <item>@drawable/ic_toplist_hentai_home</item>
-        <item>@drawable/ic_toplist_ehtracker</item>
-        <item>@drawable/ic_toplist_cleanup</item>
-        <item>@drawable/ic_toplist_rating</item>
-    </integer-array>
-
     <string-array name="top_list_type">
         <item>@string/gallery_toplists</item>
         <item>@string/uploader_toplists</item>

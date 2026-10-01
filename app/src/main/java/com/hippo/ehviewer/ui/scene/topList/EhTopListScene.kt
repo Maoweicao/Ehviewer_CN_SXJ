@@ -56,11 +56,29 @@ private const val CATEGORY_TAB_COUNT = 7
 private const val TIME_BUCKET_COUNT = 4
 
 // Time bucket ordering matches TopListInfo.get(): 0=yesterday,1=past-month,2=past-year,3=all-time
-private val TIME_BUCKET_LABELS = intArrayOf(
+internal val TIME_BUCKET_LABELS = intArrayOf(
     R.string.top_list_tab_yesterday,
     R.string.top_list_tab_past_month,
     R.string.top_list_tab_past_year,
     R.string.top_list_tab_all_time,
+)
+
+/**
+ * 分类 tab 图标，与 [R.array.top_list_type] 顺序一一对应。
+ *
+ * 这里刻意写成代码常量而不是资源数组：实测本项目里
+ * `<array>@drawable/x</array>` 读出来是 null，`<integer-array>@drawable/x</integer-array>`
+ * 读出来全是 0（运行时抛 Resource ID #0x0），两种资源写法都不可用。
+ * 直接引用 R.drawable 常量由编译器保证正确。
+ */
+internal val TOP_LIST_TAB_ICONS = intArrayOf(
+    R.drawable.ic_toplist_gallery,       // 0 画廊排行榜
+    R.drawable.ic_toplist_uploader,      // 1 上传者排行榜
+    R.drawable.ic_toplist_tag,           // 2 标签排行榜
+    R.drawable.ic_toplist_hentai_home,   // 3 Hentai@Home 排行榜
+    R.drawable.ic_toplist_ehtracker,     // 4 EHTracker 排行榜
+    R.drawable.ic_toplist_cleanup,       // 5 清理排行榜
+    R.drawable.ic_toplist_rating,        // 6 评分与评论排行榜
 )
 
 private var mCategory = 0
@@ -220,7 +238,6 @@ class EhTopListScene : BaseScene() {
         val tabs = categoryTabLayout ?: return
         val ctx = ehContext ?: return
         val labels = resources.getStringArray(R.array.top_list_type)
-        val iconIds = resources.getIntArray(R.array.top_list_type_icon_ids)
         val inflater = LayoutInflater.from(ctx)
 
         for (i in 0 until CATEGORY_TAB_COUNT) {
@@ -229,10 +246,17 @@ class EhTopListScene : BaseScene() {
 
             val iconView = content.findViewById<ImageView>(R.id.top_list_tab_icon)
             val textView = content.findViewById<TextView>(R.id.top_list_tab_text)
-            if (i < iconIds.size) {
-                val d = AppCompatResources.getDrawable(ctx, iconIds[i])
+            // 图标 id 直接在代码里写死，不走资源数组。
+            // 踩过的坑：<array>@drawable/x</array> 读出来是 null，
+            // <integer-array>@drawable/x</integer-array> 读出来全是 0，
+            // 两种写法在这个项目里都拿不到可用的 drawable id。
+            val iconId = TOP_LIST_TAB_ICONS.getOrNull(i)
+            if (iconId != null && iconId != 0) {
+                val d = AppCompatResources.getDrawable(ctx, iconId)
                 if (d != null) {
                     iconView.setImageDrawable(d)
+                } else {
+                    Log.w(TAG, "Failed to load top list tab icon index=$i id=0x${Integer.toHexString(iconId)}")
                 }
             }
             if (i < labels.size) {
