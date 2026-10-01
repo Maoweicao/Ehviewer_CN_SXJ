@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 排行榜分类 tab 文字的状态色：选中主题主色，未选中普通文字色。 -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:color="?attr/widgetColorThemePrimary"
+        android:state_selected="true" />
+    <item android:color="?attr/textColorThemePrimary" />
+</selector>

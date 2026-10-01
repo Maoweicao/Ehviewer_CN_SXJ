@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  排行榜分类 tab 的状态色：
+  选中态用主题主色（与 tabIndicator 一致），未选中态用普通文字色。
+  定义成状态色列表后，TabLayout 切换选中时图标与文字会自动变色。
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:color="?attr/widgetColorThemePrimary"
+        android:state_selected="true" />
+    <item android:color="?attr/textColorThemePrimary" />
+</selector>

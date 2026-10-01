@@ -22,6 +22,22 @@
         <item>@string/sort_by_pub_time</item>
     </string-array>
 
+    <!--
+      排行榜分类 tab 的 drawable 资源 id 列表，与 top_list_type 一一对应。
+      用 integer-array 存 id 而不是 <array>@drawable/x</array>：
+      后者在部分 AAPT/AGP 组合下会被编译成字符串类型，
+      TypedArray.getDrawable() 静默返回 null，图标就完全不显示。
+    -->
+    <integer-array name="top_list_type_icon_ids" translatable="false">
+        <item>@drawable/ic_toplist_gallery</item>
+        <item>@drawable/ic_toplist_uploader</item>
+        <item>@drawable/ic_toplist_tag</item>
+        <item>@drawable/ic_toplist_hentai_home</item>
+        <item>@drawable/ic_toplist_ehtracker</item>
+        <item>@drawable/ic_toplist_cleanup</item>
+        <item>@drawable/ic_toplist_rating</item>
+    </integer-array>
+
     <string-array name="top_list_type">
         <item>@string/gallery_toplists</item>
         <item>@string/uploader_toplists</item>
@@ -32,20 +48,6 @@
         <item>@string/rating_reviewing_toplists</item>
     </string-array>
 
-    <!--
-      排行榜分类 tab 图标，与 top_list_type 一一对应。
-      专用 ic_toplist_* 系列，与界面其他位置的通用 v_*_x24 区分开。
-      这些图标的 fillColor 均为 ?attr/widgetColorThemePrimary，可随深浅色主题变化。
-    -->
-    <array name="top_list_type_icons">
-        <item>@drawable/ic_toplist_gallery</item>
-        <item>@drawable/ic_toplist_uploader</item>
-        <item>@drawable/ic_toplist_tag</item>
-        <item>@drawable/ic_toplist_hentai_home</item>
-        <item>@drawable/ic_toplist_ehtracker</item>
-        <item>@drawable/ic_toplist_cleanup</item>
-        <item>@drawable/ic_toplist_rating</item>
-    </array>
 
     <string-array name="top_list_history_list_test_data">
         <item>@string/gallery_toplists</item>

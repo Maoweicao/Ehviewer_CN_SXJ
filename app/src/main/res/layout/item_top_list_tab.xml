@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  排行榜分类 tab 的自定义内容：图标在上、文字在下。
+  不使用 TabLayout 内置的 tab.icon，改为自绘，避免 TypedArray 图标数组
+  在不同 AAPT 版本下被编译成非 drawable 类型导致图标静默丢失。
+  颜色统一用 ?attr/textColorThemePrimary，通过 color/ 里的状态色列表
+  跟随 tab 选中态变化。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingStart="8dp"
+    android:paddingTop="6dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="6dp">
+
+    <ImageView
+        xmlns:app="http://schemas.android.com/apk/res-auto"
+        android:id="@+id/top_list_tab_icon"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_toplist_gallery"
+        app:tint="@color/top_list_tab_icon"
+        tools:ignore="ContentDescription" />
+
+    <TextView
+        android:id="@+id/top_list_tab_text"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:maxLines="1"
+        android:textColor="@color/top_list_tab_text"
+        android:textSize="11sp"
+        tools:text="Gallery" />
+
+</LinearLayout>

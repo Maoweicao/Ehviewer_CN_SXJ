@@ -1,18 +1,18 @@
 package com.hippo.ehviewer.ui.scene.topList
 
 import android.content.Context
-import android.content.res.ColorStateList
 import android.os.Bundle
 import android.util.Log
 import android.util.SparseArray
-import android.util.TypedValue
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.annotation.IntDef
 import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -109,16 +109,11 @@ class EhTopListScene : BaseScene() {
     private var downloadBar: View? = null
     private var downloadBarCount: TextView? = null
     private var multiSelectFab: FloatingActionButton? = null
-    private var selectedIconColor = 0
-    private var unselectedIconColor = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val ehContext = ehContext ?: return
         client = EhApplication.getEhClient(ehContext)
-        // 提前算出图标着色，onCreateView2 里逐个 tab 应用
-        selectedIconColor = resolveThemeColor(R.attr.widgetColorThemePrimary, 0xFF2196F3.toInt())
-        unselectedIconColor = resolveThemeColor(R.attr.textColorThemePrimary, 0xFF888888.toInt())
     }
 
     override fun onCreateView2(
@@ -213,29 +208,42 @@ class EhTopListScene : BaseScene() {
         return true
     }
 
+    /**
+     * 分类 tab 用自绘 customView（图标 + 文字），不走 TabLayout 内置的图标槽位。
+     *
+     * 之前用 TypedArray 读 `<array>@drawable/..</array>` 拿图标，实测图标完全不显示：
+     * 换 AAPT 组合下该数组会被编译成非 drawable 类型，getDrawable() 静默返回 null。
+     * 现在改成 integer-array 存资源 id + 自绘布局，行为确定，不依赖资源编译细节。
+     */
     private fun bindCategoryTabLayout(root: View) {
         categoryTabLayout = root.findViewById(R.id.top_list_tab_layout)
         val tabs = categoryTabLayout ?: return
-        val array = resources.getStringArray(R.array.top_list_type)
-        val iconArray = resources.obtainTypedArray(R.array.top_list_type_icons)
-        val iconTint = getColorStateListFromTheme()
+        val ctx = ehContext ?: return
+        val labels = resources.getStringArray(R.array.top_list_type)
+        val iconIds = resources.getIntArray(R.array.top_list_type_icon_ids)
+        val inflater = LayoutInflater.from(ctx)
+
         for (i in 0 until CATEGORY_TAB_COUNT) {
             val tab = tabs.newTab()
-            if (i < array.size) {
-                tab.text = array[i]
+            val content = inflater.inflate(R.layout.item_top_list_tab, tabs, false)
+
+            val iconView = content.findViewById<ImageView>(R.id.top_list_tab_icon)
+            val textView = content.findViewById<TextView>(R.id.top_list_tab_text)
+            if (i < iconIds.size) {
+                val d = AppCompatResources.getDrawable(ctx, iconIds[i])
+                if (d != null) {
+                    iconView.setImageDrawable(d)
+                }
             }
-            if (i < iconArray.length()) {
-                // 分类 tab 配图标做视觉装饰；时间分段 tab 保持纯文字
-                // 图标自身 fillColor 已是 ?attr/widgetColorThemePrimary，
-                // 这里不再单独染色，统一交给 tabIconTint 处理选中/未选中态
-                tab.icon = iconArray.getDrawable(i)
+            if (i < labels.size) {
+                textView.text = labels[i]
             }
+
+            tab.customView = content
             tab.tag = i
             tabs.addTab(tab)
         }
-        iconArray.recycle()
-        // 图标跟随 tab 选中态着色：选中主题色，未选中普通文字色
-        tabs.tabIconTint = iconTint
+
         tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) {
                 val pos = (tab.tag as? Int) ?: 0
@@ -251,21 +259,6 @@ class EhTopListScene : BaseScene() {
             override fun onTabUnselected(tab: TabLayout.Tab) {}
             override fun onTabReselected(tab: TabLayout.Tab) {}
         })
-    }
-
-    /**
-     * 分类 tab 图标着色：选中态用主题色，未选中态用普通文字色，
-     * 跟 TabLayout 的 tabTextColor 保持一致。
-     */
-    private fun getColorStateListFromTheme(): ColorStateList {
-        val states = arrayOf(
-            intArrayOf(android.R.attr.state_selected),
-            intArrayOf(),
-        )
-        return ColorStateList(
-            states,
-            intArrayOf(selectedIconColor, unselectedIconColor)
-        )
     }
 
     private fun resolveThemeColor(attrRes: Int, fallback: Int): Int {
