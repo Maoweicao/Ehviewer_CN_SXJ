@@ -382,10 +382,12 @@ public class SearchLayout extends EasyRecyclerView implements CompoundButton.OnC
                 // 追加语言快捷标签
                 String finalQuery = query == null ? "" : query;
                 if (uploaderSearchMode) {
-                    // 上传者搜索：加 uploader: 前缀，与站内搜索框语法一致
-                    finalQuery = TextUtils.isEmpty(finalQuery)
-                            ? ListUrlBuilder.UPLOADER_KEYWORD_PREFIX
-                            : ListUrlBuilder.UPLOADER_KEYWORD_PREFIX + finalQuery;
+                    // 上传者搜索：加 uploader:"名称" 前缀，名称带空格时必须加引号，
+                    // 否则会被搜索框按空格拆词。统一走 ListUrlBuilder 的实现。
+                    String uploaderKeyword = ListUrlBuilder.buildUploaderKeyword(finalQuery);
+                    if (uploaderKeyword != null) {
+                        finalQuery = uploaderKeyword;
+                    }
                     SearchDebugLog.d("GallerySearch", "uploader search -> '" + finalQuery + "'");
                 }
                 if (mLanguageTag != null && !mLanguageTag.isEmpty()) {

@@ -151,15 +151,39 @@ public class ListUrlBuilder implements Cloneable, Parcelable {
     /**
      * 构造"按上传者搜索画廊"的 builder。
      *
-     * <p>统一走 MODE_NORMAL + {@code uploader:xxx} 关键词，而不是
+     * <p>统一走 MODE_NORMAL + {@code uploader:"xxx"} 关键词，而不是
      * {@link #MODE_UPLOADER} 的 {@code /uploader/xxx} 路径式 URL：
      * E-Hentai 的站内搜索框本身就支持 {@code uploader:名称} 这种写法，
      * 走搜索接口比走路径更稳，也顺带避免了不同画廊站（e/ex）路径不一致的问题。
+     *
+     * <p>实测（e-hentai.org）：{@code ?f_search=uploader:milannews} 与
+     * {@code /uploader/milannews} 结果数完全一致（766），所以两者等价。
      *
      * @param uploader 上传者名称，为空时返回 null，调用方需自行判空
      */
     @Nullable
     public static ListUrlBuilder buildUploaderSearch(@Nullable String uploader) {
+        String keyword = buildUploaderKeyword(uploader);
+        if (keyword == null) {
+            return null;
+        }
+        ListUrlBuilder builder = new ListUrlBuilder();
+        builder.setMode(MODE_NORMAL);
+        builder.setKeyword(keyword);
+        return builder;
+    }
+
+    /**
+     * 生成 {@code uploader:"名称"} 搜索关键词；名称为空时返回 null。
+     *
+     * <p><b>名称必须加双引号</b>：E-Hentai 搜索框用空格分词，不加引号的话
+     * {@code uploader:Zero Angel} 会被拆成 {@code uploader:Zero AND Angel} 而查不到结果。
+     * 实测 {@code uploader:"Zero Angel"} → 115 条，不加引号 → 0 条。
+     * 无空格的名字加不加引号结果相同（{@code uploader:"milannews"} 也是 766 条），
+     * 所以这里统一加引号，省掉分支判断。
+     */
+    @Nullable
+    public static String buildUploaderKeyword(@Nullable String uploader) {
         if (uploader == null) {
             return null;
         }
@@ -167,10 +191,11 @@ public class ListUrlBuilder implements Cloneable, Parcelable {
         if (name.isEmpty()) {
             return null;
         }
-        ListUrlBuilder builder = new ListUrlBuilder();
-        builder.setMode(MODE_NORMAL);
-        builder.setKeyword(UPLOADER_KEYWORD_PREFIX + name);
-        return builder;
+        // 已经是带引号的形式就别套第二层引号
+        if (name.length() >= 2 && name.startsWith("\"") && name.endsWith("\"")) {
+            return UPLOADER_KEYWORD_PREFIX + name;
+        }
+        return UPLOADER_KEYWORD_PREFIX + '"' + name + '"';
     }
 
     /** 按上传者搜索时的关键词前缀，与 E-Hentai 站内搜索的 {@code uploader:} 语法一致。 */

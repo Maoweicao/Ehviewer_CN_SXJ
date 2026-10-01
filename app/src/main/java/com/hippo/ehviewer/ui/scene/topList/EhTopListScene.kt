@@ -635,11 +635,13 @@ class EhTopListScene : BaseScene() {
             }
         }
 
-        // 兜底：按关键词搜索。走 e-hentai.org 的关键词接口，
-        // 上传者榜单用 "uploader:xxx" 前缀，和主画廊列表点作者名一致。
+        // 兜底：按关键词搜索。
+        // 实测 e-hentai.org/toplist.php：除画廊榜单外，其余 6 个分类的条目
+        // 全部是 /uploader/{name} 链接（240 条 uploader 链接、0 条 tag 链接），
+        // 所以排人的分类统一按 uploader:"名称" 搜索，和主画廊列表点作者名一致。
         val urlBuilder = ListUrlBuilder()
-        val keyword = if (isUserRankedCategory() && !topListItem.value.isNullOrEmpty()) {
-            ListUrlBuilder.UPLOADER_KEYWORD_PREFIX + topListItem.value
+        val keyword = if (isUserRankedCategory()) {
+            ListUrlBuilder.buildUploaderKeyword(topListItem.value) ?: topListItem.value
         } else {
             topListItem.value
         }

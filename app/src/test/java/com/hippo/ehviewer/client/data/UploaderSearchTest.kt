@@ -19,14 +19,47 @@ class UploaderSearchTest {
         val b = ListUrlBuilder.buildUploaderSearch("Mios-dream")
         assertNotNull(b)
         assertEquals(ListUrlBuilder.MODE_NORMAL, b!!.mode)
-        assertEquals("uploader:Mios-dream", b.keyword)
+        assertEquals("uploader:\"Mios-dream\"", b.keyword)
     }
 
     @Test
     fun uploaderSearchTrimsWhitespace() {
         val b = ListUrlBuilder.buildUploaderSearch("  someone  ")
         assertNotNull(b)
-        assertEquals("uploader:someone", b!!.keyword)
+        assertEquals("uploader:\"someone\"", b!!.keyword)
+    }
+
+    /**
+     * 名字带空格时必须加引号，否则 E-Hentai 搜索框会按空格拆词。
+     * 实测：uploader:"Zero Angel" → 115 条，uploader:Zero Angel → 0 条。
+     * （Zero Angel 真实存在于 Rating & Reviewing 榜单第 2 名，
+     *   toplist.php 上 href 是 /uploader/Zero+Angel）
+     */
+    @Test
+    fun uploaderNameWithSpaceIsQuoted() {
+        assertEquals("uploader:\"Zero Angel\"", ListUrlBuilder.buildUploaderKeyword("Zero Angel"))
+    }
+
+    /** 无空格的名字加不加引号结果一致，统一加引号即可，不必分支。 */
+    @Test
+    fun uploaderNameWithoutSpaceStillQuoted() {
+        assertEquals("uploader:\"milannews\"", ListUrlBuilder.buildUploaderKeyword("milannews"))
+    }
+
+    /** 已经带引号的名字不能再套一层引号，否则语法坏掉。 */
+    @Test
+    fun alreadyQuotedUploaderNameIsNotDoubleQuoted() {
+        assertEquals(
+            "uploader:\"Zero Angel\"",
+            ListUrlBuilder.buildUploaderKeyword("\"Zero Angel\"")
+        )
+    }
+
+    @Test
+    fun uploaderKeywordReturnsNullOnBlank() {
+        assertNull(ListUrlBuilder.buildUploaderKeyword(null))
+        assertNull(ListUrlBuilder.buildUploaderKeyword(""))
+        assertNull(ListUrlBuilder.buildUploaderKeyword("   "))
     }
 
     @Test
@@ -60,6 +93,9 @@ class UploaderSearchTest {
     /**
      * 这些榜单的条目是用户名，点击时按 uploader: 搜索。
      * 与 EhTopListAdapter#isUserRankedCategory 保持同一套判定。
+     *
+     * 依据实测 e-hentai.org/toplist.php 原始 HTML：
+     * 6 个非画廊分类共 240 条链接全部是 /uploader/{name}，tag 链接 0 条。
      */
     @Test
     fun userRankedCategoriesMatchAdapterLogic() {
