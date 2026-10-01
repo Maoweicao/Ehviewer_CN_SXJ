@@ -14,7 +14,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
-import com.hippo.ehviewer.client.EhUtils;
+import com.hippo.ehviewer.client.data.EhTopListDetail;
 import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.topList.TopListInfo;
 import com.hippo.ehviewer.client.data.topList.TopListItem;
@@ -80,7 +80,7 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
     }
 
     private boolean isGalleryCategory() {
-        return ehTopListInfo.type == com.hippo.ehviewer.client.data.EhTopListDetail.ListType.GALLERY;
+        return ehTopListInfo.type == EhTopListDetail.ListType.GALLERY;
     }
 
     /**
@@ -179,10 +179,28 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         bindSelectionState(holder, gid);
     }
 
-    /** 关键词文字行：表单式平铺，保留金银铜排名 badge */
+    /** 关键词文字行：表单式平铺，保留金银铜排名 badge，并在其后标注条目类型 */
     private void bindTextRow(@NonNull EhTopListViewHolder holder, TopListItem item, int rank) {
         bindRankBadge(holder, rank);
+        bindKindIcon(holder);
         holder.title.setText(item.value);
+    }
+
+    /**
+     * 文字行的条目类型标记，排在金银铜 badge 之后：
+     * 上传者排行榜是人（ic_toplist_user），其余关键词榜单是画廊名（ic_toplist_gallery_name）。
+     */
+    private void bindKindIcon(@NonNull EhTopListViewHolder holder) {
+        if (holder.kindIcon == null) {
+            return;
+        }
+        holder.kindIcon.setImageResource(
+                isUploaderCategory() ? R.drawable.ic_toplist_user : R.drawable.ic_toplist_gallery_name);
+        holder.kindIcon.setVisibility(View.VISIBLE);
+    }
+
+    private boolean isUploaderCategory() {
+        return ehTopListInfo.type == EhTopListDetail.ListType.UPLOADER;
     }
 
     /** 金银铜排名 badge：#1 金色带皇冠，#2 银，#3 铜，其余普通色。两种行布局共用。 */
@@ -259,6 +277,8 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         public FrameLayout rankContainer;
         public TextView rankText;
         public ImageView rankCrown;
+        // 文字行：条目类型标记（人 / 画廊），画廊行不需要（已有缩略图）
+        public final ImageView kindIcon;
         // 卡片：缩略图与次要信息
         public TileThumb thumb;
         public TextView uploader;
@@ -270,6 +290,7 @@ abstract class EhTopListAdapter extends RecyclerView.Adapter<EhTopListAdapter.Eh
         public EhTopListViewHolder(@NonNull View itemView, boolean galleryRow) {
             super(itemView);
             this.galleryRow = galleryRow;
+            this.kindIcon = itemView.findViewById(R.id.top_list_kind_icon);
             if (galleryRow) {
                 this.selected = itemView.findViewById(R.id.gallery_selected);
                 this.title = itemView.findViewById(R.id.gallery_title);

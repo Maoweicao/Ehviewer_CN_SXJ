@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  榜单条目类型标记：人（上传者排行榜）。
+  fillColor 走主题属性，可随深浅色主题变化。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+
+    <path
+        android:fillColor="?attr/widgetColorThemePrimary"
+        android:pathData="M504.59685925 253.55757036m-207.0452148 0a207.04521482 207.04521482 0 1 0 414.09042963 0 207.04521482 207.04521482 0 1 0-414.09042963 0Z" />
+    <path
+        android:fillColor="?attr/widgetColorThemePrimary"
+        android:pathData="M856.54945185 647.38038517C656.42192592 519.8279111 658.4850963 519.8279111 514.42725925 519.8279111c-141.63057778 0-141.99466667 0-358.02074073 132.64971852-47.81700741 31.7970963-75.85185185 188.59804445-75.85185185 230.22554074 0 108.86257778 192.48165925 78.88592592 429.86761481 78.88592593s429.86761482 29.97665185 429.86761482-78.88592593c0.12136297-43.93339259-31.06891852-202.67614815-83.74044445-235.32278519z" />
+</vector>

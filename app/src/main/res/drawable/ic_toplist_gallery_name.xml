@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  榜单条目类型标记：画廊（未渲染成画廊行的条目，即只有名称没有 gid/详情的条目）。
+  描边风格，用淡一些的主题文字色，弱于金银铜 badge，不抢视觉重心。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+
+    <path
+        android:fillColor="?attr/textColorThemePrimary"
+        android:pathData="M803.52 464c-107.52-256.832-416.832 153.408-416.832 153.408C293.12 419.648 229.12 625.536 229.12 625.536l0 98.496 574.4 0L803.52 464z" />
+    <path
+        android:fillColor="?attr/textColorThemePrimary"
+        android:pathData="M397.12 386.56m-69.504 0a1.086 1.086 0 1 0 139.008 0 1.086 1.086 0 1 0-139.008 0Z" />
+    <path
+        android:fillColor="?attr/textColorThemePrimary"
+        android:pathData="M64 143.872l0 736.256 896 0L960 143.872 64 143.872zM905.792 826.496 118.144 826.496 118.144 197.44l787.648 0L905.792 826.496z" />
+    <path
+        android:fillColor="?attr/textColorThemePrimary"
+        android:pathData="M893.248 207.552 130.688 207.552l0 608.896 762.56 0L893.248 207.552zM842.368 766.208 181.504 766.208 181.504 257.792l660.864 0L842.368 766.208z" />
+</vector>

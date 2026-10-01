@@ -25,7 +25,7 @@
             android:id="@+id/top_list_rank_container"
             android:layout_width="@dimen/top_list_entry_rank_size"
             android:layout_height="@dimen/top_list_entry_rank_size"
-            android:layout_marginEnd="12dp"
+            android:layout_marginEnd="6dp"
             android:background="@drawable/bg_rank_normal">
 
             <TextView
@@ -47,6 +47,17 @@
                 android:src="@drawable/v_crown_white_x24"
                 android:visibility="gone" />
         </FrameLayout>
+
+        <!-- 条目类型标记：人（上传者）/ 画廊（只有名称没有详情） -->
+        <ImageView
+            android:id="@+id/top_list_kind_icon"
+            android:layout_width="16dp"
+            android:layout_height="16dp"
+            android:layout_marginEnd="10dp"
+            android:contentDescription="@null"
+            android:visibility="gone"
+            tools:src="@drawable/ic_toplist_user"
+            tools:visibility="visible" />
 
         <TextView
             android:id="@+id/top_list_title"
