@@ -22,7 +22,9 @@ import android.content.Intent;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.Looper;
+import android.os.Process;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -102,6 +104,35 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     private final LinkedList<DownloadInfo> mDefaultInfoList;
     // Store download info wait to start
     private final LinkedList<DownloadInfo> mWaitList;
+
+    // 专用后台线程：只跑速度统计/进度节拍这类不碰 UI 的周期性任务。
+    // 之前这部分挂在 SimpleHandler(主 Looper) 上，主线程被系统限流时进度会整体停摆。
+    //
+    // 惰性初始化：Handler.getLooper() 在 HandlerThread 尚未 start() 时返回 null，
+    // 字段初始化阶段无法保证线程已启动，因此改为首次使用时再建。
+    @Nullable
+    private volatile Handler mSpeedHandler;
+
+    /**
+     * 获取（并在首次调用时创建）速度统计专用后台 Handler。
+     * 线程以BACKGROUND 优先级启动，避免与 UI 争抢 CPU。
+     */
+    @NonNull
+    private Handler speedHandler() {
+        Handler h = mSpeedHandler;
+        if (h != null) {
+            return h;
+        }
+        synchronized (this) {
+            if (mSpeedHandler == null) {
+                HandlerThread thread = new HandlerThread("Download-Speed",
+                        Process.THREAD_PRIORITY_BACKGROUND);
+                thread.start();
+                mSpeedHandler = new Handler(thread.getLooper());
+            }
+            return mSpeedHandler;
+        }
+    }
 
     // 预下载合并任务 gid -> taskId，用于停止按钮取消合并
     private final Map<Long, String> mPreMergeTaskIds = new HashMap<>();
@@ -457,6 +488,13 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             DownloadLogger.getInstance().logDownloadStart(info);
             // Start speed count
             mSpeedReminder.start();
+            // Keep a WorkManager expedited foreground worker alive for the
+            // duration of the download. On aggressive OEMs (HyperOS etc.) the
+            // SpiderWorker threads default to THREAD_PRIORITY_DEFAULT and can be
+            // throttled once the app is backgrounded; the worker periodically
+            // raises them to THREAD_PRIORITY_FOREGROUND and holds a second FGS,
+            // which also makes the app less likely to be frozen.
+            DownloadWorker.Companion.enqueue(mContext);
             // Notify start downloading
             for (DownloadListener l : mDownloadListeners) {
                 l.onStart(info);
@@ -2286,6 +2324,12 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         mCurrentSpider = null;
         // Stop speed reminder
         mSpeedReminder.stop();
+        // The WorkManager keep-alive worker exits on its own once there is no
+        // active download, but cancel explicitly so a stopped download does not
+        // keep a foreground notification around.
+        if (mContext != null) {
+            DownloadWorker.Companion.cancel(mContext);
+        }
         // Release spider (wrap in try-catch to ensure cleanup even if spider throws)
         if (spider != null) {
             try {
@@ -2927,6 +2971,15 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
 
+    /**
+     * 速度统计与进度上报。
+     *
+     * 速度/剩余时间的计算不依赖任何UI，跑在专用后台线程
+     * ({@link #speedHandler()}) 上，避免占用主Looper：
+     * 之前它每 2s 跑一次 SimpleHandler(主线程)，一旦主线程被系统限流或
+     * 冻结，进度就彻底停摆。现在计算与定时调度都在后台线程，只把最终的
+     * UI 回调切回主线程派发。
+     */
     class SpeedReminder implements Runnable {
 
         private boolean mStop = true;
@@ -2940,7 +2993,7 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         public void start() {
             if (mStop) {
                 mStop = false;
-                SimpleHandler.getInstance().post(this);
+                speedHandler().post(this);
             }
         }
 
@@ -2951,22 +3004,24 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 oldSpeed = -1;
                 mContentLengthMap.clear();
                 mReceivedSizeMap.clear();
-                SimpleHandler.getInstance().removeCallbacks(this);
+                speedHandler().removeCallbacks(this);
             }
         }
 
-        public void onDownload(int index, long contentLength, long receivedSize, int bytesRead) {
+        // Called from SpiderWorker threads while the background handler reads the
+        // maps in run(); both sides must be synchronised.
+        public synchronized void onDownload(int index, long contentLength, long receivedSize, int bytesRead) {
             mContentLengthMap.put(index, contentLength);
             mReceivedSizeMap.put(index, receivedSize);
             mBytesRead += bytesRead;
         }
 
-        public void onDone(int index) {
+        public synchronized void onDone(int index) {
             mContentLengthMap.delete(index);
             mReceivedSizeMap.delete(index);
         }
 
-        public void onFinish() {
+        public synchronized void onFinish() {
             mContentLengthMap.clear();
             mReceivedSizeMap.clear();
         }
@@ -2974,7 +3029,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         @Override
         public void run() {
             DownloadInfo info = mCurrentTask;
-            if (info != null) {
+            if (info == null) {
+                mBytesRead = 0;
+                return;
+            }
+            synchronized (this) {
                 long newSpeed = mBytesRead / 2;
                 if (oldSpeed != -1) {
                     newSpeed = (long) MathUtils.lerp(oldSpeed, newSpeed, 0.75f);
@@ -3003,21 +3062,26 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                         info.remaining = totalSize * 1000 / newSpeed;
                     }
                 }
-                for (DownloadListener l : mDownloadListeners) {
-                    l.onDownload(info);
-                }
-                List<DownloadInfo> list = getInfoListForLabel(info.label);
-                if (list != null) {
-                    for (DownloadInfoListener l : mDownloadInfoListeners) {
-                        l.onUpdate(info, list, mWaitList);
+                // Listener callbacks touch the UI (notification + DownloadsScene), so they
+                // must be dispatched on the main thread even though the speed
+                // arithmetic above ran on the background handler.
+                final DownloadInfo cur = info;
+                SimpleHandler.getInstance().post(() -> {
+                    for (DownloadListener l : mDownloadListeners) {
+                        l.onDownload(cur);
                     }
-                }
+                    List<DownloadInfo> list = getInfoListForLabel(cur.label);
+                    if (list != null) {
+                        for (DownloadInfoListener l : mDownloadInfoListeners) {
+                            l.onUpdate(cur, list, mWaitList);
+                        }
+                    }
+                });
+                mBytesRead = 0;
             }
 
-            mBytesRead = 0;
-
             if (!mStop) {
-                SimpleHandler.getInstance().postDelayed(this, 2000);
+                speedHandler().postDelayed(this, 2000);
             }
         }
     }

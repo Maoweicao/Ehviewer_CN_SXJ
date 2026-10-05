@@ -35,28 +35,44 @@ class DownloadWorker(
 
         try {
             var priorityBoostTick = 0
-            while (!isStopped) {
+            var idleTicks = 0
+            // Hard cap so this can never outlive a genuinely stuck state forever.
+            val maxTicks = MAX_LIFETIME_SECONDS * 1000 / TICK_MS
+            var ticks = 0
+            while (!isStopped && ticks < maxTicks) {
+                ticks++
                 if (!downloadManager.hasActiveDownload()) {
-                    delay(500)
-                    if (!downloadManager.hasActiveDownload()) {
+                    // Require a few consecutive idle observations before exiting:
+                    // a single gap can happen between one gallery finishing and
+                    // the next being picked up by ensureDownload().
+                    idleTicks++
+                    if (idleTicks >= IDLE_TICKS_BEFORE_EXIT) {
                         break
                     }
+                    delay(TICK_MS)
+                    continue
                 }
+                idleTicks = 0
                 // Periodically boost SpiderQueen/SpiderWorker thread priority.
                 // On HyperOS / aggressive OEMs, even default-priority threads can be
                 // throttled when the app is in the background. This is a safety net
                 // that pushes them to THREAD_PRIORITY_FOREGROUND (-1) which is less
                 // likely to be throttled.
                 priorityBoostTick++
-                if (priorityBoostTick >= 3) {
+                if (priorityBoostTick >= PRIORITY_BOOST_EVERY_TICKS) {
                     priorityBoostTick = 0
                     boostDownloadThreadPriority()
                 }
-                delay(1000)
+                delay(TICK_MS)
             }
         } finally {
-            // Stop the DownloadService when downloads complete
-            stopDownloadService()
+            // Only tear the DownloadService down if it really has nothing left to do.
+            // Unconditionally sending ACTION_STOP_ALL here would also abort a
+            // download that the user started deliberately while this keep-alive
+            // worker was running.
+            if (!downloadManager.hasActiveDownload()) {
+                stopDownloadService()
+            }
         }
 
         return Result.success()
@@ -148,6 +164,22 @@ class DownloadWorker(
         const val ID_DOWNLOADING = 100
         const val UNIQUE_WORK_NAME = "ehviewer_download"
         private const val TAG = "DownloadWorker"
+
+        /** How often the worker wakes up to re-check state / boost threads. */
+        private const val TICK_MS = 1000L
+
+        /** Boost SpiderWorker priority every N ticks (~3s). */
+        private const val PRIORITY_BOOST_EVERY_TICKS = 3
+
+        /** Consecutive idle observations required before the worker exits. */
+        private const val IDLE_TICKS_BEFORE_EXIT = 5
+
+        /**
+         * Absolute upper bound on the worker's lifetime. A download can legitimately
+         * run for hours, so this is generous; its only purpose is to guarantee the
+         * foreground worker can never outlive a wedged state.
+         */
+        private const val MAX_LIFETIME_SECONDS = 6 * 60 * 60
 
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<DownloadWorker>()
