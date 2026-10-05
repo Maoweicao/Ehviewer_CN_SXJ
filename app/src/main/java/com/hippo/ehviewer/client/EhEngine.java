@@ -73,6 +73,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -118,6 +119,12 @@ public class EhEngine {
     private static final int DEFAULT_NETWORK_CONCURRENCY = 64;
     private static final DynamicNetworkLimiter NETWORK_LIMITER = new DynamicNetworkLimiter(DEFAULT_NETWORK_CONCURRENCY);
 
+    /**
+     * 等待全局网络许可的最长秒数。超过则放弃本次请求并抛IOException，
+     * 避免一个挂死的调用把整个限流池连带拖垮。
+     */
+    private static final int NETWORK_LIMITER_ACQUIRE_TIMEOUT_SEC = 30;
+
     /** 应用启动时按持久化设置初始化限流器 */
     public static void initialize() {
         sEhFilter = EhFilter.getInstance();
@@ -141,10 +148,25 @@ public class EhEngine {
 
     /**
      * 在全局并发限流内执行同步请求。
-     * 同步 execute() 本身不可中断，acquire 也使用不可中断语义保持一致。
+     *
+     * 许可获取带超时：原先使用 acquireUninterruptibly()，一旦某个调用永久挂死
+     * 并一直占着 permit，后续所有请求都会无限期阻塞在这里，表现为下载队列整体
+     * 僵死且无法自愈。带超时后最坏情况仅是当前请求失败，循环可以继续。
      */
     private static Response executeCallWithLimit(Call call) throws IOException {
-        NETWORK_LIMITER.acquire();
+        boolean acquired;
+        try {
+            acquired = NETWORK_LIMITER.acquire(NETWORK_LIMITER_ACQUIRE_TIMEOUT_SEC,
+                    TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while waiting for network limiter", e);
+        }
+        if (!acquired) {
+            throw new IOException("Timed out after " + NETWORK_LIMITER_ACQUIRE_TIMEOUT_SEC
+                    + "s waiting for a network slot (in-flight="
+                    + NETWORK_LIMITER.activeCount() + "/" + NETWORK_LIMITER.currentLimit() + ")");
+        }
         try {
             return call.execute();
         } finally {

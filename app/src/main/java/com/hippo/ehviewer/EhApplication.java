@@ -430,7 +430,13 @@ public class EhApplication extends RecordingApplication {
                     .connectTimeout(10, TimeUnit.SECONDS)
                     .readTimeout(10, TimeUnit.SECONDS)
                     .writeTimeout(10, TimeUnit.SECONDS)
-//                    .callTimeout(10, TimeUnit.SECONDS)
+                    // 整体调用超时（含 DNS/连接/TLS/读全流程）。
+                    // 必须设置：connect/read 超时只约束单步耗时，管不住
+                    // "TCP 已建立但对端永不返回响应" 这种挂起——实测在
+                    // VPN 环境下 api.php 会挂住，导致 SpiderWorker 永久阻塞、
+                    // 整个下载队列僵死。图片下载在 SpiderQueen 中单独覆盖
+                    // callTimeout，不受此值影响。
+                    .callTimeout(60, TimeUnit.SECONDS)
                     .connectionPool(connectionPool)  // 添加优化的连接池
                     .retryOnConnectionFailure(true)  // 连接失败时重试
                     .cookieJar(getEhCookieStore(application))

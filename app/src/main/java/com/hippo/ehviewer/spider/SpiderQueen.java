@@ -117,6 +117,16 @@ public final class SpiderQueen implements Runnable {
     private static final AtomicInteger sIdGenerator = new AtomicInteger();
     private static final boolean DEBUG_LOG = false;
     private static final boolean DEBUG_PTOKEN = true;
+
+    /**
+     * SpiderWorker 等待 SpiderQueen 供给 pToken 的最长时间。
+     *
+     * 使用带超时的 wait() 而非无限 wait()：一旦 notify 丢失（Queen 线程异常
+     * 退出、或恰好错过通知时机），无超时的 wait() 会让worker 永久阻塞，
+     * 连带整个下载队列僵死，只能杀进程恢复。超时后 worker 会重新检查 token
+     * 状态并重新入队请求，从而自愈。
+     */
+    private static final long PTOKEN_WAIT_TIMEOUT_MS = 5000L;
     private static final String[] URL_509_SUFFIX_ARRAY = {
             "/509.gif",
             "/509s.gif"
@@ -1802,10 +1812,16 @@ public final class SpiderQueen implements Runnable {
                     synchronized (mQueenLock) {
                         mQueenLock.notify();
                     }
-                    // Wait
+                    // Wait for the Queen thread to supply the token.
+                    // Use a timed wait: an untimed wait() can hang forever if
+                    // the notify is missed (e.g. the Queen died or bailed out
+                    // between our add() and its notify()), which used to leave
+                    // every SpiderWorker blocked here with the whole download
+                    // queue starved and no way to recover without killing the
+                    // process. On timeout we simply loop and re-check.
                     synchronized (mWorkerLock) {
                         try {
-                            mWorkerLock.wait();
+                            mWorkerLock.wait(PTOKEN_WAIT_TIMEOUT_MS);
                         } catch (InterruptedException e) {
                             // Interrupted
                             if (DEBUG_LOG) {
@@ -1839,10 +1855,10 @@ public final class SpiderQueen implements Runnable {
                     synchronized (mQueenLock) {
                         mQueenLock.notify();
                     }
-                    // Wait
+                    // Wait (timed, see comment above)
                     synchronized (mWorkerLock) {
                         try {
-                            mWorkerLock.wait();
+                            mWorkerLock.wait(PTOKEN_WAIT_TIMEOUT_MS);
                         } catch (InterruptedException e) {
                             // Interrupted
                             if (DEBUG_LOG) {

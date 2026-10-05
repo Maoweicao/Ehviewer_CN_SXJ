@@ -1,6 +1,7 @@
 package com.hippo.ehviewer.client
 
 import java.util.concurrent.Semaphore
+import java.util.concurrent.TimeUnit
 
 /**
  * 可动态调整上限的全局网络并发限流器。
@@ -63,6 +64,31 @@ class DynamicNetworkLimiter(initialLimit: Int) {
     fun acquire() {
         activeCount.incrementAndGet()
         semaphore.acquireUninterruptibly()
+    }
+
+    /**
+     * 带超时的许可获取。超时抛 [InterruptedException]。
+     *
+     * 背景：若某个 [acquire] 进来的调用永久挂死（例如对端建立 TCP 后永不
+     * 返回响应），它会一直占着 permit不放。此时后续所有请求都会阻塞在
+     * [semaphore] 上，连"等超时再重试"的机会都没有 —— 表现为整个下载队列
+     * 瞬间僵死且无法自愈。带上超时后，最坏情况只是当前这一个请求失败，
+     * permit 循环得以继续。
+     */
+    @Throws(InterruptedException::class)
+    fun acquire(timeout: Long, unit: TimeUnit): Boolean {
+        activeCount.incrementAndGet()
+        val acquired = try {
+            semaphore.tryAcquire(timeout, unit)
+        } catch (e: InterruptedException) {
+            activeCount.decrementAndGet()
+            throw e
+        }
+        if (!acquired) {
+            // 未获得许可时不能占用计数，否则计数会与实际在飞数长期偏离
+            activeCount.decrementAndGet()
+        }
+        return acquired
     }
 
     /** 归还一个在飞许可；缩容期间空闲已达标时不再归还（渐进收敛） */
