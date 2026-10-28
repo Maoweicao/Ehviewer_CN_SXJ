@@ -1,11 +1,14 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.Entity;
-import org.greenrobot.greendao.annotation.Generated;
-import org.greenrobot.greendao.annotation.Id;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 
 /** Permanent, gallery-level record of completed downloads. */
-@Entity(nameInDb = "DOWNLOAD_HISTORY")
+@Entity(tableName = "DOWNLOAD_HISTORY")
 public class DownloadHistory {
 
     public static final int DELETION_NONE = 0;
@@ -13,28 +16,41 @@ public class DownloadHistory {
     public static final int DELETION_DUPLICATE_MERGED = 2;
     public static final int DELETION_PROGRESSIVE_MERGED = 3;
 
-    @Id
+    @PrimaryKey
+    @ColumnInfo(name = "GID")
     private long gid;
+    @ColumnInfo(name = "TOKEN")
     private String token;
+    @ColumnInfo(name = "TITLE")
     private String title;
+    @ColumnInfo(name = "TITLE_JPN")
     private String titleJpn;
+    @ColumnInfo(name = "FILE_PATH")
     private String filePath;
+    @ColumnInfo(name = "COMPLETED_AT")
     private long completedAt;
+    @ColumnInfo(name = "LAST_DOWNLOADED_AT")
     private long lastDownloadedAt;
+    @ColumnInfo(name = "DOWNLOAD_COUNT")
     private int downloadCount;
+    @ColumnInfo(name = "DELETION_TYPE")
     private int deletionType;
+    @ColumnInfo(name = "MERGED_TARGET_GID")
     private long mergedTargetGid;
+    @ColumnInfo(name = "DELETED_AT")
     private long deletedAt;
     // 新增字段：用于预下载对比
+    @ColumnInfo(name = "TOTAL_FILES")
     private int totalFiles; // 总文件数（来自 .ehviewer）
+    @ColumnInfo(name = "DOWNLOADED_FILES")
     private int downloadedFiles; // 已下载文件数
+    @ColumnInfo(name = "FILE_TOKENS")
     private String fileTokens; // JSON 格式存储文件 token 列表，用于后续增量对比
 
-    @Generated
     public DownloadHistory() {
     }
 
-    @Generated
+    @Ignore
     public DownloadHistory(long gid, String token, String title, String titleJpn, String filePath,
             long completedAt, long lastDownloadedAt, int downloadCount, int deletionType,
             long mergedTargetGid, long deletedAt, int totalFiles, int downloadedFiles, String fileTokens) {

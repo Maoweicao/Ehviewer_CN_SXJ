@@ -1,26 +1,34 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.Entity;
-import org.greenrobot.greendao.annotation.Generated;
-import org.greenrobot.greendao.annotation.Id;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 
 /** AI 图片分析结果（用于下载列表的按描述搜索）。 */
-@Entity(nameInDb = "GALLERY_AI_INFO")
+@Entity(tableName = "GALLERY_AI_INFO")
 public class GalleryAiInfo {
 
-    @Id
+    @PrimaryKey
+    @ColumnInfo(name = "GID")
     private long gid;
+    @ColumnInfo(name = "SUMMARY")
     private String summary;
+    @ColumnInfo(name = "TAGS")
     private String tags;
+    @ColumnInfo(name = "DESCRIPTIONS")
     private String descriptions;
+    @ColumnInfo(name = "AESTHETIC_SCORE")
     private float aestheticScore;
+    @ColumnInfo(name = "UPDATED_AT")
     private long updatedAt;
 
-    @Generated
     public GalleryAiInfo() {
     }
 
-    @Generated
+    @Ignore
     public GalleryAiInfo(long gid, String summary, String tags, String descriptions,
             float aestheticScore, long updatedAt) {
         this.gid = gid;

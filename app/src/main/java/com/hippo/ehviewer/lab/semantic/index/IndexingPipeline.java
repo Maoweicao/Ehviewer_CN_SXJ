@@ -252,7 +252,7 @@ public class IndexingPipeline {
 
     private GalleryTags loadTags(long gid) {
         try {
-            return EhDB.getDaoSession().getGalleryTagsDao().load(gid);
+            return EhDB.getDatabase().galleryTagsDao().load(gid);
         } catch (Throwable t) {
             return null;
         }

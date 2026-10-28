@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.hippo.ehviewer.EhDB;
-import com.hippo.ehviewer.dao.MilestoneDao;
 import com.hippo.ehviewer.dao.MilestoneInfo;
 
 import java.util.ArrayList;
@@ -28,7 +27,6 @@ public class MilestoneManager {
 
     private final Context mContext;
     private final SharedPreferences mPrefs;
-    private final MilestoneDao mDao;
 
     private static MilestoneManager sInstance;
 
@@ -42,7 +40,6 @@ public class MilestoneManager {
     private MilestoneManager(Context context) {
         mContext = context;
         mPrefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        mDao = EhDB.getDaoSession().getMilestoneDao();
     }
 
     public void recordAppUsage(long durationMillis) {

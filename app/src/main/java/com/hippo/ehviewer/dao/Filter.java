@@ -1,6 +1,11 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.*;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 import com.hippo.util.HashCodeUtils;
 import com.hippo.yorozuya.ObjectUtils;
 
@@ -8,24 +13,28 @@ import com.hippo.yorozuya.ObjectUtils;
 /**
  * Entity mapped to table "FILTER".
  */
-@Entity(nameInDb = "FILTER")
+@Entity(tableName = "FILTER")
 public class Filter {
 
-	@Id
+    @PrimaryKey
+    @ColumnInfo(name = "_id")
 	private Long id;
+    @ColumnInfo(name = "MODE")
 	public int mode;
+    @ColumnInfo(name = "TEXT")
 	public String text;
+    @ColumnInfo(name = "ENABLE")
 	public Boolean enable;
 
-	@Generated
 	public Filter() {
 	}
 
+    @Ignore
 	public Filter(Long id) {
 		this.id = id;
 	}
 
-	@Generated
+    @Ignore
 	public Filter(Long id, int mode, String text, Boolean enable) {
 		this.id = id;
 		this.mode = mode;

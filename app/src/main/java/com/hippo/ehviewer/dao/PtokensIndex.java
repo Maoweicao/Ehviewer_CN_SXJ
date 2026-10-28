@@ -1,33 +1,39 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.Entity;
-import org.greenrobot.greendao.annotation.Id;
-import org.greenrobot.greendao.annotation.Generated;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 
 /**
  * 画廊页面 ptoken 索引实体，用于快速检测递进关系
  * 存储每个已下载画廊的所有页面 ptoken，以便增量检测子集/超集关系
  */
-@Entity(nameInDb = "PTOKENS_INDEX")
+@Entity(tableName = "PTOKENS_INDEX")
 public class PtokensIndex {
 
-    @Id
+    @PrimaryKey
+    @ColumnInfo(name = "GID")
     private long gid;
 
     /** 逗号分隔的 ptoken 字符串 */
+    @ColumnInfo(name = "PTOKENS")
     private String ptokens;
 
     /** 画廊总页数 */
+    @ColumnInfo(name = "PAGES")
     private int pages;
 
     /** 索引最后更新时间 */
+    @ColumnInfo(name = "UPDATED_AT")
     private long updatedAt;
 
-    @Generated
     public PtokensIndex() {
     }
 
-    @Generated
+    @Ignore
     public PtokensIndex(long gid, String ptokens, int pages, long updatedAt) {
         this.gid = gid;
         this.ptokens = ptokens;

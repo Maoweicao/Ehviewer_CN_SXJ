@@ -1,6 +1,8 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.*;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
 import android.os.Parcel;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 
@@ -8,9 +10,10 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 /**
  * Entity mapped to table "LOCAL_FAVORITES".
  */
-@Entity(nameInDb = "LOCAL_FAVORITES")
+@Entity(tableName = "LOCAL_FAVORITES")
 public class LocalFavoriteInfo extends GalleryInfo {
 
+	@ColumnInfo(name = "TIME")
 	public long time;
 
 	public static final Creator<LocalFavoriteInfo> CREATOR = new Creator<LocalFavoriteInfo>() {
@@ -25,7 +28,6 @@ public class LocalFavoriteInfo extends GalleryInfo {
 		}
 	};
 
-	@Generated
 	public LocalFavoriteInfo() {
 	}
 
@@ -33,7 +35,7 @@ public class LocalFavoriteInfo extends GalleryInfo {
 		this.gid = gid;
 	}
 
-	@Generated
+	@Ignore
 	public LocalFavoriteInfo(long gid, String token, String title, String titleJpn, String thumb, int category,
 			String posted, String uploader, float rating, String simpleLanguage, long time) {
 		this.gid = gid;
@@ -153,6 +155,7 @@ public class LocalFavoriteInfo extends GalleryInfo {
 		this.time = in.readLong();
 	}
 
+	@Ignore
 	public LocalFavoriteInfo(GalleryInfo galleryInfo) {
 		this.gid = galleryInfo.gid;
 		this.token = galleryInfo.token;

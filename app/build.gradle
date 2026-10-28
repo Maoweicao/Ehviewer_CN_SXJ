@@ -139,6 +139,10 @@ tasks.withType(Test).configureEach {
 
 kapt {
     correctErrorTypes = true
+    // 导出 Room schema，供迁移测试比对表结构
+    arguments {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
 }
 
 //tasks.withType(JavaCompile) {
@@ -224,7 +228,11 @@ dependencies {
     implementation 'com.github.xiaojieonly:Android-Request-Inspector-WebView:70403bb'
 
     implementation 'org.ccil.cowan.tagsoup:tagsoup:1.2.1'
-    implementation 'org.greenrobot:greendao:3.0.0'
+    // 数据层：Room 取代 greenDAO（DAO 线程安全 + 事务由 SQLite 串行，
+    // 不再需要 EhDB 的全局 static synchronized 锁）
+    implementation 'androidx.room:room-runtime:2.5.0'
+    implementation 'androidx.room:room-ktx:2.5.0'
+    kapt 'androidx.room:room-compiler:2.5.0'
     // 1.18.x 在部分 Android 运行环境上出现 NoClassDefFoundError(org.jsoup.parser.Tag)
     // 回退到 Android 侧更稳定的版本，避免运行时缺类
     implementation 'org.jsoup:jsoup:1.15.4'

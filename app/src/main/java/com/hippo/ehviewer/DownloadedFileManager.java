@@ -24,9 +24,9 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.hippo.ehviewer.dao.DaoSession;
 import com.hippo.ehviewer.dao.DownloadedFile;
-import com.hippo.ehviewer.dao.DownloadedFilesDao;
+import androidx.sqlite.db.SupportSQLiteDatabase;
+import com.hippo.ehviewer.db.DownloadedFilesDao;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
@@ -65,6 +65,7 @@ public class DownloadedFileManager {
 
     private final Context mContext;
     private final DownloadedFilesDao mDownloadedFilesDao;
+    private final SupportSQLiteDatabase mDatabase;
 
     public static final int SCAN_STATUS_IDLE = 0;
     public static final int SCAN_STATUS_SCANNING = 1;
@@ -92,8 +93,9 @@ public class DownloadedFileManager {
 
     private DownloadedFileManager(Context context) {
         mContext = context;
-        DaoSession daoSession = EhDB.getDaoSession();
-        mDownloadedFilesDao = daoSession.getDownloadedFilesDao();
+        // Room 的 DAO 线程安全，不再需要 DaoSession + 外部锁
+        mDatabase = EhDB.getDatabase().getOpenHelper().getWritableDatabase();
+        mDownloadedFilesDao = EhDB.getDatabase().downloadedFilesDao();
         ensureFileTokenColumn();
         ensureGallerySizeView();
     }
@@ -105,7 +107,7 @@ public class DownloadedFileManager {
      */
     private void ensureGallerySizeView() {
         try {
-            mDownloadedFilesDao.getDatabase().execSQL(
+            mDatabase.execSQL(
                     "CREATE TABLE IF NOT EXISTS \"" + GALLERY_SIZE_TABLE + "\" (" +
                             "\"GID\" INTEGER PRIMARY KEY NOT NULL ," +
                             "\"TOTAL_SIZE\" INTEGER NOT NULL DEFAULT 0);");
@@ -119,8 +121,8 @@ public class DownloadedFileManager {
      */
     public void refreshGallerySizeView() {
         try {
-            mDownloadedFilesDao.getDatabase().execSQL("DELETE FROM \"" + GALLERY_SIZE_TABLE + "\"");
-            mDownloadedFilesDao.getDatabase().execSQL(
+            mDatabase.execSQL("DELETE FROM \"" + GALLERY_SIZE_TABLE + "\"");
+            mDatabase.execSQL(
                     "INSERT OR REPLACE INTO \"" + GALLERY_SIZE_TABLE + "\" (GID, TOTAL_SIZE) " +
                             "SELECT d.GID, COALESCE(SUM(f.SIZE), 0) " +
                             "FROM DOWNLOAD_DIRNAME d " +
@@ -156,7 +158,7 @@ public class DownloadedFileManager {
         }
         Cursor cursor = null;
         try {
-            cursor = mDownloadedFilesDao.getDatabase().rawQuery(
+            cursor = mDatabase.query(
                     "SELECT GID, TOTAL_SIZE FROM \"" + GALLERY_SIZE_TABLE + "\" WHERE GID IN (" + placeholders + ")",
                     args);
             while (cursor != null && cursor.moveToNext()) {
@@ -214,7 +216,7 @@ public class DownloadedFileManager {
     private void ensureFileTokenColumn() {
         try {
             boolean hasFileToken = false;
-            Cursor cursor = mDownloadedFilesDao.getDatabase().rawQuery("PRAGMA table_info('DOWNLOADED_FILES')", null);
+            Cursor cursor = mDatabase.query("PRAGMA table_info('DOWNLOADED_FILES')");
             if (cursor != null) {
                 while (cursor.moveToNext()) {
                     int columnIndex = cursor.getColumnIndex("name");
@@ -230,7 +232,7 @@ public class DownloadedFileManager {
                 cursor.close();
             }
             if (!hasFileToken) {
-                mDownloadedFilesDao.getDatabase().execSQL("ALTER TABLE DOWNLOADED_FILES ADD COLUMN FILE_TOKEN TEXT;");
+                mDatabase.execSQL("ALTER TABLE DOWNLOADED_FILES ADD COLUMN FILE_TOKEN TEXT;");
                 Log.i(TAG, "Added missing FILE_TOKEN column to DOWNLOADED_FILES");
             }
         } catch (Exception e) {
@@ -435,10 +437,7 @@ public class DownloadedFileManager {
 
         try {
             // 优先查找正常状态记录
-            DownloadedFile file = mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.Token.eq(token))
-                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                    .unique();
+            DownloadedFile file = mDownloadedFilesDao.findByTokenAndStatus(token, DownloadedFile.STATUS_NORMAL);
 
             if (file != null) {
                 Log.d(TAG, "Found normal status file for token: " + token + ", filename: " + file.getFilename());
@@ -467,17 +466,12 @@ public class DownloadedFileManager {
         }
 
         try {
-            DownloadedFile file = mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.FileToken.eq(fileToken))
-                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                    .unique();
+            DownloadedFile file = mDownloadedFilesDao.findByFileTokenAndStatus(fileToken, DownloadedFile.STATUS_NORMAL);
             if (file != null) {
                 return file;
             }
 
-            List<DownloadedFile> candidates = mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.FileToken.eq(fileToken))
-                    .list();
+            List<DownloadedFile> candidates = mDownloadedFilesDao.findByFileToken(fileToken);
             if (candidates != null && !candidates.isEmpty()) {
                 for (DownloadedFile candidate : candidates) {
                     File candidateFile = new File(candidate.getPath());
@@ -606,10 +600,7 @@ public class DownloadedFileManager {
      */
     public void markGalleryRemoved(long gid) {
         try {
-            List<DownloadedFile> files = mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.Gid.eq(gid))
-                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                    .list();
+            List<DownloadedFile> files = mDownloadedFilesDao.findByGidAndStatus(gid, DownloadedFile.STATUS_NORMAL);
 
             for (DownloadedFile file : files) {
                 file.setStatus(DownloadedFile.STATUS_GALLERY_REMOVED);
@@ -628,11 +619,7 @@ public class DownloadedFileManager {
      */
     public List<DownloadedFile> getGalleryFiles(long gid) {
         try {
-            return mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.Gid.eq(gid))
-                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                    .orderAsc(DownloadedFilesDao.Properties.Filename)
-                    .list();
+            return mDownloadedFilesDao.findByGidAndStatusOrderByFilename(gid, DownloadedFile.STATUS_NORMAL);
         } catch (Exception e) {
             Log.e(TAG, "Error getting gallery files: " + gid, e);
             return new ArrayList<>();
@@ -731,9 +718,7 @@ public class DownloadedFileManager {
      */
     public int getTotalFilesCount() {
         try {
-            return (int) mDownloadedFilesDao.queryBuilder()
-                    .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                    .count();
+            return (int) mDownloadedFilesDao.countByStatus(DownloadedFile.STATUS_NORMAL);
         } catch (Exception e) {
             Log.e(TAG, "Error getting total files count", e);
             return 0;
@@ -804,7 +789,7 @@ public class DownloadedFileManager {
         Set<Long> dirFallback = new HashSet<>();
         Cursor cursor = null;
         try {
-            cursor = mDownloadedFilesDao.getDatabase().rawQuery(sql, args);
+            cursor = mDatabase.query(sql, args);
             while (cursor != null && cursor.moveToNext()) {
                 long gid = cursor.getLong(0);
                 long size = cursor.isNull(1) ? 0L : cursor.getLong(1);
@@ -848,7 +833,7 @@ public class DownloadedFileManager {
      */
     private void upsertGallerySizeView(long gid, long size) {
         try {
-            mDownloadedFilesDao.getDatabase().execSQL(
+            mDatabase.execSQL(
                     "INSERT OR REPLACE INTO \"" + GALLERY_SIZE_TABLE + "\" (GID, TOTAL_SIZE) VALUES (?, ?)",
                     new Object[]{gid, Math.max(size, 0L)});
         } catch (Exception e) {
@@ -864,9 +849,7 @@ public class DownloadedFileManager {
     public int cleanupInvalidFiles() {
         Log.d(TAG, "开始清理无效文件记录");
 
-        List<DownloadedFile> allFiles = mDownloadedFilesDao.queryBuilder()
-                .where(DownloadedFilesDao.Properties.Status.eq(DownloadedFile.STATUS_NORMAL))
-                .list();
+        List<DownloadedFile> allFiles = mDownloadedFilesDao.findByStatus(DownloadedFile.STATUS_NORMAL);
 
         int cleanedCount = 0;
 
@@ -1183,10 +1166,10 @@ public class DownloadedFileManager {
 
         // 批量写库（不计算 MD5：MD5 在应用中无消费者，全量读图算 MD5 是扫描慢的主因）
         if (!toInsert.isEmpty()) {
-            mDownloadedFilesDao.insertInTx(toInsert);
+            mDownloadedFilesDao.insertAll(toInsert);
         }
         if (!toUpdate.isEmpty()) {
-            mDownloadedFilesDao.updateInTx(toUpdate);
+            mDownloadedFilesDao.updateAll(toUpdate);
         }
 
         // 标记本画廊在 DB 中但磁盘已缺失的文件为已删除，保留文件级历史
@@ -1201,7 +1184,7 @@ public class DownloadedFileManager {
                 }
             }
             if (!stale.isEmpty()) {
-                mDownloadedFilesDao.updateInTx(stale);
+                mDownloadedFilesDao.updateAll(stale);
                 acc.markedDeleted += stale.size();
             }
             gidTokens.clear();
@@ -1299,7 +1282,7 @@ public class DownloadedFileManager {
      * 创建 DOWNLOADED_FILES 表（含 FILE_TOKEN 列，与 DAO schema 一致）。
      */
     private void createDownloadedFilesTable() throws Exception {
-        mDownloadedFilesDao.getDatabase().execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
+        mDatabase.execSQL("CREATE TABLE IF NOT EXISTS \"DOWNLOADED_FILES\" (" +
                 "\"TOKEN\" TEXT PRIMARY KEY NOT NULL ," +
                 "\"FILE_TOKEN\" TEXT," +
                 "\"GID\" INTEGER NOT NULL ," +
@@ -1355,7 +1338,7 @@ public class DownloadedFileManager {
             }
         }
         if (!stale.isEmpty()) {
-            mDownloadedFilesDao.updateInTx(stale);
+            mDownloadedFilesDao.updateAll(stale);
         }
         return stale.size();
     }

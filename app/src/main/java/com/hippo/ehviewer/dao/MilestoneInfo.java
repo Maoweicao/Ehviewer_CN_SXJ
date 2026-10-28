@@ -1,31 +1,36 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.Entity;
-import org.greenrobot.greendao.annotation.Id;
-import org.greenrobot.greendao.annotation.NotNull;
-import org.greenrobot.greendao.annotation.Generated;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 
-@Entity
+@Entity(tableName = "MILESTONE")
 public class MilestoneInfo {
-    @Id
+    @PrimaryKey(autoGenerate = true)
+    @ColumnInfo(name = "_id")
     private Long id;
 
-    @NotNull
+    @NonNull
+    @ColumnInfo(name = "KEY")
     private String key;
 
+    @ColumnInfo(name = "VALUE")
     private String value;
 
+    @ColumnInfo(name = "UPDATE_TIME")
     private long updateTime;
 
-    @Generated(hash = 1849103488)
-    public MilestoneInfo(Long id, @NotNull String key, String value, long updateTime) {
+    @Ignore
+    public MilestoneInfo(Long id, String key, String value, long updateTime) {
         this.id = id;
         this.key = key;
         this.value = value;
         this.updateTime = updateTime;
     }
 
-    @Generated(hash = 1453418844)
     public MilestoneInfo() {
     }
 

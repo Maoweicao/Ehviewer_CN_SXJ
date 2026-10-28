@@ -75,7 +75,6 @@ import com.hippo.widget.recyclerview.AutoStaggeredGridLayoutManager;
 import com.hippo.lib.yorozuya.AssertUtils;
 import com.hippo.lib.yorozuya.ViewUtils;
 
-import org.greenrobot.greendao.query.LazyList;
 
 import java.util.ArrayList;
 import java.util.List;

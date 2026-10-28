@@ -41,7 +41,6 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
-import com.hippo.ehviewer.dao.GalleryVersionMap;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.spider.SpiderDen;
@@ -473,20 +472,10 @@ public final class CommonOperations {
                 Log.w("CommonOperations", "未找到.ehviewer文件");
             }
 
-            // 在数据库中添加映射关系
-            GalleryVersionMap existingMap = EhDB.getGalleryVersionMap(oldGid);
-            long originalGid;
-            if (existingMap != null) {
-                originalGid = existingMap.getOriginalGid();
-                Log.d("CommonOperations", "找到已存在的版本映射，原始GID: " + originalGid);
-            } else {
-                originalGid = oldGid;
-                Log.d("CommonOperations", "未找到已存在的版本映射，使用当前GID作为原始GID: " + originalGid);
-            }
-            
-            // 添加新的映射关系
-            EhDB.addGalleryVersionMap(newGalleryInfo.gid, originalGid, newGalleryInfo.title);
-            Log.i("CommonOperations", "版本映射关系添加成功: " + originalGid + " -> " + newGalleryInfo.gid);
+            // 版本映射功能已停用（GALLERY_VERSION_MAP 表随 Room 迁移删除），
+            // 这里保留原始 GID 语义即可。
+            long originalGid = oldGid;
+            Log.d("CommonOperations", "使用当前GID作为原始GID: " + originalGid);
 
             // 显示提示
             SimpleHandler.getInstance().post(() -> {

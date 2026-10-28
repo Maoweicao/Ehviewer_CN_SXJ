@@ -20,6 +20,9 @@ import android.os.Parcel;
 import android.os.Parcelable;
 
 import androidx.annotation.Nullable;
+import androidx.room.ColumnInfo;
+import androidx.room.Ignore;
+import androidx.room.PrimaryKey;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -104,26 +107,49 @@ public class GalleryInfo implements Parcelable {
             "language:dutch",
     };
 
+    // ===== Room 映射说明 =====
+    // GalleryInfo 不是实体，但它的子类（DownloadInfo / HistoryInfo / LocalFavoriteInfo /
+    // BookmarkInfo）都是 Room 实体。Room 会收集父类字段，因此这里用 @Ignore 明确标出
+    // 4 张表都不持久化的字段，用 @ColumnInfo 锁定历史库里的列名（大写）。
+    @PrimaryKey
+    @ColumnInfo(name = "GID")
     public long gid;
+    @ColumnInfo(name = "TOKEN")
     public String token;
+    @ColumnInfo(name = "TITLE")
     public String title;
+    @ColumnInfo(name = "TITLE_JPN")
     public String titleJpn;
+    @ColumnInfo(name = "THUMB")
     public String thumb;
+    @ColumnInfo(name = "CATEGORY")
     public int category;
+    @ColumnInfo(name = "POSTED")
     public String posted;
+    @ColumnInfo(name = "UPLOADER")
     public String uploader;
+    @ColumnInfo(name = "RATING")
     public float rating;
+    @Ignore
     public boolean rated;
+    @Ignore
     @Nullable
     public String[] simpleTags;
+    @Ignore
     public int pages;
 
+    @Ignore
     public int thumbWidth;
+    @Ignore
     public int thumbHeight;
 
+    @Ignore
     public int spanSize;
+    @Ignore
     public int spanIndex;
+    @Ignore
     public int spanGroupIndex;
+    @Ignore
     @Nullable
     public ArrayList<String> tgList;
 
@@ -131,22 +157,29 @@ public class GalleryInfo implements Parcelable {
      * This gallery has been replaced/updated; the current version (from API current_gid/current_key).
      * -1L or null means not set.
      */
+    @Ignore
     public long currentGid = -1L;
+    @Ignore
     public String currentKey;
 
     /**
      * This gallery has been merged into a parent gallery (from API parent_gid/parent_key).
      * -1L or null means not set.
      */
+    @Ignore
     public long parentGid = -1L;
+    @Ignore
     public String parentKey;
 
     /**
      * language from title
      */
+    @ColumnInfo(name = "SIMPLE_LANGUAGE")
     public String simpleLanguage;
 
+    @Ignore
     public int favoriteSlot = -2;
+    @Ignore
     public String favoriteName;
 
     public String toCSV() {

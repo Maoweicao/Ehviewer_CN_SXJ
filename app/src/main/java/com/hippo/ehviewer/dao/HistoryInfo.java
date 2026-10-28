@@ -1,6 +1,8 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.*;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
 import android.os.Parcel;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 
@@ -8,10 +10,12 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 /**
  * Entity mapped to table "HISTORY".
  */
-@Entity(nameInDb = "HISTORY")
+@Entity(tableName = "HISTORY")
 public class HistoryInfo extends GalleryInfo {
 
+	@ColumnInfo(name = "MODE")
 	public int mode;
+	@ColumnInfo(name = "TIME")
 	public long time;
 
 	public static final Creator<HistoryInfo> CREATOR = new Creator<HistoryInfo>() {
@@ -26,7 +30,6 @@ public class HistoryInfo extends GalleryInfo {
 		}
 	};
 
-	@Generated
 	public HistoryInfo() {
 	}
 
@@ -34,7 +37,7 @@ public class HistoryInfo extends GalleryInfo {
 		this.gid = gid;
 	}
 
-	@Generated
+	@Ignore
 	public HistoryInfo(long gid, String token, String title, String titleJpn, String thumb, int category, String posted,
 			String uploader, float rating, String simpleLanguage, int mode, long time) {
 		this.gid = gid;
@@ -165,6 +168,7 @@ public class HistoryInfo extends GalleryInfo {
 		this.time = in.readLong();
 	}
 
+	@Ignore
 	public HistoryInfo(GalleryInfo galleryInfo) {
 		this.gid = galleryInfo.gid;
 		this.token = galleryInfo.token;

@@ -1,8 +1,11 @@
 package com.hippo.ehviewer.dao;
 
-import org.greenrobot.greendao.annotation.Entity;
-import org.greenrobot.greendao.annotation.Id;
-import org.greenrobot.greendao.annotation.Generated;
+import androidx.annotation.NonNull;
+import androidx.room.ColumnInfo;
+import androidx.room.Entity;
+import androidx.room.Ignore;
+import androidx.room.Index;
+import androidx.room.PrimaryKey;
 
 /**
  * 系统 DownloadManager 任务映射：
@@ -12,7 +15,7 @@ import org.greenrobot.greendao.annotation.Generated;
  *  - 应用重启 / Worker 调度丢失时能 query 系统 DM 找回状态
  *  - 隐私清理时按 gid 批量 remove
  */
-@Entity(nameInDb = "SYSTEM_DOWNLOAD_TASKS")
+@Entity(tableName = "SYSTEM_DOWNLOAD_TASKS")
 public class SystemDownloadTask {
 
     public static final String STATUS_PENDING = "PENDING";
@@ -20,29 +23,36 @@ public class SystemDownloadTask {
     public static final String STATUS_SUCCESS = "SUCCESS";
     public static final String STATUS_FAILED = "FAILED";
 
-    @Id
+    @PrimaryKey
+    @ColumnInfo(name = "DOWNLOAD_ID")
     private long downloadId;
 
+    @ColumnInfo(name = "GID")
     private long gid;
 
+    @ColumnInfo(name = "PAGE_INDEX")
     private int pageIndex;
 
     /** 解析后的图片 URL（pToken/showKey 可能在数小时内失效；用于 retry） */
+    @ColumnInfo(name = "RESOLVED_URL")
     private String resolvedUrl;
 
     /** PENDING / RUNNING / SUCCESS / FAILED */
+    @NonNull
+    @ColumnInfo(name = "STATUS")
     private String status;
 
     /** 已 retry 次数，0..N；>=3 视为放弃 */
+    @ColumnInfo(name = "RETRY_COUNT")
     private int retryCount;
 
+    @ColumnInfo(name = "CREATED_AT")
     private long createdAt;
 
-    @Generated
     public SystemDownloadTask() {
     }
 
-    @Generated
+    @Ignore
     public SystemDownloadTask(long downloadId, long gid, int pageIndex, String resolvedUrl, String status, int retryCount, long createdAt) {
         this.downloadId = downloadId;
         this.gid = gid;
@@ -109,7 +119,6 @@ public class SystemDownloadTask {
         this.createdAt = createdAt;
     }
 
-    @Generated
     @Override
     public String toString() {
         return "SystemDownloadTask{" +
