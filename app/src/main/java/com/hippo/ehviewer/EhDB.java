@@ -32,7 +32,6 @@ import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.sqlite.db.SupportSQLiteDatabase;
 
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.data.ListUrlBuilder;
