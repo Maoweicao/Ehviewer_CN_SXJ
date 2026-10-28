@@ -16,7 +16,6 @@
 
 package com.hippo.ehviewer.transfer.api;
 
-import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
@@ -24,6 +23,9 @@ import fi.iki.elonen.NanoHTTPD;
 
 /**
  * HTTP响应构建工具
+ *
+ * <p>JSON 响应统一走 {@link SafeResponse}：它会在写出阶段兜住 OOM/异常，
+ * 并在低内存时退回极小 503，避免因写响应把进程带崩。
  */
 public class ResponseBuilder {
     
@@ -35,19 +37,18 @@ public class ResponseBuilder {
      * 创建JSON成功响应
      */
     public static NanoHTTPD.Response jsonSuccess(String json) {
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.OK, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.OK, json);
     }
     
     /**
      * 创建JSON成功响应（带自定义状态码）
      */
     public static NanoHTTPD.Response jsonSuccess(NanoHTTPD.Response.Status status, String json) {
-        return NanoHTTPD.newFixedLengthResponse(status, MIME_JSON, json);
+        return SafeResponse.json(status, json);
     }
 
     public static NanoHTTPD.Response accepted(String json) {
-        return NanoHTTPD.newFixedLengthResponse(NanoHTTPD.Response.Status.ACCEPTED, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.ACCEPTED, json);
     }
     
     /**
@@ -55,7 +56,7 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response jsonError(NanoHTTPD.Response.Status status, String message) {
         String json = "{\"success\":false,\"error\":\"" + escapeJson(message) + "\"}";
-        return NanoHTTPD.newFixedLengthResponse(status, MIME_JSON, json);
+        return SafeResponse.json(status, json);
     }
     
     /**
@@ -65,7 +66,7 @@ public class ResponseBuilder {
                                                 String message, int errorCode) {
         String json = "{\"success\":false,\"error\":\"" + escapeJson(message) + 
                      "\",\"code\":" + errorCode + "}";
-        return NanoHTTPD.newFixedLengthResponse(status, MIME_JSON, json);
+        return SafeResponse.json(status, json);
     }
     
     /**
@@ -73,8 +74,7 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response unauthorized() {
         String json = "{\"success\":false,\"error\":\"Unauthorized\",\"code\":401}";
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.UNAUTHORIZED, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.UNAUTHORIZED, json);
     }
     
     /**
@@ -82,8 +82,7 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response forbidden(String message) {
         String json = "{\"success\":false,\"error\":\"" + escapeJson(message) + "\",\"code\":403}";
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.FORBIDDEN, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.FORBIDDEN, json);
     }
     
     /**
@@ -91,8 +90,7 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response notFound(String resource) {
         String json = "{\"success\":false,\"error\":\"" + escapeJson(resource) + " not found\",\"code\":404}";
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.NOT_FOUND, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.NOT_FOUND, json);
     }
     
     /**
@@ -100,8 +98,7 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response methodNotAllowed() {
         String json = "{\"success\":false,\"error\":\"Method not allowed\",\"code\":405}";
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.METHOD_NOT_ALLOWED, json);
     }
     
     /**
@@ -109,8 +106,14 @@ public class ResponseBuilder {
      */
     public static NanoHTTPD.Response internalError(String message) {
         String json = "{\"success\":false,\"error\":\"" + escapeJson(message) + "\",\"code\":500}";
-        return NanoHTTPD.newFixedLengthResponse(
-            NanoHTTPD.Response.Status.INTERNAL_ERROR, MIME_JSON, json);
+        return SafeResponse.json(NanoHTTPD.Response.Status.INTERNAL_ERROR, json);
+    }
+
+    /**
+     * 创建503服务不可用响应（内存不足/过载）
+     */
+    public static NanoHTTPD.Response serviceUnavailable() {
+        return SafeResponse.serviceUnavailable();
     }
     
     /**

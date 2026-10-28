@@ -288,6 +288,54 @@ export interface LoginResponse {
   mode: string;
 }
 
+// ===== v3.2.0 §5.25 在线画廊 =====
+export interface OnlineListResponse {
+  source: string;
+  keyword: string;
+  mode: string;
+  page: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  galleries: Gallery[];
+}
+
+export interface OnlinePageItem {
+  page: number;
+  state: string;
+  pToken: string;
+  pageUrl: string;
+}
+
+export interface OnlinePagesResponse {
+  gid: number;
+  token: string;
+  pages: number;
+  pageList: OnlinePageItem[];
+}
+
+// ===== v3.2.0 §5.26 收藏管理 =====
+export interface FavoriteMutationResponse {
+  success: boolean;
+  gid: number;
+  isFavorited: boolean;
+  remote?: boolean;
+  message?: string;
+}
+
+// ===== v3.2.0 §5.27 E-Hentai 账号 =====
+export interface EhAuthStatus {
+  signedIn: boolean;
+  site: string;
+  username: string;
+}
+
+// ===== v3.2.0 §5.28 实时变更 =====
+export interface DataVersion {
+  version: number;
+  since: number;
+  changed?: boolean;
+}
+
 export interface SystemInfo {
   deviceName: string;
   deviceManufacturer: string;
@@ -829,7 +877,8 @@ class EhViewerAPI {
 
   async queryGalleries(query: Record<string, unknown> = {}): Promise<GalleryListResponse> {
     return this.request<GalleryListResponse>('/api/v1/galleries', {
-      method: 'QUERY',
+      method: 'POST',
+      headers: { 'X-HTTP-Method-Override': 'QUERY' },
       body: JSON.stringify(query),
     });
   }
@@ -846,7 +895,8 @@ class EhViewerAPI {
 
   async queryFavorites(query: Record<string, unknown> = {}): Promise<GalleryListResponse> {
     return this.request<GalleryListResponse>('/api/v1/favorites', {
-      method: 'QUERY',
+      method: 'POST',
+      headers: { 'X-HTTP-Method-Override': 'QUERY' },
       body: JSON.stringify(query),
     });
   }
@@ -1227,6 +1277,132 @@ class EhViewerAPI {
 
   isAuthenticated(): boolean {
     return !!this.token;
+  }
+
+  // ==================== Online (§5.25) ====================
+
+  async onlineSearch(params: {
+    keyword?: string
+    page?: number
+    mode?: string
+    category?: number
+    searchName?: boolean
+    searchTags?: boolean
+    searchDesc?: boolean
+    thumb?: boolean
+  } = {}): Promise<OnlineListResponse> {
+    return this.request<OnlineListResponse>('/api/v1/online/search', {
+      method: 'POST',
+      headers: { 'X-HTTP-Method-Override': 'QUERY' },
+      body: JSON.stringify(params),
+    }, 60000)
+  }
+
+  async onlineGalleryDetail(gid: number, token: string): Promise<GalleryDetail> {
+    return this.request<GalleryDetail>(
+      `/api/v1/online/galleries/${gid}?token=${encodeURIComponent(token)}`,
+      {},
+      60000,
+    )
+  }
+
+  async onlinePages(gid: number, token: string): Promise<OnlinePagesResponse> {
+    return this.request<OnlinePagesResponse>(
+      `/api/v1/online/galleries/${gid}/pages?token=${encodeURIComponent(token)}`,
+      {},
+      60000,
+    )
+  }
+
+  /**
+   * 在线取图 URL。画廊 token 走 `gToken`，会话 token 走 `token`，
+   * 避免 <img> 无法带头时两者冲突。
+   */
+  getOnlinePageUrl(gid: number, page: number, galleryToken: string, mode = 'proxy'): string {
+    const params = new URLSearchParams()
+    params.set('gToken', galleryToken)
+    params.set('mode', mode)
+    if (this.token) params.set('token', this.token)
+    return `${this.baseUrl}/api/v1/online/galleries/${gid}/pages/${page}?${params.toString()}`
+  }
+
+  // ==================== Favorites write (§5.26) ====================
+
+  async addFavorite(
+    info: {
+      gid: number
+      token?: string
+      title?: string
+      titleJpn?: string
+      category?: number
+      posted?: string
+      uploader?: string
+      rating?: number
+      pages?: number
+      thumb?: string
+    },
+    remote = false,
+    favCat = 0,
+    favNote = '',
+  ): Promise<FavoriteMutationResponse> {
+    return this.request<FavoriteMutationResponse>('/api/v1/favorites', {
+      method: 'POST',
+      body: JSON.stringify({ ...info, remote, favCat, favNote }),
+    })
+  }
+
+  async removeFavorite(gid: number): Promise<FavoriteMutationResponse> {
+    return this.request<FavoriteMutationResponse>(`/api/v1/favorites/${gid}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async addRemoteFavorite(gid: number, token: string, favCat = 0, favNote = ''): Promise<{ success: boolean }> {
+    return this.request('/api/v1/favorites/remote', {
+      method: 'POST',
+      body: JSON.stringify({ gid, token, favCat, favNote }),
+    })
+  }
+
+  // ==================== E-Hentai account (§5.27) ====================
+
+  async ehAuthStatus(): Promise<EhAuthStatus> {
+    return this.request<EhAuthStatus>('/api/v1/eh/auth/status')
+  }
+
+  async ehSignin(username: string, password: string): Promise<{ success: boolean; username: string; signedIn: boolean }> {
+    return this.request('/api/v1/eh/auth/signin', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }, 60000)
+  }
+
+  async ehCookieImport(ipbMemberId: string, ipbPassHash: string, igneous = ''): Promise<{ success: boolean; signedIn: boolean }> {
+    return this.request('/api/v1/eh/auth/cookie', {
+      method: 'POST',
+      body: JSON.stringify({
+        ipb_member_id: ipbMemberId,
+        ipb_pass_hash: ipbPassHash,
+        igneous,
+      }),
+    })
+  }
+
+  async ehSignout(): Promise<{ success: boolean; message: string }> {
+    return this.request('/api/v1/eh/auth/signout', { method: 'POST' })
+  }
+
+  // ==================== Realtime changes (§5.28) ====================
+
+  async getDataVersion(since = 0): Promise<DataVersion> {
+    return this.request<DataVersion>(`/api/v1/system/version?since=${since}`)
+  }
+
+  /** 事件流 URL（SSE），供 EventSource 使用 */
+  getEventsUrl(): string {
+    let url = `${this.baseUrl}/api/v1/events`
+    if (this.token) url += `?token=${encodeURIComponent(this.token)}`
+    return url
   }
 
   setToken(token: string): void {

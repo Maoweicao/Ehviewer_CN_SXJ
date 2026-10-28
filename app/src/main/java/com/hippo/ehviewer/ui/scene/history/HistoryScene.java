@@ -95,7 +95,7 @@ public class HistoryScene extends ToolbarScene
     @Nullable
     private RecyclerView.Adapter<?> mAdapter;
     @Nullable
-    private LazyList<HistoryInfo> mLazyList;
+    private List<HistoryInfo> mLazyList;
 
     @Override
     public int getNavCheckedItem() {
@@ -174,7 +174,6 @@ public class HistoryScene extends ToolbarScene
         super.onDestroyView();
 
         if (null != mLazyList) {
-            mLazyList.close();
             mLazyList = null;
             if (mAdapter != null) {
                 mAdapter.notifyDataSetChanged();
@@ -191,11 +190,25 @@ public class HistoryScene extends ToolbarScene
 
     // Remember to notify
     private void updateLazyList() {
-        LazyList<HistoryInfo> lazyList = EhDB.getHistoryLazyList();
-        if (mLazyList != null) {
-            mLazyList.close();
-        }
-        mLazyList = lazyList;
+        // 历史列表改为一次性后台读取：旧 LazyList 会在滚动时逐行在主线程查库。
+        new Thread(() -> {
+            final List<HistoryInfo> list;
+            try {
+                list = EhDB.getHistoryList();
+            } catch (Throwable t) {
+                return;
+            }
+            com.hippo.lib.yorozuya.SimpleHandler.getInstance().post(() -> {
+                if (!isAdded()) {
+                    return;
+                }
+                mLazyList = list;
+                if (mAdapter != null) {
+                    mAdapter.notifyDataSetChanged();
+                }
+                updateView(false);
+            });
+        }, "HistoryLoad").start();
     }
 
     private void updateView(boolean animation) {
@@ -230,10 +243,21 @@ public class HistoryScene extends ToolbarScene
                             return;
                         }
 
-                        EhDB.clearHistoryInfo();
-                        updateLazyList();
-                        mAdapter.notifyDataSetChanged();
-                        updateView(true);
+                        try {
+                            // 表格级删除放到后台，完成后再刷新列表，避免主线程做整表事务
+                            EhDB.clearHistoryInfoAsync(() -> {
+                                if (mAdapter == null) {
+                                    return;
+                                }
+                                // 内存列表直接清空，无需再等一次异步整表读取
+                                if (mLazyList != null) {
+                                    mLazyList.clear();
+                                }
+                                mAdapter.notifyDataSetChanged();
+                                updateView(true);
+                            });
+                        } catch (Throwable ignored) {
+                        }
                     }
                 }).show();
     }
@@ -464,8 +488,11 @@ public class HistoryScene extends ToolbarScene
 
             HistoryInfo info = mLazyList.get(mPosition);
             EhDB.deleteHistoryInfo(info);
-            updateLazyList();
-            mAdapter.notifyDataSetChanged();
+            // 内存列表直接移除，避免再走一次整表重读
+            if (mPosition >= 0 && mPosition < mLazyList.size()) {
+                mLazyList.remove(mPosition);
+            }
+            mAdapter.notifyItemRemoved(mPosition);
             updateView(true);
         }
     }

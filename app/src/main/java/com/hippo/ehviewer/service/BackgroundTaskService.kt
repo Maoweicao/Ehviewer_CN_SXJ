@@ -355,6 +355,14 @@ class BackgroundTaskService : Service() {
     // ==================== Notification ====================
 
     private fun buildNotification(activeCount: Int, taskName: String?): android.app.Notification {
+        // 统一通知来源：与 BackgroundTaskManager 的进度刷新共用同一份构建逻辑，
+        // 否则 startForeground 会用这份"无进度"通知覆盖掉刚刷新出来的进度。
+        try {
+            return BackgroundTaskManager.getInstance().buildActiveTaskNotification()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Falling back to minimal notification", e)
+        }
+
         val title = if (activeCount > 1) {
             resources.getQuantityString(R.plurals.background_tasks_running, activeCount, activeCount)
         } else {

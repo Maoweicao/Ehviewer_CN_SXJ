@@ -1,22 +1,40 @@
+/*
+ * Copyright 2025 EhViewer Contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package com.hippo.ehviewer.sync;
 
 import android.util.Log;
 
-import com.hippo.ehviewer.EhDB;
-import com.hippo.ehviewer.client.data.GalleryDetail;
 import com.hippo.ehviewer.client.data.GalleryInfo;
-import com.hippo.ehviewer.client.data.GalleryTagGroup;
-import com.hippo.ehviewer.dao.GalleryTags;
+import com.hippo.util.IoThreadPoolExecutor;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
+/**
+ * 把列表页解析出来的标签写进 {@code Gallery_Tags}。
+ *
+ * <p>历史上这个方法体是被整段注释掉的（2022 年引入时就是死代码），所以列表页的标签
+ * 从来没入库，只有打开画廊详情页才会写 —— 结果「排除标签 / 标签搜索 / 无标签筛选 /
+ * 标签联想」只能看到极少数条目。现在改为直接委托 {@link GalleryTagsWriter}：
+ * 列表页每解析一次就顺手补齐标签，浏览过（或从列表下载）的画廊都能被标签规则命中。
+ */
 public class GalleryListTagsSyncTask {
-    ExecutorService service = Executors.newSingleThreadExecutor();
 
-    private final String TAG = "GalleryListTagsSyncTask";
+    private static final String TAG = "GalleryListTagsSyncTask";
+
     final List<GalleryInfo> galleryInfoList;
 
     public GalleryListTagsSyncTask(List<GalleryInfo> galleryInfoList) {
@@ -24,99 +42,28 @@ public class GalleryListTagsSyncTask {
     }
 
     public void execute() {
-        service.execute(this::executeFunction);
-
+        IoThreadPoolExecutor.Companion.getInstance().execute(this::executeFunction);
     }
 
     private void executeFunction() {
-//        for (GalleryInfo info : galleryInfoList) {
-//            GalleryTags galleryTags = getTags(info);
-//            if (galleryTags != null) {
-//                try {
-//                    if (!EhDB.inGalleryTags(info.gid)) {
-//                        EhDB.insertGalleryTags(galleryTags);
-//                    }
-//                } catch (Exception e) {
-//                    Log.e(TAG, e.toString());
-//                }
-//            }
-//
-//        }
-    }
-
-    private GalleryTags getTags(GalleryInfo info) {
-
-        GalleryTags tags = new GalleryTags(info.gid);
-
-        ArrayList<String> groups = info.tgList;
-        if (groups == null || groups.isEmpty()) {
-            return null;
-        }
-        for (String tag : groups) {
-            parserData(tags, tag);
-        }
-
-        return tags;
-    }
-
-    private void parserData(GalleryTags tags, String tag) {
-        String[] tagArr = tag.split(":");
-        if (tagArr.length < 2) {
+        if (galleryInfoList == null || galleryInfoList.isEmpty()) {
             return;
         }
-        switch (tagArr[0]) {
-            case "rows":
-                tags.rows = getTagString(tags.rows, tagArr[1]);
-                break;
-            case "artist":
-                tags.artist = getTagString(tags.artist, tagArr[1]);
-                break;
-            case "cosplayer":
-                tags.cosplayer = getTagString(tags.cosplayer, tagArr[1]);
-                break;
-            case "character":
-                tags.character = getTagString(tags.character, tagArr[1]);
-                break;
-            case "female":
-                tags.female = getTagString(tags.female, tagArr[1]);
-                break;
-            case "group":
-                tags.group = getTagString(tags.group, tagArr[1]);
-                break;
-            case "language":
-                tags.language = getTagString(tags.language, tagArr[1]);
-                break;
-            case "male":
-                tags.male = getTagString(tags.male, tagArr[1]);
-                break;
-            case "misc":
-                tags.misc = getTagString(tags.misc, tagArr[1]);
-                break;
-            case "mixed":
-                tags.mixed = getTagString(tags.mixed, tagArr[1]);
-                break;
-            case "other":
-                tags.other = getTagString(tags.other, tagArr[1]);
-                break;
-            case "parody":
-                tags.parody = getTagString(tags.parody, tagArr[1]);
-                break;
-            case "reclass":
-                tags.reclass = getTagString(tags.reclass, tagArr[1]);
-                break;
-            case "location":
-                tags.location = getTagString(tags.location, tagArr[1]);
-                break;
-            default:
+        int saved = 0;
+        for (GalleryInfo info : galleryInfoList) {
+            if (info == null) {
+                continue;
+            }
+            try {
+                if (GalleryTagsWriter.saveFromGalleryInfo(info)) {
+                    saved++;
+                }
+            } catch (Throwable e) {
+                Log.e(TAG, "保存标签失败 gid=" + info.gid, e);
+            }
+        }
+        if (saved > 0) {
+            Log.d(TAG, "列表页标签入库: " + saved + "/" + galleryInfoList.size());
         }
     }
-
-    private String getTagString(String tagContent, String newTag) {
-        if (tagContent == null || tagContent.isEmpty()) {
-            return newTag;
-        }
-
-        return tagContent + "," + newTag;
-    }
-
 }

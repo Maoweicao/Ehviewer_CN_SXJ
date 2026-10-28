@@ -193,20 +193,20 @@ public class SubscriptionDraw {
 
         final EditTextDialogBuilder builder = new EditTextDialogBuilder(context,
                 tagName, context.getString(R.string.tag_title));
+        // 标签智能提示：本地已下载画廊标签优先，词库补全
+        builder.enableTagSuggestions();
         builder.setTitle(R.string.add_tag_dialog_title);
-        builder.setPositiveButton(R.string.subscription_watched, this::onDialogPositiveButtonClick);
-        builder.setNegativeButton(R.string.subscription_hidden, this::onDialogNegativeButtonClick);
+        final EditTextDialogBuilder finalBuilder = builder;
+        builder.setPositiveButton(R.string.subscription_watched, (dialog, which) -> {
+            dialog.dismiss();
+            // 用用户实际输入（可能通过建议改过）而不是预填值
+            requestTag(finalBuilder.getText().trim(), true);
+        });
+        builder.setNegativeButton(R.string.subscription_hidden, (dialog, which) -> {
+            dialog.dismiss();
+            requestTag(finalBuilder.getText().trim(), false);
+        });
         builder.show();
-    }
-
-    private void onDialogNegativeButtonClick(DialogInterface dialog, int which) {
-        dialog.dismiss();
-        requestTag(tagName, false);
-    }
-
-    private void onDialogPositiveButtonClick(DialogInterface dialog, int which) {
-        dialog.dismiss();
-        requestTag(tagName, true);
     }
 
     private void loadData() throws EhException {

@@ -27,6 +27,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.index.GalleryIndexStore;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
@@ -475,6 +476,9 @@ public class DataApiHandler extends BaseApiHandler {
             ResponseCache.getInstance().invalidateByPrefix("export_");
             ResponseCache.getInstance().invalidateGalleries();
 
+            // 批量导入会同时改变大量桶：换 epoch 让客户端整体重同步（协议 §5.29.7）
+            rotateIndexEpochIfBulk(imported);
+
             TransferLogger.getInstance().d(TAG, "Import bookmarks: imported=" + imported + ", skipped=" + skipped);
             return ResponseBuilder.jsonSuccess(result.toJSONString());
 
@@ -556,6 +560,8 @@ public class DataApiHandler extends BaseApiHandler {
             ResponseCache.getInstance().invalidateByPrefix("export_");
             ResponseCache.getInstance().invalidateGalleries();
 
+            rotateIndexEpochIfBulk(imported);
+
             TransferLogger.getInstance().d(TAG, "Import downloads: imported=" + imported + ", skipped=" + skipped);
             return ResponseBuilder.jsonSuccess(result.toJSONString());
 
@@ -590,6 +596,9 @@ public class DataApiHandler extends BaseApiHandler {
             if (error != null) {
                 return ResponseBuilder.internalError("Import failed: " + error);
             }
+
+            // 整库替换：必须更换索引 epoch（协议 §5.29.7）
+            GalleryIndexStore.get(context).rotateEpoch();
 
             JSONObject result = new JSONObject();
             result.put("success", true);
@@ -681,6 +690,8 @@ public class DataApiHandler extends BaseApiHandler {
             result.put("skipped", skipped);
             result.put("failed", failed);
 
+            rotateIndexEpochIfBulk(imported);
+
             TransferLogger.getInstance().d(TAG, "Import CSV: imported=" + imported + ", skipped=" + skipped);
             return ResponseBuilder.jsonSuccess(result.toJSONString());
 
@@ -691,6 +702,15 @@ public class DataApiHandler extends BaseApiHandler {
     }
 
     // ==================== Utility Methods ====================
+
+    /** 单次导入超过该条数时视为批量导入，直接更换索引 epoch。 */
+    private static final int BULK_IMPORT_EPOCH_THRESHOLD = 200;
+
+    private void rotateIndexEpochIfBulk(int imported) {
+        if (imported >= BULK_IMPORT_EPOCH_THRESHOLD) {
+            GalleryIndexStore.get(context).rotateEpoch();
+        }
+    }
 
     private String getCategoryName(int category) {
         String[] names = {"Misc", "Doujinshi", "Manga", "Artist CG", "Game CG",

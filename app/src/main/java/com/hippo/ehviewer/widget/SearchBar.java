@@ -61,6 +61,7 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.android.resource.AttrResources;
 import com.hippo.ehviewer.client.EhTagDatabase;
+import com.hippo.ehviewer.client.tag.TagSuggestRepository;
 import com.hippo.ehviewer.util.SearchDebugLog;
 import com.hippo.view.ViewTransition;
 import com.hippo.lib.yorozuya.AnimationUtils;
@@ -169,6 +170,8 @@ public class SearchBar extends CardView implements View.OnClickListener,
     private void init(Context context) {
         showTranslation = Settings.getShowTagTranslations();
         mSearchDatabase = SearchDatabase.getInstance(getContext());
+        // 提前建本地标签索引，首次敲字时才扫库会卡住建议
+        TagSuggestRepository.warmUpAsync();
 
         LayoutInflater inflater = LayoutInflater.from(context);
         inflater.inflate(R.layout.widget_search_bar, this);
@@ -275,7 +278,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
         }
 
         EhTagDatabase ehTagDatabase = EhTagDatabase.getInstance(getContext());
-        if (!TextUtils.isEmpty(text) && ehTagDatabase != null) {
+        if (!TextUtils.isEmpty(text)) {
             String[] s = text.split(" ");
             if (s.length > 0) {
                 // String keyword = s[s.length - 1];
@@ -294,18 +297,36 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
                 if(!keyword.isEmpty()) 
                 {
-                    List<Pair<String, String>> searchHints = ehTagDatabase.suggest(keyword);
-                    SearchDebugLog.d("SearchBar", "last-token suggest('" + keyword + "') -> " + searchHints.size()
-                            + " (full query: '" + text + "')");
-
-                    for (Pair<String, String> searchHint : searchHints) {
-                        if (isTagAlreadyAdded(searchHint.second)) {
+                    // 1) 本地已下载画廊标签优先（带出现次数，方便快速排除/搜索我自己的语料）
+                    List<TagSuggestRepository.TagSuggestion> localHints =
+                            TagSuggestRepository.suggest(keyword,
+                                    TagSuggestRepository.SuggestScope.TAG, 12);
+                    for (TagSuggestRepository.TagSuggestion localHint : localHints) {
+                        if (isTagAlreadyAdded(localHint.getTag())) {
                             continue;
                         }
-                        if (showTranslation) {
-                            mSuggestionList.add(new TagSuggestion(searchHint.first, searchHint.second));
-                        } else {
-                            mSuggestionList.add(new TagSuggestion(null, searchHint.second));
+                        mSuggestionList.add(new TagSuggestion(
+                                showTranslation ? localHint.getTranslation() : null,
+                                localHint.getTag(), localHint.getLocalCount()));
+                    }
+
+                    // 2) 词库补全（本地没有的）
+                    if (ehTagDatabase != null) {
+                        List<Pair<String, String>> searchHints = ehTagDatabase.suggest(keyword);
+                        SearchDebugLog.d("SearchBar", "last-token suggest('" + keyword + "') -> " + searchHints.size()
+                                + " (full query: '" + text + "')");
+
+                        for (Pair<String, String> searchHint : searchHints) {
+                            if (isTagAlreadyAdded(searchHint.second)) {
+                                continue;
+                            }
+                            if (showTranslation) {
+                                mSuggestionList.add(new TagSuggestion(searchHint.first, searchHint.second,
+                                        TagSuggestRepository.localCountOf(searchHint.second)));
+                            } else {
+                                mSuggestionList.add(new TagSuggestion(null, searchHint.second,
+                                        TagSuggestRepository.localCountOf(searchHint.second)));
+                            }
                         }
                     }
                 }
@@ -1630,10 +1651,17 @@ public class SearchBar extends CardView implements View.OnClickListener,
 
     private class TagSuggestion extends Suggestion {
         public String show, mKeyword;
+        /** 该 tag 在本地已下载画廊里出现过多少次；0 = 本地没有。 */
+        public final int localCount;
 
         public TagSuggestion(String show, String mKeyword) {
+            this(show, mKeyword, 0);
+        }
+
+        public TagSuggestion(String show, String mKeyword, int localCount) {
             this.show = show;
             this.mKeyword = mKeyword;
+            this.localCount = localCount;
         }
 
         @Override
@@ -1644,7 +1672,7 @@ public class SearchBar extends CardView implements View.OnClickListener,
         @Override
         public CharSequence getText(TextView textView) {
             if (textView.getId() == R.id.hintView) {
-                return mKeyword;
+                return localCount > 0 ? mKeyword + "   ×" + localCount : mKeyword;
             }
             return show;
         }

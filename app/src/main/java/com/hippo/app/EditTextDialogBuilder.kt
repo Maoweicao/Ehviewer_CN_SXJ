@@ -26,6 +26,8 @@ import android.widget.TextView.OnEditorActionListener
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.textfield.TextInputLayout
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.client.tag.TagSuggestRepository
+import com.hippo.ehviewer.widget.TagInputView
 
 class EditTextDialogBuilder @SuppressLint("InflateParams") constructor(
     context: Context?,
@@ -47,6 +49,25 @@ class EditTextDialogBuilder @SuppressLint("InflateParams") constructor(
         editText.setSelection(editText.text.length)
         editText.setOnEditorActionListener(this)
         mTextInputLayout.hint = hint
+        // 这个 builder 是通用的（快搜名、页码跳转等都会用），默认不给标签建议
+        (editText as? TagInputView)?.setSuggestEnabled(false)
+    }
+
+    /**
+     * 启用标签智能提示（订阅标签、屏蔽过滤器等真正输入标签的场景）。
+     *
+     * 建议来源是 [TagSuggestRepository]：本地已下载画廊标签优先，词库补全。
+     */
+    @JvmOverloads
+    fun enableTagSuggestions(
+        scope: TagSuggestRepository.SuggestScope = TagSuggestRepository.SuggestScope.TAG
+    ): EditTextDialogBuilder {
+        (editText as? TagInputView)?.let {
+            it.setSuggestScope(scope)
+            it.setSuggestEnabled(true)
+        }
+        TagSuggestRepository.warmUpAsync()
+        return this
     }
 
     val text: String

@@ -1922,30 +1922,34 @@ public class GalleryActivity extends EhActivity implements SeekBar.OnSeekBarChan
         super.onActivityResult(requestCode, resultCode, resultData);
         if (requestCode == WRITE_REQUEST_CODE && resultCode == Activity.RESULT_OK) {
             if (resultData != null) {
-                Uri uri = resultData.getData();
-                String filepath = getCacheDir() + "/" + mCacheFileName;
-                File cacheFile = new File(filepath);
-
-                InputStream is = null;
-                OutputStream os = null;
-                ContentResolver resolver = getContentResolver();
-
-                try {
-                    is = new FileInputStream(cacheFile);
-                    os = resolver.openOutputStream(uri);
-                    IOUtils.copy(is, os);
-                } catch (IOException e) {
-                    e.printStackTrace();
-                } finally {
-                    IOUtils.closeQuietly(is);
-                    IOUtils.closeQuietly(os);
-                }
-
-                cacheFile.delete();
-
-                Toast.makeText(this, getString(R.string.image_saved, uri.getPath()), Toast.LENGTH_SHORT).show();
-                // Sync media store
-                sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri));
+                final Uri uri = resultData.getData();
+                final String filepath = getCacheDir() + "/" + mCacheFileName;
+                final File cacheFile = new File(filepath);
+                // 多 MB 的文件拷贝放到后台，避免保存大图时阻塞主线程
+                new Thread(() -> {
+                    InputStream is = null;
+                    OutputStream os = null;
+                    ContentResolver resolver = getContentResolver();
+                    try {
+                        is = new FileInputStream(cacheFile);
+                        os = resolver.openOutputStream(uri);
+                        IOUtils.copy(is, os);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    } finally {
+                        IOUtils.closeQuietly(is);
+                        IOUtils.closeQuietly(os);
+                    }
+                    cacheFile.delete();
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
+                        Toast.makeText(this, getString(R.string.image_saved, uri.getPath()), Toast.LENGTH_SHORT).show();
+                        // Sync media store
+                        sendBroadcast(new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE, uri));
+                    });
+                }, "SaveImageCopy").start();
             }
         }
     }

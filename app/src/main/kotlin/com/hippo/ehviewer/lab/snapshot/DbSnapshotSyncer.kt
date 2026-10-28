@@ -27,6 +27,7 @@ import com.hippo.ehviewer.lab.LabManager
 import com.hippo.ehviewer.lab.TrustedPeer
 import com.hippo.ehviewer.lab.TrustedPeerStore
 import com.hippo.ehviewer.lab.log.SnapshotLogger
+import com.hippo.ehviewer.transfer.core.DataChangeBus
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -144,6 +145,10 @@ class DbSnapshotSyncer private constructor(context: Context) {
                 if (resp != null) {
                     val applied = cache.applyResponse(resp)
                     success++
+                    // §5.28 跨设备数据变化：广播给进程内 UI（收藏/下载页自动刷新）
+                    if (applied > 0) {
+                        DataChangeBus.publish(DataChangeBus.TYPE_DATA_CHANGED, 0L, null, null)
+                    }
                     mainHandler.post {
                         for (l in listeners) l.onSnapshotSynced(p, applied, resp.version)
                     }

@@ -57,6 +57,7 @@ import com.hippo.ehviewer.gallery.A7ZipArchive;
 import com.hippo.ehviewer.gallery.Pipe;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.util.ReadableTime;
+import com.hippo.ehviewer.download.progressive.ProgressiveStats;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
 import com.hippo.ehviewer.ui.scene.download.DownloadsScene;
 import com.hippo.ehviewer.ui.scene.gallery.detail.GalleryDetailScene;
@@ -150,6 +151,8 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
     public DownloadAdapter(DownloadsScene scene, DownloadAdapterCallback callback) {
         DRAG_ENABLE = Settings.getDragDownloadGallery();
+        // 提前建递进关系索引，列表滚动时才不会卡
+        ProgressiveStats.warmUpAsync();
         this.mScene = scene;
         this.mCallback = callback;
         
@@ -623,6 +626,19 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
 
         holder.folderTime.setVisibility(showFolderTime ? View.VISIBLE : View.GONE);
         holder.folderSize.setVisibility(showFolderSize ? View.VISIBLE : View.GONE);
+
+        // 递进传递次数：开关关着、或这个画廊没吸收过别的画廊，就不占位。
+        // absorbedCount 对「不是合并目标」的 gid 是 O(1) 空查，列表滚动开销可忽略。
+        int absorbed = Settings.getShowProgressiveCount()
+                ? ProgressiveStats.absorbedCount(info.gid)
+                : 0;
+        if (absorbed > 0) {
+            holder.progressiveCount.setText(
+                    mScene.getString(R.string.progressive_count_badge, absorbed));
+            holder.progressiveCount.setVisibility(View.VISIBLE);
+        } else {
+            holder.progressiveCount.setVisibility(View.GONE);
+        }
     }
 
     /**
@@ -1024,6 +1040,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         public final TextView speed;
         public final TextView folderTime;
         public final TextView folderSize;
+        public final TextView progressiveCount;
         public final TextView queuePosition;
 
         public DownloadHolder(View itemView) {
@@ -1044,6 +1061,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
             speed = itemView.findViewById(R.id.speed);
             folderTime = itemView.findViewById(R.id.folder_time);
             folderSize = itemView.findViewById(R.id.folder_size);
+            progressiveCount = itemView.findViewById(R.id.progressive_count);
             queuePosition = itemView.findViewById(R.id.queue_position);
 
             // 初始设置点击监听器

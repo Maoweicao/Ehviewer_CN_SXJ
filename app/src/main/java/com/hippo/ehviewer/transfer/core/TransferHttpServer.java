@@ -20,13 +20,18 @@ import android.content.Context;
 
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.transfer.api.AuthApiHandler;
+import com.hippo.ehviewer.transfer.api.AuxDownloadApiHandler;
 import com.hippo.ehviewer.transfer.api.CompressApiHandler;
 import com.hippo.ehviewer.transfer.api.ConnectApiHandler;
 import com.hippo.ehviewer.transfer.api.DataApiHandler;
 import com.hippo.ehviewer.transfer.api.DownloadApiHandler;
+import com.hippo.ehviewer.transfer.api.EhAuthApiHandler;
+import com.hippo.ehviewer.transfer.api.EventsApiHandler;
 import com.hippo.ehviewer.transfer.api.FileApiHandler;
 import com.hippo.ehviewer.transfer.api.GalleryApiHandler;
+import com.hippo.ehviewer.transfer.api.GalleryIndexApiHandler;
 import com.hippo.ehviewer.transfer.api.LabelApiHandler;
+import com.hippo.ehviewer.transfer.api.OnlineApiHandler;
 import com.hippo.ehviewer.transfer.api.PageApiHandler;
 import com.hippo.ehviewer.transfer.api.PushApiHandler;
 import com.hippo.ehviewer.transfer.api.RelayApiHandler;
@@ -36,14 +41,25 @@ import com.hippo.ehviewer.transfer.api.SystemApiHandler;
 import com.hippo.ehviewer.transfer.api.TasksApiHandler;
 import com.hippo.ehviewer.lab.LabApiHandler;
 import com.hippo.ehviewer.lab.SnapshotApiHandler;
+import com.hippo.ehviewer.lab.sync.LabSyncApiHandler;
+import com.hippo.ehviewer.lab.sync.LabSyncAuth;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import fi.iki.elonen.NanoHTTPD;
 
@@ -100,6 +116,14 @@ import fi.iki.elonen.NanoHTTPD;
  * - GET    /api/v1/lab/db/snapshot          DB 快照（v3.0）
  * - POST   /api/v1/lab/db/snapshot/ack      确认快照版本（v3.0）
  * - GET    /api/v1/lab/db/thumbnail/{gid}   缩略图（v3.0）
+ * - GET    /api/v1/aux-download/tasks        未完成画廊列表（§5.24）
+ * - GET    /api/v1/aux-download/tasks/{gid}  单画廊缺口详情（§5.24）
+ * - POST   /api/v1/aux-download/upload       回传压缩图片（§5.24）
+ * - GET    /api/v1/sync/gallery-index/scopes 列表级索引（§5.29）
+ * - GET    /api/v1/sync/gallery-index        分区位图清单（§5.29）
+ * - GET    /api/v1/sync/gallery-index/buckets/{bucket} 桶内画廊行（§5.29）
+ * - POST   /api/v1/lab/sync/sessions         设备同步会话（§5.30）
+ * - GET    /api/v1/lab/sync/sessions/{id}    设备同步状态（§5.30）
  * - GET    /docs                          Swagger UI 文档页面
  * - GET    /openapi.yaml                  OpenAPI 规范文件
  * - GET    /web/*                         静态资源
@@ -132,6 +156,14 @@ public class TransferHttpServer {
     private RelayApiHandler relayApiHandler;
     private LabApiHandler labApiHandler;
     private SnapshotApiHandler snapshotApiHandler;
+    private LabSyncApiHandler labSyncApiHandler;
+    private AuxDownloadApiHandler auxDownloadApiHandler;
+    // §5.25~§5.28 新增
+    private OnlineApiHandler onlineApiHandler;
+    private EhAuthApiHandler ehAuthApiHandler;
+    private EventsApiHandler eventsApiHandler;
+    // §5.29 画廊索引
+    private GalleryIndexApiHandler galleryIndexApiHandler;
 
     public TransferHttpServer(int port, TransferServerManager serverManager, Context context) {
         this.port = port;
@@ -165,6 +197,17 @@ public class TransferHttpServer {
         // v3.0 实验室 / 多机联动（Lab）API
         this.labApiHandler = new LabApiHandler(context, authManager);
         this.snapshotApiHandler = new SnapshotApiHandler(context, authManager);
+        // §5.30 设备间快速同步会话
+        this.labSyncApiHandler = new LabSyncApiHandler(context, authManager);
+        // §5.24 辅助下载API
+        this.auxDownloadApiHandler = new AuxDownloadApiHandler(context, authManager);
+        // §5.25~§5.28 新增
+        this.onlineApiHandler = new OnlineApiHandler(context, authManager);
+        this.ehAuthApiHandler = new EhAuthApiHandler(context, authManager);
+        this.eventsApiHandler = new EventsApiHandler(context, authManager);
+        // §5.29 画廊索引（同时负责载入持久化版本号）
+        DataChangeBus.init(context);
+        this.galleryIndexApiHandler = new GalleryIndexApiHandler(context, authManager);
     }
 
     /** 启动HTTP服务器 */
@@ -202,8 +245,85 @@ public class TransferHttpServer {
     /** 获取生成的Token（Token模式） */
     public String getGeneratedToken() { return authManager.getGeneratedToken(); }
 
+    /**
+     * 有界异步执行器。
+     *
+     * <p>NanoHTTPD 2.3.1 默认每个请求新建一条线程且无上限，请求风暴（尤其是
+     * 传输列表 + 多下载并发时 Web UI 轮询）会瞬间叠加大量线程与内存。
+     * 这里改为固定线程池 + 有界队列，超出容量直接关闭连接，保护内存与主进程。
+     */
+    private static final class BoundedAsyncRunner implements NanoHTTPD.AsyncRunner {
+
+        private static final int DEFAULT_MAX_THREADS = 8;
+        private static final int DEFAULT_QUEUE_CAPACITY = 32;
+
+        private final ThreadPoolExecutor executor;
+        private final List<NanoHTTPD.ClientHandler> clients =
+                Collections.synchronizedList(new ArrayList<>());
+
+        BoundedAsyncRunner() {
+            this(DEFAULT_MAX_THREADS, DEFAULT_QUEUE_CAPACITY);
+        }
+
+        BoundedAsyncRunner(int maxThreads, int queueCapacity) {
+            int max = Math.max(1, maxThreads);
+            this.executor = new ThreadPoolExecutor(
+                    Math.max(1, max / 2),
+                    max,
+                    30L, TimeUnit.SECONDS,
+                    new ArrayBlockingQueue<>(Math.max(1, queueCapacity)),
+                    new ThreadFactory() {
+                        private final AtomicInteger count = new AtomicInteger(1);
+
+                        @Override
+                        public Thread newThread(Runnable r) {
+                            Thread t = new Thread(r, "TransferHttp-" + count.getAndIncrement());
+                            t.setDaemon(true);
+                            return t;
+                        }
+                    },
+                    new ThreadPoolExecutor.AbortPolicy());
+        }
+
+        @Override
+        public void closeAll() {
+            for (NanoHTTPD.ClientHandler client : clients) {
+                try {
+                    client.close();
+                } catch (Throwable ignored) {
+                }
+            }
+            clients.clear();
+            executor.shutdownNow();
+        }
+
+        @Override
+        public void closed(NanoHTTPD.ClientHandler clientHandler) {
+            clients.remove(clientHandler);
+        }
+
+        @Override
+        public void exec(NanoHTTPD.ClientHandler code) {
+            clients.add(code);
+            try {
+                executor.execute(code);
+            } catch (RejectedExecutionException e) {
+                // 过载：关闭该连接而不是无限堆积
+                TransferLogger.getInstance().w(TAG, "传输请求过载，拒绝新连接");
+                clients.remove(code);
+                try {
+                    code.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
     private class HttpServerImpl extends NanoHTTPD {
-        HttpServerImpl(int port) { super(port); }
+        HttpServerImpl(int port) {
+            super(port);
+            setAsyncRunner(new BoundedAsyncRunner());
+        }
 
         @Override
         public Response serve(IHTTPSession session) {
@@ -241,7 +361,19 @@ public class TransferHttpServer {
                 logger.i(TAG, String.format("[响应] %s %s -> %s (耗时: %d ms)", methodName, uri, statusText, cost));
                 return response;
 
-            } catch (Exception e) {
+            } catch (OutOfMemoryError oom) {
+                // 构建响应阶段堆耗尽：清理缓存并返回极小 503，避免异常上抛带崩进程。
+                TransferLogger.getInstance().e(TAG, "请求处理 OOM: " + uri, oom);
+                try {
+                    com.hippo.ehviewer.EhApplication.clearMemoryCacheSafely();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    com.hippo.ehviewer.transfer.core.ResponseCache.getInstance().clear();
+                } catch (Throwable ignored) {
+                }
+                return ResponseBuilder.serviceUnavailable();
+            } catch (Throwable e) {
                 TransferLogger.getInstance().e(TAG, "请求处理异常: " + uri, e);
                 return ResponseBuilder.internalError(e.getMessage());
             }
@@ -249,7 +381,14 @@ public class TransferHttpServer {
         
         private Response handleRequest(IHTTPSession session, String uri, String method) {
             // 认证检查（白名单端点除外）
-            if (!AuthManager.isWhitelisted(uri) && !authManager.authenticate(session)) {
+            // 辅助下载：开启 trustLan 时局域网请求免认证（§5.24）
+            boolean auxLanBypass = uri.startsWith("/api/v1/aux-download")
+                    && Settings.isAuxDownloadTrustLan()
+                    && AuthManager.isLocalNetwork(session.getRemoteIpAddress());
+            // §5.30 已配对设备使用 presharedKey 做 HMAC 签名，免传输服务 Token
+            boolean peerSyncBypass = LabSyncAuth.isSyncPath(uri)
+                    && LabSyncAuth.verify(context, session);
+            if (!auxLanBypass && !peerSyncBypass && !AuthManager.isWhitelisted(uri) && !authManager.authenticate(session)) {
                 return ResponseBuilder.unauthorized();
             }
             
@@ -325,7 +464,27 @@ public class TransferHttpServer {
             if (uri.startsWith("/api/v1/labels")) {
                 return labelApiHandler.handleGet(session, uri);
             }
-            
+
+            // §5.25 在线画廊API
+            if (uri.startsWith("/api/v1/online")) {
+                return onlineApiHandler.handleGet(session, uri);
+            }
+
+            // §5.27 E-Hentai 账号API
+            if (uri.startsWith("/api/v1/eh/auth")) {
+                return ehAuthApiHandler.handleGet(session, uri);
+            }
+
+            // §5.28 实时变更API
+            if (uri.startsWith("/api/v1/events") || uri.startsWith("/api/v1/system/version")) {
+                return eventsApiHandler.handleGet(session, uri);
+            }
+
+            // §5.29 画廊索引与分区位图API
+            if (uri.startsWith("/api/v1/sync/gallery-index")) {
+                return galleryIndexApiHandler.handleGet(session, uri);
+            }
+
             // 系统API
             if (uri.startsWith("/api/v1/system")) {
                 return systemApiHandler.handleGet(session, uri);
@@ -379,12 +538,20 @@ public class TransferHttpServer {
             }
 
             // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab/sync")) {
+                return labSyncApiHandler.handleGet(session, uri);
+            }
             if (uri.startsWith("/api/v1/lab")) {
                 // /api/v1/lab/db/* 走 SnapshotApiHandler
                 if (uri.startsWith("/api/v1/lab/db")) {
                     return snapshotApiHandler.handleGet(session, uri);
                 }
                 return labApiHandler.handleGet(session, uri);
+            }
+
+            // 辅助下载API（v1 §5.24）
+            if (uri.startsWith("/api/v1/aux-download")) {
+                return auxDownloadApiHandler.handleGet(session, uri);
             }
 
             // 设备信息（保持向后兼容）
@@ -403,9 +570,26 @@ public class TransferHttpServer {
         }
         
         private Response handlePost(IHTTPSession session, String uri) {
+            // QUERY 语义兜底：内嵌 NanoHTTPD 2.3.1 不支持 QUERY 动词（会在解析阶段 400），
+            // 客户端以 POST + X-HTTP-Method-Override: QUERY 承载查询体，这里转给 handleQuery。
+            String methodOverride = session.getHeaders().get("x-http-method-override");
+            if (methodOverride != null && "QUERY".equalsIgnoreCase(methodOverride.trim())) {
+                return handleQuery(session, uri);
+            }
+
             // 认证API
             if (uri.startsWith("/api/v1/auth")) {
                 return authApiHandler.handlePost(session, uri);
+            }
+
+            // §5.27 E-Hentai 账号API
+            if (uri.startsWith("/api/v1/eh/auth")) {
+                return ehAuthApiHandler.handlePost(session, uri);
+            }
+
+            // §5.26 收藏管理API（加入收藏 / 源站收藏）
+            if (uri.startsWith("/api/v1/favorites")) {
+                return galleryApiHandler.handlePost(session, uri);
             }
 
             // 页面API（上传页面图片）—— 必须在画廊API之前匹配，因路径包含 /api/v1/galleries
@@ -449,11 +633,19 @@ public class TransferHttpServer {
             }
 
             // 实验室 / 多机联动（v3.0）API
+            if (uri.startsWith("/api/v1/lab/sync")) {
+                return labSyncApiHandler.handlePost(session, uri);
+            }
             if (uri.startsWith("/api/v1/lab")) {
                 if (uri.startsWith("/api/v1/lab/db")) {
                     return snapshotApiHandler.handlePost(session, uri);
                 }
                 return labApiHandler.handlePost(session, uri);
+            }
+
+            // 辅助下载API（v1 §5.24）
+            if (uri.startsWith("/api/v1/aux-download")) {
+                return auxDownloadApiHandler.handlePost(session, uri);
             }
 
             // 统一任务API（后台任务创建 / 开始 / 暂停 / 恢复 / 停止，传输任务控制）
@@ -481,6 +673,11 @@ public class TransferHttpServer {
         private Response handleDelete(IHTTPSession session, String uri) {
             // 画廊API
             if (uri.startsWith("/api/v1/galleries")) {
+                return galleryApiHandler.handleDelete(session, uri);
+            }
+
+            // §5.26 收藏管理API（取消收藏）
+            if (uri.startsWith("/api/v1/favorites")) {
                 return galleryApiHandler.handleDelete(session, uri);
             }
             
@@ -535,6 +732,11 @@ public class TransferHttpServer {
             // 收藏API
             if (uri.startsWith("/api/v1/favorites")) {
                 return galleryApiHandler.handleQuery(session, uri);
+            }
+
+            // §5.25 在线画廊API
+            if (uri.startsWith("/api/v1/online")) {
+                return onlineApiHandler.handleQuery(session, uri);
             }
 
             return ResponseBuilder.notFound("Endpoint");

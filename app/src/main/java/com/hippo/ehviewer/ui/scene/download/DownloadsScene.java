@@ -45,6 +45,7 @@ import android.util.SparseBooleanArray;
 import android.view.Display;
 import android.view.Gravity;
 import android.view.LayoutInflater;
+import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
@@ -104,9 +105,19 @@ import com.hippo.ehviewer.client.MergedGalleryChecker;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
+import com.hippo.ehviewer.transfer.core.DataChangeBus;
+import com.hippo.ehviewer.download.DeleteProtectHelper;
 import com.hippo.ehviewer.download.DownloadDeleteHelper;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
+import com.hippo.ehviewer.download.filter.ExcludeRule;
+import com.hippo.ehviewer.download.filter.FilterCondition;
+import com.hippo.ehviewer.download.filter.FilterIdMapping;
+import com.hippo.ehviewer.download.filter.FilterSettingsStore;
+import com.hippo.ehviewer.download.filter.KeywordScope;
+import com.hippo.ehviewer.download.filter.QuickFilterDefinition;
+import com.hippo.ehviewer.download.filter.ScopedKeyword;
+import com.hippo.ehviewer.download.filter.TagCoverage;
 import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask;
 import com.hippo.ehviewer.task.ResumeFromHistoryTask;
 import com.hippo.ehviewer.BackgroundTaskManager;
@@ -130,7 +141,10 @@ import com.hippo.ehviewer.transfer.core.RelayTaskManager;
 import com.hippo.ehviewer.transfer.data.ConnectedDevice;
 import com.hippo.ehviewer.util.TagTranslationUtil;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
+import com.hippo.ehviewer.widget.FilterExcludeView;
+import com.hippo.ehviewer.widget.FilterExtraOptionsView;
 import com.hippo.ehviewer.widget.MyEasyRecyclerView;
+import com.hippo.ehviewer.widget.QuickPresetBar;
 import com.hippo.ehviewer.widget.RatingRangeView;
 import com.hippo.ehviewer.widget.SearchBar;
 import com.hippo.lib.yorozuya.AssertUtils;
@@ -204,6 +218,12 @@ public class DownloadsScene extends ToolbarScene
     private static final String KEY_SEARCH_CATEGORY_IDS = "search_category_ids";
     private static final String KEY_SEARCH_SORT_ID = "search_sort_id";
     private static final String KEY_RESUME_HISTORY_CHECKED = "resume_history_checked";
+    /** 新增筛选条件（排除规则 / 发布时间区间 / 低分 / 未收藏…），整体序列化为 JSON 保存。 */
+    private static final String KEY_FILTER_EXTRA_JSON = "filter_extra_json";
+    /** 最近一次执行的快捷筛选 id（配置里的稳定 id，不是菜单 R.id）。 */
+    private static final String KEY_LAST_QUICK_FILTER_ID = "last_quick_filter_id";
+    /** 当前应用的快速设置预设 id，用于面板高亮。 */
+    private static final String KEY_APPLIED_PRESET_ID = "applied_preset_id";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
@@ -312,6 +332,26 @@ public class DownloadsScene extends ToolbarScene
     private boolean mFilterDuplicateOnly = false;
     private float mFilterRatingFrom = 0f;
     private float mFilterRatingTo = 5f;
+    /**
+     * 新增的筛选条件：排除规则、发布时间区间、低分判定、未收藏、每页体积下限等。
+     * 与上面的老字段合并成一份完整的 {@link FilterCondition} 后交给执行器。
+     */
+    @NonNull
+    private FilterCondition mFilterExtra = FilterCondition.EMPTY;
+    @Nullable
+    private String mLastQuickFilterId;
+    @Nullable
+    private String mAppliedPresetId;
+    /** 动态生成的快捷筛选菜单项 id -> 配置里的快捷筛选 id。 */
+    private final java.util.Map<Integer, String> mQuickFilterMenuIds = new HashMap<>();
+
+    /** 标签覆盖率统计的请求序号，用于丢弃过期的后台结果。 */
+    private int mTagCoverageRequestId;
+
+    /** 筛选配置变化时重建菜单（含快捷筛选子菜单）。 */
+    private final FilterSettingsStore.Listener mFilterConfigListener =
+            (oldConfig, newConfig) -> reloadMenu();
+
     private boolean mPendingRestoreFilter = false;
 
     /*---------------
@@ -434,6 +474,22 @@ public class DownloadsScene extends ToolbarScene
         handleArguments(args);
     }
 
+    /**
+     * §5.28 数据变更监听：Web 端导入/批量等变更后刷新下载页。
+     * （下载增删改本身由 DownloadManager 监听覆盖，这里只补 data_changed / 收藏变化。）
+     */
+    private final DataChangeBus.Listener mDataChangeListener = (type, dataJson) -> {
+        if (DataChangeBus.TYPE_DATA_CHANGED.equals(type)
+                || DataChangeBus.TYPE_FAVORITE_ADDED.equals(type)
+                || DataChangeBus.TYPE_FAVORITE_REMOVED.equals(type)) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                if (getView() != null && mDownloadManager != null) {
+                    refreshListKeepState();
+                }
+            });
+        }
+    };
+
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -442,6 +498,7 @@ public class DownloadsScene extends ToolbarScene
         AssertUtils.assertNotNull(context);
         mDownloadManager = EhApplication.getDownloadManager(context);
         mDownloadManager.addDownloadInfoListener(this);
+        DataChangeBus.addListener(mDataChangeListener);
         canPagination = Settings.getDownloadPagination();
         if (savedInstanceState == null) {
             onInit();
@@ -472,6 +529,7 @@ public class DownloadsScene extends ToolbarScene
         } else {
             Log.e(TAG, "Can't removeDownloadInfoListener");
         }
+        DataChangeBus.removeListener(mDataChangeListener);
         mActionFabDrawable = null;
     }
 
@@ -568,6 +626,9 @@ public class DownloadsScene extends ToolbarScene
         mFilterDuplicateOnly = savedInstanceState.getBoolean(KEY_FILTER_DUPLICATE_ONLY, false);
         mFilterRatingFrom = savedInstanceState.getFloat(KEY_FILTER_RATING_FROM, 0f);
         mFilterRatingTo = savedInstanceState.getFloat(KEY_FILTER_RATING_TO, 5f);
+        mFilterExtra = parseExtraCondition(savedInstanceState.getString(KEY_FILTER_EXTRA_JSON));
+        mLastQuickFilterId = savedInstanceState.getString(KEY_LAST_QUICK_FILTER_ID);
+        mAppliedPresetId = savedInstanceState.getString(KEY_APPLIED_PRESET_ID);
 
         mSearchActive = savedInstanceState.getBoolean(KEY_SEARCH_ACTIVE, false);
         mSearchOption = savedInstanceState.getInt(KEY_SEARCH_OPTION, 0);
@@ -622,6 +683,9 @@ public class DownloadsScene extends ToolbarScene
         outState.putBoolean(KEY_FILTER_DUPLICATE_ONLY, mFilterDuplicateOnly);
         outState.putFloat(KEY_FILTER_RATING_FROM, mFilterRatingFrom);
         outState.putFloat(KEY_FILTER_RATING_TO, mFilterRatingTo);
+        outState.putString(KEY_FILTER_EXTRA_JSON, mFilterExtra.toJson().toJSONString());
+        outState.putString(KEY_LAST_QUICK_FILTER_ID, mLastQuickFilterId);
+        outState.putString(KEY_APPLIED_PRESET_ID, mAppliedPresetId);
 
         outState.putBoolean(KEY_SEARCH_ACTIVE, mSearchActive);
         outState.putInt(KEY_SEARCH_OPTION, mSearchOption);
@@ -635,30 +699,121 @@ public class DownloadsScene extends ToolbarScene
     private void applyPendingFilter() {
         if (mAdvancedFilterActive) {
             applyAdvancedFilter();
+        } else if (mLastQuickFilterId != null) {
+            gotoQuickFilter(mLastQuickFilterId);
         } else if (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default) {
-            if (isQuickFilterId(mLastFilterSortId)) {
-                gotoQuickFilter(mLastFilterSortId);
-            } else {
-                gotoFilterAndSort(mLastFilterSortId);
-            }
+            gotoFilterAndSort(mLastFilterSortId);
         } else if (mSearchActive && searchKey != null && !searchKey.isEmpty()) {
             applyPendingSearch(true);
         }
     }
 
-    private boolean isQuickFilterId(int id) {
-        switch (id) {
-            case R.id.quick_filter_big_low_rating:
-            case R.id.quick_filter_duplicates:
-            case R.id.quick_filter_low_space_efficiency:
-            case R.id.quick_filter_low_rating:
-            case R.id.quick_filter_huge_file:
-            case R.id.quick_filter_old_unfavorited:
-            case R.id.quick_filter_ai_generated:
-                return true;
-            default:
-                return false;
+    @NonNull
+    private static FilterCondition parseExtraCondition(@Nullable String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return FilterCondition.EMPTY;
         }
+        try {
+            return FilterCondition.Companion.fromJson(
+                            com.alibaba.fastjson.JSON.parseObject(json));
+        } catch (Exception e) {
+            Log.w(TAG, "parseExtraCondition failed", e);
+            return FilterCondition.EMPTY;
+        }
+    }
+
+    /**
+     * 把“老字段 + 新字段”合并成一份完整的筛选条件。
+     * 老字段是历史遗留的散装字段，新条件（排除规则 / 发布时间 / 低分…）在 [mFilterExtra] 里。
+     */
+    @NonNull
+    private FilterCondition buildFilterCondition() {
+        FilterCondition extra = mFilterExtra;
+        return new FilterCondition(
+                mFilterCategoryIds != null ? mFilterCategoryIds : new HashSet<>(),
+                mFilterStatusIds != null ? mFilterStatusIds : new HashSet<>(),
+                FilterIdMapping.sortKeyOf(mFilterSortId),
+                mFilterTimeFrom,
+                mFilterTimeTo,
+                mFilterSizeFrom,
+                mFilterSizeTo,
+                mFilterPageFrom,
+                mFilterPageTo,
+                mFilterDuplicateOnly,
+                mFilterRatingFrom,
+                mFilterRatingTo,
+                extra.getLowRatingOnly(),
+                extra.getPostedFrom(),
+                extra.getPostedTo(),
+                extra.getPostedAgoMonths(),
+                extra.getPerPageFromBytes(),
+                extra.getUnfavoritedOnly(),
+                extra.getAiGeneratedOnly(),
+                extra.getTagsMissingOnly(),
+                false,
+                searchKey,
+                mSearchOption,
+                extra.getExclude());
+    }
+
+    /**
+     * 刷新排除面板里的「标签覆盖率」提示。
+     *
+     * <p>标签数据只来自条目内存里的 simpleTags/tgList 与 {@code Gallery_Tags} 表；历史上
+     * 几乎只有打开过画廊详情页的条目才会写 {@code Gallery_Tags}，因此标签规则对大多数条目
+     * 实际上是静默不生效的。这里把「有多少条能被标签规则判断」算出来给用户看。
+     *
+     * <p>统计放到 IO 线程：一次 {@code Gallery_Tags} gid 集合查询 + 一次内存遍历。
+     *
+     * @param needsTags 当前排除规则里是否有依赖标签数据的条件
+     */
+    private void refreshTagCoverage(@NonNull FilterExcludeView excludeView, boolean needsTags) {
+        List<DownloadInfo> source = mBackList != null ? mBackList : mList;
+        if (!needsTags || source == null || source.isEmpty()) {
+            mTagCoverageRequestId++;
+            excludeView.setTagCoverage(0, 0);
+            return;
+        }
+        final List<DownloadInfo> snapshot = new ArrayList<>(source);
+        final int requestId = ++mTagCoverageRequestId;
+        IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+            Set<Long> tagGids;
+            try {
+                tagGids = EhDB.getAllGalleryTagGids();
+            } catch (Throwable e) {
+                tagGids = Collections.emptySet();
+            }
+            final int tagged = TagCoverage.countTagged(snapshot, tagGids);
+            final int total = snapshot.size();
+            excludeView.post(() -> {
+                if (requestId != mTagCoverageRequestId) {
+                    // 已有更新的统计结果，丢弃这次
+                    return;
+                }
+                excludeView.setTagCoverage(tagged, total);
+            });
+        });
+    }
+
+    /**
+     * 排除规则里是否有「靠标签数据才能判断」的条件。
+     *
+     * <p>排除标签必然需要；作用域为「标签」的关键词也需要。作用域为「任意」的关键词
+     * 还能命中标题/作者/AI 描述，所以不算——提示只说标签规则，避免误报。
+     */
+    private static boolean ruleNeedsTags(@Nullable ExcludeRule rule) {
+        if (rule == null || rule.isEmpty()) {
+            return false;
+        }
+        if (!rule.getExcludedTags().isEmpty()) {
+            return true;
+        }
+        for (ScopedKeyword keyword : rule.getKeywords()) {
+            if (keyword.getScope() == KeywordScope.TAG) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void applyPendingSearch(boolean showProgress) {
@@ -1054,8 +1209,30 @@ public class DownloadsScene extends ToolbarScene
         if (mFabLayout != null) {
             mFabLayout.setShowFabFunctionName(Settings.getShowFabFunctionName());
         }
+        // 快捷筛选子菜单由配置驱动，从设置返回后需要重建
+        Context ehContext = getEHContext();
+        if (ehContext != null) {
+            try {
+                FilterSettingsStore.getInstance(ehContext).addListener(mFilterConfigListener);
+            } catch (Exception e) {
+                Log.w(TAG, "register filter config listener failed", e);
+            }
+        }
+        reloadMenu();
         // 自动检查是否有可恢复的下载历史
         checkAutoResumeFromHistory();
+    }
+
+    @Override
+    public void onPause() {
+        Context ehContext = getEHContext();
+        if (ehContext != null) {
+            try {
+                FilterSettingsStore.getInstance(ehContext).removeListener(mFilterConfigListener);
+            } catch (Exception ignored) {
+            }
+        }
+        super.onPause();
     }
 
     /**
@@ -1122,9 +1299,54 @@ public class DownloadsScene extends ToolbarScene
         return R.menu.scene_download;
     }
 
-    @SuppressLint("NonConstantResourceId")
+    /**
+     * 「快捷筛选」子菜单改为从配置动态生成，用户在设置里增删改后立即生效。
+     *
+     * 菜单项 id 从一个不会与 R.id 冲突的区间自减分配，并记录到 [mQuickFilterMenuIds]。
+     */
+    @Override
+    public void onMenuCreated(Menu menu) {
+        super.onMenuCreated(menu);
+        Menu quickFilterMenu = menu.findItem(R.id.quick_filter) != null
+                ? menu.findItem(R.id.quick_filter).getSubMenu() : null;
+        if (quickFilterMenu == null) {
+            return;
+        }
+        quickFilterMenu.clear();
+        mQuickFilterMenuIds.clear();
+        List<QuickFilterDefinition> definitions;
+        try {
+            definitions = FilterSettingsStore.getInstance(requireContext()).enabledQuickFilters();
+        } catch (Exception e) {
+            Log.w(TAG, "onMenuCreated: load quick filters failed", e);
+            return;
+        }
+        int nextId = Integer.MAX_VALUE - 1;
+        for (QuickFilterDefinition definition : definitions) {
+            android.view.MenuItem item = quickFilterMenu.add(
+                    Menu.NONE, nextId, Menu.NONE, definition.displayName(requireContext()));
+            item.setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER);
+            mQuickFilterMenuIds.put(nextId, definition.getId());
+            nextId--;
+        }
+        if (definitions.isEmpty()) {
+            quickFilterMenu.add(Menu.NONE, nextId, Menu.NONE, R.string.filter_quick_filter_manager_title)
+                    .setEnabled(false);
+        }
+    }
+
     @Override
     public boolean onMenuItemClick(MenuItem item) {
+        String quickFilterId = mQuickFilterMenuIds.get(item.getItemId());
+        if (quickFilterId != null) {
+            gotoQuickFilter(quickFilterId);
+            return true;
+        }
+        return onDownloadMenuItemClick(item);
+    }
+
+    @SuppressLint("NonConstantResourceId")
+    private boolean onDownloadMenuItemClick(MenuItem item) {
         // Skip when in choice mode
         Activity activity = getActivity2();
         if (null == activity || null == mRecyclerView || mRecyclerView.isInCustomChoice()) {
@@ -1217,15 +1439,6 @@ public class DownloadsScene extends ToolbarScene
             case R.id.unknown:
                 gotoFilterAndSort(id);
                 return true;
-            case R.id.quick_filter_big_low_rating:
-            case R.id.quick_filter_duplicates:
-            case R.id.quick_filter_low_space_efficiency:
-            case R.id.quick_filter_low_rating:
-            case R.id.quick_filter_huge_file:
-            case R.id.quick_filter_old_unfavorited:
-            case R.id.quick_filter_ai_generated:
-                gotoQuickFilter(id);
-                return true;
             case R.id.import_local_archive:
                 importLocalArchive();
                 return true;
@@ -1240,6 +1453,9 @@ public class DownloadsScene extends ToolbarScene
             }
             case R.id.repair_thumbnails:
                 repairThumbnails();
+                return true;
+            case R.id.action_recheck_downloading:
+                recheckDownloading();
                 return true;
 //            case R.id.misc:
 //            case R.id.doujinshi:
@@ -1299,6 +1515,13 @@ public class DownloadsScene extends ToolbarScene
         RecyclerView sortRecyclerView = linearLayout.findViewById(R.id.search_sort_recycler_view);
         Button selectAllStatusBtn = linearLayout.findViewById(R.id.select_all_status_button);
         Button selectNoneStatusBtn = linearLayout.findViewById(R.id.select_none_status_button);
+
+        // 快速设置按钮：点击只套用条件，不直接执行
+        QuickPresetBar quickPresetBar = linearLayout.findViewById(R.id.quick_preset_bar);
+        // 排除内容面板：分类 / 关键词 / Tag
+        FilterExcludeView excludeView = linearLayout.findViewById(R.id.filter_exclude_view);
+        // 低分 / 发布时间 / 未收藏 / AI 生成 / 无标签 / 每页体积
+        FilterExtraOptionsView extraOptionsView = linearLayout.findViewById(R.id.extra_options_view);
 
         // Setup category table
         categoryTable.setAllSelected();
@@ -1380,12 +1603,33 @@ public class DownloadsScene extends ToolbarScene
             }
         });
 
+        // 预设套用：把预设里的条件填进面板，用户可继续微调后再点“搜索”
+        quickPresetBar.reload();
+        quickPresetBar.setAppliedPresetId(mAppliedPresetId);
+        quickPresetBar.setOnPresetAppliedListener(new QuickPresetBar.OnPresetAppliedListener() {
+            @Override
+            public void onPresetApplied(@NonNull String presetId, @NonNull FilterCondition condition) {
+                mAppliedPresetId = presetId;
+                applyPresetToPanel(condition, categoryTable, statusAdapter, sortAdapter, selectedSortId,
+                        pagesRangeCheckbox, pagesFromInput, pagesToInput, timeFromInput, timeToInput,
+                        sizeFromInput, sizeToInput, duplicateOnlyCheckbox, ratingRangeView);
+                extraOptionsView.setCondition(condition);
+            }
+
+            @Override
+            public void onPresetCleared() {
+                mAppliedPresetId = null;
+            }
+        });
+
         // Date picker buttons for time inputs
         Button pickTimeFromBtn = new Button(context);
         Button pickTimeToBtn = new Button(context);
 
         // Restore previous filter state if available
         if (mAdvancedFilterActive) {
+            excludeView.setRule(mFilterExtra.getExclude());
+            extraOptionsView.setCondition(mFilterExtra);
             // Restore category
             if (mFilterCategoryIds != null && !mFilterCategoryIds.contains(EhUtils.ALL_CATEGORY)) {
                 categoryTable.setSelectedCategories(mFilterCategoryIds);
@@ -1432,6 +1676,11 @@ public class DownloadsScene extends ToolbarScene
             }
         }
 
+        // 标签规则只在「条目的标签已知」时才生效，面板里把覆盖率显示出来
+        excludeView.setOnExcludeChangedListener(rule ->
+                refreshTagCoverage(excludeView, ruleNeedsTags(rule)));
+        refreshTagCoverage(excludeView, ruleNeedsTags(excludeView.getRule()));
+
         mSearchDialog = new AlertDialog.Builder(context)
                 .setView(linearLayout)
                 .setCancelable(true)
@@ -1465,6 +1714,11 @@ public class DownloadsScene extends ToolbarScene
             sizeToInput.setText("");
             // Reset duplicate only
             duplicateOnlyCheckbox.setChecked(false);
+            // Reset exclusions and preset highlight
+            excludeView.setRule(ExcludeRule.EMPTY);
+            extraOptionsView.setCondition(FilterCondition.EMPTY);
+            mAppliedPresetId = null;
+            quickPresetBar.setAppliedPresetId(null);
         });
 
         searchButton.setOnClickListener(v -> {
@@ -1523,6 +1777,7 @@ public class DownloadsScene extends ToolbarScene
 
             // Stash advanced filter state
             mAdvancedFilterActive = true;
+            mFilterCategoryIds = categories;
             mFilterStatusIds = selectedStatusIds;
             mFilterTimeFrom = timeFrom;
             mFilterTimeTo = timeTo;
@@ -1533,6 +1788,9 @@ public class DownloadsScene extends ToolbarScene
             mFilterDuplicateOnly = duplicateOnly;
             mFilterRatingFrom = ratingFrom;
             mFilterRatingTo = ratingTo;
+            // 新条件：排除规则 + 低分/发布时间/未收藏/AI/无标签/每页体积
+            mFilterExtra = extraOptionsView.applyTo(
+                    mFilterExtra.withExclude(excludeView.getRule()));
 
             if (mSearchDialog != null) {
                 mSearchDialog.dismiss();
@@ -1549,9 +1807,7 @@ public class DownloadsScene extends ToolbarScene
             DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
             executor.setDownloadSearchingListener(this);
             cancelCurrentExecutor();
-            executor.executeFilterAndSort(categories, selectedStatusIds, sortId,
-                    timeFrom, timeTo, sizeFrom, sizeTo,
-                    pageFrom, pageTo, duplicateOnly, ratingFrom, ratingTo);
+            executor.executeFilterAndSort(buildFilterCondition());
             mCurrentExecutor = executor;
             searching = true;
         });
@@ -1664,6 +1920,11 @@ public class DownloadsScene extends ToolbarScene
         // Duplicate checkbox
         CheckBox duplicateCheckbox = linearLayout.findViewById(R.id.filter_duplicate_only_checkbox);
 
+        // 快速设置按钮 + 排除内容面板（与搜索面板共用同一套配置）
+        QuickPresetBar quickPresetBar = linearLayout.findViewById(R.id.quick_preset_bar);
+        FilterExcludeView excludeView = linearLayout.findViewById(R.id.filter_exclude_view);
+        FilterExtraOptionsView extraOptionsView = linearLayout.findViewById(R.id.extra_options_view);
+
         // Rating filter
         RatingBar ratingFromBar = linearLayout.findViewById(R.id.filter_rating_from_bar);
         RatingBar ratingToBar = linearLayout.findViewById(R.id.filter_rating_to_bar);
@@ -1690,7 +1951,29 @@ public class DownloadsScene extends ToolbarScene
             }
         });
 
+        quickPresetBar.reload();
+        quickPresetBar.setAppliedPresetId(mAppliedPresetId);
+        quickPresetBar.setOnPresetAppliedListener(new QuickPresetBar.OnPresetAppliedListener() {
+            @Override
+            public void onPresetApplied(@NonNull String presetId, @NonNull FilterCondition condition) {
+                mAppliedPresetId = presetId;
+                applyPresetToAdvancedPanel(condition, categoryTable, statusAdapter, sortAdapter,
+                        selectedSortId, timeFromInput, timeToInput, sizeFromInput, sizeToInput,
+                        pageFromInput, pageToInput, duplicateCheckbox, ratingFrom, ratingTo);
+                ratingFromBar.setRating(ratingFrom[0]);
+                ratingToBar.setRating(ratingTo[0]);
+                extraOptionsView.setCondition(condition);
+            }
+
+            @Override
+            public void onPresetCleared() {
+                mAppliedPresetId = null;
+            }
+        });
+
         if (mAdvancedFilterActive) {
+            excludeView.setRule(mFilterExtra.getExclude());
+            extraOptionsView.setCondition(mFilterExtra);
             if (mFilterCategoryIds != null && !mFilterCategoryIds.contains(EhUtils.ALL_CATEGORY)) {
                 categoryTable.setSelectedCategories(mFilterCategoryIds);
             }
@@ -1728,6 +2011,11 @@ public class DownloadsScene extends ToolbarScene
             ratingTo[0] = mFilterRatingTo;
         }
 
+        // 标签规则只在「条目的标签已知」时才生效，面板里把覆盖率显示出来
+        excludeView.setOnExcludeChangedListener(rule ->
+                refreshTagCoverage(excludeView, ruleNeedsTags(rule)));
+        refreshTagCoverage(excludeView, ruleNeedsTags(excludeView.getRule()));
+
         AlertDialog dialog = new AlertDialog.Builder(context)
                 .setView(linearLayout)
                 .setCancelable(true)
@@ -1754,6 +2042,10 @@ public class DownloadsScene extends ToolbarScene
             ratingToBar.setRating(5f);
             ratingFrom[0] = 0f;
             ratingTo[0] = 5f;
+            excludeView.setRule(ExcludeRule.EMPTY);
+            extraOptionsView.setCondition(FilterCondition.EMPTY);
+            mAppliedPresetId = null;
+            quickPresetBar.setAppliedPresetId(null);
         });
 
         applyButton.setOnClickListener(v -> {
@@ -1786,8 +2078,11 @@ public class DownloadsScene extends ToolbarScene
             mFilterDuplicateOnly = duplicateOnly;
             mFilterRatingFrom = ratFrom;
             mFilterRatingTo = ratTo;
+            mFilterExtra = extraOptionsView.applyTo(
+                    mFilterExtra.withExclude(excludeView.getRule()));
             mAdvancedFilterActive = true;
             mLastFilterSortId = 0;
+            mLastQuickFilterId = null;
 
             applyAdvancedFilter();
         });
@@ -1807,11 +2102,102 @@ public class DownloadsScene extends ToolbarScene
         DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
         executor.setDownloadSearchingListener(this);
         cancelCurrentExecutor();
-        executor.executeFilterAndSort(mFilterCategoryIds, mFilterStatusIds, mFilterSortId,
-                mFilterTimeFrom, mFilterTimeTo, mFilterSizeFrom, mFilterSizeTo,
-                mFilterPageFrom, mFilterPageTo, mFilterDuplicateOnly, mFilterRatingFrom, mFilterRatingTo);
+        executor.executeFilterAndSort(buildFilterCondition());
         mCurrentExecutor = executor;
         searching = true;
+    }
+
+    /**
+     * 把预设条件套用到搜索面板的输入框上。
+     *
+     * 只填界面不执行，用户可以继续微调后点“搜索”。
+     */
+    private void applyPresetToPanel(@NonNull FilterCondition condition,
+                                    DownloadCategoryTable categoryTable,
+                                    CheckboxAdapter statusAdapter,
+                                    CheckboxAdapter sortAdapter,
+                                    int[] selectedSortId,
+                                    CheckBox pagesRangeCheckbox,
+                                    EditText pagesFromInput,
+                                    EditText pagesToInput,
+                                    EditText timeFromInput,
+                                    EditText timeToInput,
+                                    EditText sizeFromInput,
+                                    EditText sizeToInput,
+                                    CheckBox duplicateOnlyCheckbox,
+                                    RatingRangeView ratingRangeView) {
+        Set<Integer> categories = condition.getCategories();
+        if (categories != null && !categories.isEmpty() && !categories.contains(EhUtils.ALL_CATEGORY)) {
+            categoryTable.setSelectedCategories(categories);
+        } else {
+            categoryTable.setAllSelected();
+        }
+        Set<Integer> statuses = condition.getStatuses();
+        statusAdapter.setSelectedItems(statuses != null && !statuses.isEmpty() ? statuses : new HashSet<>());
+
+        Set<Integer> sort = new HashSet<>();
+        sort.add(FilterIdMapping.menuIdOf(condition.getSort()));
+        sortAdapter.setSelectedItems(sort);
+        selectedSortId[0] = FilterIdMapping.menuIdOf(condition.getSort());
+
+        timeFromInput.setText(condition.getTimeFrom() != null ? formatTimeInput(condition.getTimeFrom()) : "");
+        timeToInput.setText(condition.getTimeTo() != null ? formatTimeInput(condition.getTimeTo()) : "");
+        sizeFromInput.setText(condition.getSizeFrom() != null ? formatSizeInput(condition.getSizeFrom()) : "");
+        sizeToInput.setText(condition.getSizeTo() != null ? formatSizeInput(condition.getSizeTo()) : "");
+
+        Long pageFrom = condition.getPageFrom();
+        Long pageTo = condition.getPageTo();
+        pagesRangeCheckbox.setChecked(pageFrom != null || pageTo != null);
+        pagesFromInput.setText(pageFrom != null ? String.valueOf(pageFrom) : "");
+        pagesToInput.setText(pageTo != null ? String.valueOf(pageTo) : "");
+
+        duplicateOnlyCheckbox.setChecked(condition.getDuplicateOnly());
+
+        if (ratingRangeView != null) {
+            ratingRangeView.setRangeEnabled(true);
+            ratingRangeView.setRatingRange(condition.getRatingFrom(), condition.getRatingTo());
+        }
+    }
+
+    /** 把预设条件套用到高级筛选面板的输入框上。 */
+    private void applyPresetToAdvancedPanel(@NonNull FilterCondition condition,
+                                            DownloadCategoryTable categoryTable,
+                                            CheckboxAdapter statusAdapter,
+                                            CheckboxAdapter sortAdapter,
+                                            int[] selectedSortId,
+                                            EditText timeFromInput,
+                                            EditText timeToInput,
+                                            EditText sizeFromInput,
+                                            EditText sizeToInput,
+                                            EditText pageFromInput,
+                                            EditText pageToInput,
+                                            CheckBox duplicateCheckbox,
+                                            float[] ratingFrom,
+                                            float[] ratingTo) {
+        Set<Integer> categories = condition.getCategories();
+        if (categories != null && !categories.isEmpty() && !categories.contains(EhUtils.ALL_CATEGORY)) {
+            categoryTable.setSelectedCategories(categories);
+        } else {
+            categoryTable.setAllSelected();
+        }
+        Set<Integer> statuses = condition.getStatuses();
+        statusAdapter.setSelectedItems(statuses != null && !statuses.isEmpty() ? statuses : new HashSet<>());
+
+        int sortId = FilterIdMapping.menuIdOf(condition.getSort());
+        Set<Integer> sort = new HashSet<>();
+        sort.add(sortId);
+        sortAdapter.setSelectedItems(sort);
+        selectedSortId[0] = sortId;
+
+        timeFromInput.setText(condition.getTimeFrom() != null ? formatTimeInput(condition.getTimeFrom()) : "");
+        timeToInput.setText(condition.getTimeTo() != null ? formatTimeInput(condition.getTimeTo()) : "");
+        sizeFromInput.setText(condition.getSizeFrom() != null ? formatSizeInput(condition.getSizeFrom()) : "");
+        sizeToInput.setText(condition.getSizeTo() != null ? formatSizeInput(condition.getSizeTo()) : "");
+        pageFromInput.setText(condition.getPageFrom() != null ? String.valueOf(condition.getPageFrom()) : "");
+        pageToInput.setText(condition.getPageTo() != null ? String.valueOf(condition.getPageTo()) : "");
+        duplicateCheckbox.setChecked(condition.getDuplicateOnly());
+        ratingFrom[0] = condition.getRatingFrom();
+        ratingTo[0] = condition.getRatingTo();
     }
 
     private String formatTimeInput(Long time) {
@@ -2414,12 +2800,27 @@ public class DownloadsScene extends ToolbarScene
                     if (downloadInfoList.isEmpty()) {
                         break;
                     }
+                    // 删除保护：受保护的条目自动从这批里剔除，剔了几个会在确认框和结果里说清楚
+                    DeleteProtectHelper.warmUpAsync();
+                    DeleteProtectHelper.SplitResult split =
+                            DownloadDeleteHelper.splitProtected(downloadInfoList);
+                    final List<DownloadInfo> deletable = new ArrayList<>(split.deletable.size());
+                    for (GalleryInfo info : split.deletable) {
+                        if (info instanceof DownloadInfo) {
+                            deletable.add((DownloadInfo) info);
+                        }
+                    }
+                    final int protectedCount = split.getProtectedCount();
+                    if (deletable.isEmpty()) {
+                        DownloadDeleteHelper.notifySkipped(getDialogContext(), protectedCount);
+                        break;
+                    }
                     CheckBoxDialogBuilder builder = new CheckBoxDialogBuilder(context,
-                            getString(R.string.download_remove_dialog_message_2, gidList.size()),
+                            DownloadDeleteHelper.buildRangeMessage(context, deletable.size(), protectedCount),
                             getString(R.string.download_remove_dialog_check_text),
                             Settings.getRemoveImageFiles());
                     DeleteRangeDialogHelper helper = new DeleteRangeDialogHelper(
-                            downloadInfoList, gidList, builder);
+                            deletable, gidList, builder, protectedCount);
                     builder.setTitle(R.string.download_remove_dialog_title)
                             .setPositiveButton(android.R.string.ok, helper)
                             .show();
@@ -2770,6 +3171,7 @@ public class DownloadsScene extends ToolbarScene
 
     private void gotoFilterAndSort(int id) {
         mLastFilterSortId = id;
+        mLastQuickFilterId = null;
         mAdvancedFilterActive = false;
         // Running a normal filter cancels any active search, so the filter applies to the full list
         clearSearchState();
@@ -2793,10 +3195,28 @@ public class DownloadsScene extends ToolbarScene
     }
 
     /**
-     * 执行快捷筛选预设。显示全屏“正在加载筛选”遮罩，结果通过 onDownloadSearchSuccess 回调刷新。
+     * 执行一条快捷筛选。显示全屏“正在加载筛选”遮罩，结果通过 onDownloadSearchSuccess 回调刷新。
+     *
+     * @param quickFilterId 配置里的稳定 id（不是菜单 R.id）
      */
-    private void gotoQuickFilter(int quickFilterId) {
-        mLastFilterSortId = quickFilterId;
+    private void gotoQuickFilter(@NonNull String quickFilterId) {
+        Context context = getEHContext();
+        if (context == null) {
+            return;
+        }
+        QuickFilterDefinition definition;
+        try {
+            definition = FilterSettingsStore.getInstance(context).findQuickFilter(quickFilterId);
+        } catch (Exception e) {
+            Log.w(TAG, "gotoQuickFilter: load definition failed", e);
+            return;
+        }
+        if (definition == null) {
+            Toast.makeText(context, R.string.filter_quick_filter_delete_confirm_message, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        mLastQuickFilterId = quickFilterId;
+        mLastFilterSortId = 0;
         mAdvancedFilterActive = false;
         // 快捷筛选取消当前搜索，作用于完整下载列表
         clearSearchState();
@@ -2810,7 +3230,7 @@ public class DownloadsScene extends ToolbarScene
         DownloadListInfosExecutor executor = new DownloadListInfosExecutor(mBackList, mDownloadManager);
         executor.setDownloadSearchingListener(this);
         cancelCurrentExecutor();
-        executor.executeQuickFilter(quickFilterId);
+        executor.executeQuickFilter(definition);
         mCurrentExecutor = executor;
         searching = true;
     }
@@ -3118,6 +3538,24 @@ public class DownloadsScene extends ToolbarScene
                 .show();
     }
 
+    /**
+     * 「下载中重预检」：确认后先停止正在下载的任务，再重跑同名/递进检查并按需合并，
+     * 只保留最完整的一个。结果由 DownloadManager 收尾并重新排队。
+     */
+    private void recheckDownloading() {
+        Context context = getEHContext();
+        Activity activity = getActivity2();
+        if (context == null || activity == null || mDownloadManager == null) return;
+
+        new AlertDialog.Builder(activity)
+                .setTitle(R.string.download_recheck_downloading)
+                .setMessage(R.string.download_recheck_downloading_confirm)
+                .setPositiveButton(android.R.string.ok, (dialog, which) ->
+                        mDownloadManager.recheckDownloadingTasks())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
     private void handleSelectedFile(ActivityResult result) {
         if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
             return;
@@ -3281,12 +3719,21 @@ public class DownloadsScene extends ToolbarScene
         private final List<DownloadInfo> mDownloadInfoList;
         private final LongList mGidList;
         private final CheckBoxDialogBuilder mBuilder;
+        /** 因删除保护被跳过的条目数，确认后用来提示用户。 */
+        private final int mProtectedCount;
 
         public DeleteRangeDialogHelper(List<DownloadInfo> downloadInfoList,
                                        LongList gidList, CheckBoxDialogBuilder builder) {
+            this(downloadInfoList, gidList, builder, 0);
+        }
+
+        public DeleteRangeDialogHelper(List<DownloadInfo> downloadInfoList,
+                                       LongList gidList, CheckBoxDialogBuilder builder,
+                                       int protectedCount) {
             mDownloadInfoList = downloadInfoList;
             mGidList = gidList;
             mBuilder = builder;
+            mProtectedCount = protectedCount;
         }
 
         @Override
@@ -3304,6 +3751,7 @@ public class DownloadsScene extends ToolbarScene
             boolean checked = mBuilder.isChecked();
             Settings.putRemoveImageFiles(checked);
             DownloadDeleteHelper.performDeleteRange(getDialogContext(), mDownloadInfoList, checked);
+            DownloadDeleteHelper.notifySkipped(getDialogContext(), mProtectedCount);
         }
     }
 

@@ -79,6 +79,7 @@ export default function GalleryDetail() {
   const [deleteEnabled, setDeleteEnabled] = useState(false)
   const [pageUploadEnabled, setPageUploadEnabled] = useState(false)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [favorited, setFavorited] = useState(false)
 
   // 上传页面输入状态
   const [uploadUrl, setUploadUrl] = useState('')
@@ -94,6 +95,9 @@ export default function GalleryDetail() {
     ])
       .then(([galleryData, sysInfo]) => {
         setDetail(galleryData)
+        if (typeof galleryData.isFavorited === 'boolean') {
+          setFavorited(galleryData.isFavorited)
+        }
         if (sysInfo) {
           setDeleteEnabled(sysInfo.deleteEnabled)
           setPageUploadEnabled(!!sysInfo.pageUploadEnabled)
@@ -178,6 +182,43 @@ export default function GalleryDetail() {
       loadGallery()
     } catch (e) {
       Toast.show({ content: '添加下载失败', icon: 'fail' })
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleToggleFavorite = async () => {
+    if (!detail) return
+    setActionLoading('favorite')
+    try {
+      if (favorited) {
+        await api.removeFavorite(detail.gid)
+        setFavorited(false)
+        Toast.show({ content: '已取消收藏', icon: 'success' })
+      } else {
+        await api.addFavorite({
+          gid: detail.gid,
+          token: detail.token,
+          title: detail.title,
+          titleJpn: detail.titleJpn,
+          category: detail.categoryValue ?? 0,
+          posted: detail.posted,
+          uploader: detail.uploader,
+          rating: detail.rating,
+          pages: detail.pages,
+          thumb: detail.thumb,
+        })
+        setFavorited(true)
+        Toast.show({ content: '已加入收藏', icon: 'success' })
+      }
+    } catch (e: any) {
+      const msg = e?.message || ''
+      if (msg.includes('already exists')) {
+        setFavorited(true)
+        Toast.show({ content: '已在收藏中', icon: 'success' })
+      } else {
+        Toast.show({ content: '收藏操作失败', icon: 'fail' })
+      }
     } finally {
       setActionLoading(null)
     }
@@ -521,6 +562,15 @@ export default function GalleryDetail() {
       <div style={{ padding: '0 16px 16px' }}>
         <div style={{ fontWeight: 500, marginBottom: 8, fontSize: 14 }}>下载管理</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Button
+            size="small"
+            color={favorited ? 'warning' : 'primary'}
+            fill={favorited ? 'outline' : 'solid'}
+            loading={actionLoading === 'favorite'}
+            onClick={handleToggleFavorite}
+          >
+            {favorited ? '取消收藏' : '加入收藏'}
+          </Button>
           {!hasDownloadRecord && (
             <Button size="small" color="primary" loading={actionLoading === 'add'} onClick={handleAddDownload}>
               添加到下载

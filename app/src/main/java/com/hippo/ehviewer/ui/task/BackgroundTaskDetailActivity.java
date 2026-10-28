@@ -39,7 +39,8 @@ import java.util.List;
 public class BackgroundTaskDetailActivity extends EhActivity {
     
     private static final String KEY_TASK_ID = "task_id";
-    private static final long REFRESH_INTERVAL = 1500; // 1.5秒刷新一次
+    /** 事件驱动刷新：进度事件本身已按 300ms 合并，这里再合并一次避免重复计算布局。 */
+    private static final long REFRESH_THROTTLE_MS = 300;
     private static final int MAX_DISPLAY_LOGS = 100;
     
     private TextView mTaskNameText;
@@ -69,14 +70,60 @@ public class BackgroundTaskDetailActivity extends EhActivity {
     private String mTaskId;
     private Handler mHandler;
     private int mLastLogTotalCount = -1;
+    private boolean mRefreshScheduled;
     
     private final Runnable mRefreshRunnable = new Runnable() {
         @Override
         public void run() {
+            mRefreshScheduled = false;
             updateTaskInfo();
-            mHandler.postDelayed(this, REFRESH_INTERVAL);
         }
     };
+
+    /**
+     * 只订阅当前任务的事件：扫描等任务每 300ms 上报一次进度，事件驱动比轮询更及时，
+     * 也不会在任务结束后继续空转。
+     */
+    private final BackgroundTaskStatusManager.TaskChangeListener mTaskChangeListener =
+            new BackgroundTaskStatusManager.TaskChangeListener() {
+                @Override
+                public void onTaskProgressChanged(String taskId) {
+                    if (isCurrentTask(taskId)) {
+                        scheduleRefresh();
+                    }
+                }
+
+                @Override
+                public void onTaskStateChanged(String taskId) {
+                    if (isCurrentTask(taskId)) {
+                        scheduleRefresh();
+                    }
+                }
+
+                @Override
+                public void onTaskRemoved(String taskId) {
+                    if (isCurrentTask(taskId)) {
+                        // 事件可能来自后台线程，finish() 必须回主线程
+                        mHandler.post(() -> {
+                            if (!isFinishing() && !isDestroyed()) {
+                                finish();
+                            }
+                        });
+                    }
+                }
+            };
+
+    private boolean isCurrentTask(String taskId) {
+        return mTaskId != null && mTaskId.equals(taskId);
+    }
+
+    private void scheduleRefresh() {
+        if (mRefreshScheduled) {
+            return;
+        }
+        mRefreshScheduled = true;
+        mHandler.postDelayed(mRefreshRunnable, REFRESH_THROTTLE_MS);
+    }
     
     public static void start(@NonNull Context context, @NonNull String taskId) {
         Intent intent = new Intent(context, BackgroundTaskDetailActivity.class);
@@ -240,43 +287,47 @@ public class BackgroundTaskDetailActivity extends EhActivity {
         
         // 更新进度面板
         int percentage = taskInfo.getProgressPercentage();
-        if (percentage >= 0) {
-            // 有确定进度
-            if (mProgressPanel != null) {
-                mProgressPanel.setVisibility(View.VISIBLE);
-            }
-            if (mProgressBar != null) {
+        String progressDetail = taskInfo.getProgressDetail();
+        boolean hasDetail = progressDetail != null && !progressDetail.isEmpty();
+        boolean indeterminate = percentage < 0;
+
+        // 面板在"有确定进度"或"有步骤文字"时都显示：旧实现把步骤文字嵌在面板里，
+        // 一旦进度不确定（例如扫描刚开始、尚未拿到目录总数）整块隐藏，用户什么都看不到。
+        boolean showPanel = percentage >= 0 || hasDetail;
+        if (mProgressPanel != null) {
+            mProgressPanel.setVisibility(showPanel ? View.VISIBLE : View.GONE);
+        }
+        if (mProgressBar != null) {
+            mProgressBar.setIndeterminate(indeterminate);
+            if (!indeterminate) {
                 mProgressBar.setMax(100);
                 mProgressBar.setProgress(percentage);
-                mProgressBar.setIndeterminate(false);
-            }
-            if (mTaskProgressText != null) {
-                mTaskProgressText.setText(getString(R.string.task_progress_format, 
-                    taskInfo.getCurrentProgress(), taskInfo.getTotalProgress(), percentage));
-            }
-            // ETA
-            long eta = taskInfo.getEstimatedRemainingTime();
-            if (mTaskEtaDetailText != null) {
-                if (eta > 0) {
-                    mTaskEtaDetailText.setText(getString(R.string.task_eta_format, 
-                        ReadableTime.getShortTimeInterval(eta)));
-                    mTaskEtaDetailText.setVisibility(View.VISIBLE);
-                } else {
-                    mTaskEtaDetailText.setVisibility(View.GONE);
-                }
-            }
-        } else {
-            // 无确定进度
-            if (mProgressPanel != null) {
-                mProgressPanel.setVisibility(View.GONE);
             }
         }
-        
-        // 更新进度详情
+        if (mTaskProgressText != null) {
+            if (indeterminate) {
+                mTaskProgressText.setText(R.string.task_progress_indeterminate);
+            } else {
+                mTaskProgressText.setText(getString(R.string.task_progress_format,
+                    taskInfo.getCurrentProgress(), taskInfo.getTotalProgress(), percentage));
+            }
+        }
+        // ETA 只在有确定进度时计算
+        if (mTaskEtaDetailText != null) {
+            long eta = indeterminate ? 0 : taskInfo.getEstimatedRemainingTime();
+            if (eta > 0) {
+                mTaskEtaDetailText.setText(getString(R.string.task_eta_format,
+                    ReadableTime.getShortTimeInterval(eta)));
+                mTaskEtaDetailText.setVisibility(View.VISIBLE);
+            } else {
+                mTaskEtaDetailText.setVisibility(View.GONE);
+            }
+        }
+
+        // 更新进度详情（独立行，不再受进度面板显隐影响）
         if (mTaskProgressDetailText != null) {
-            String detail = taskInfo.getProgressDetail();
-            if (detail != null && !detail.isEmpty()) {
-                mTaskProgressDetailText.setText(detail);
+            if (hasDetail) {
+                mTaskProgressDetailText.setText(progressDetail);
                 mTaskProgressDetailText.setVisibility(View.VISIBLE);
             } else {
                 mTaskProgressDetailText.setVisibility(View.GONE);
@@ -506,12 +557,20 @@ public class BackgroundTaskDetailActivity extends EhActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        mHandler.postDelayed(mRefreshRunnable, REFRESH_INTERVAL);
+        if (mTaskManager != null) {
+            mTaskManager.addTaskChangeListener(mTaskChangeListener);
+        }
+        // 进入页面时做一次对账，覆盖暂停期间可能错过的事件
+        updateTaskInfo();
     }
-    
+
     @Override
     protected void onPause() {
+        if (mTaskManager != null) {
+            mTaskManager.removeTaskChangeListener(mTaskChangeListener);
+        }
         mHandler.removeCallbacks(mRefreshRunnable);
+        mRefreshScheduled = false;
         super.onPause();
     }
     

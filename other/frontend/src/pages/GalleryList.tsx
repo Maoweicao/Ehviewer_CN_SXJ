@@ -17,6 +17,7 @@ import Pagination from '../components/Pagination'
 import FilterPanel, { type FilterState, type SortCondition } from '../components/FilterPanel'
 import GalleryCard from '../components/GalleryCard'
 import FullScreenLoading from '../components/FullScreenLoading'
+import { subscribeDataChange } from '../utils/dataEvents'
 
 function buildSortExpr(conditions: SortCondition[]): string {
   return conditions.map((c) => `${c.field}:${c.order}`).join(',')
@@ -192,6 +193,17 @@ export default function GalleryList() {
       loadInfinitePage(1, search, tab, label, false)
     }
   }
+
+  // §5.28 数据变更订阅：一端（App 或其它端）发生变更时自动刷新
+  const reloadRef = useRef(reload)
+  reloadRef.current = reload
+  useEffect(() => {
+    const off = subscribeDataChange((type) => {
+      if (type !== 'heartbeat') reloadRef.current()
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSearch = (val: string) => {
     setSearch(val)

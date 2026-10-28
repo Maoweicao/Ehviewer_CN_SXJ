@@ -178,6 +178,23 @@ public final class SettingsActivity extends EhActivity {
         }
     }
 
+    /**
+     * 压入一个设置子页面（例如快捷筛选管理面板）。
+     *
+     * 走 FragmentTransaction 而不是 Activity 跳转，这样返回键与标题栏都能沿用现有行为。
+     */
+    public void pushSettingsFragment(@NonNull Fragment fragment) {
+        if (getSupportFragmentManager().findFragmentById(R.id.settings) instanceof SearchResultsFragment) {
+            // 搜索结果页与具体设置页冲突，先退回上一层
+            getSupportFragmentManager().popBackStack();
+        }
+        getSupportFragmentManager()
+                .beginTransaction()
+                .replace(R.id.settings, fragment)
+                .addToBackStack(fragment.getClass().getSimpleName())
+                .commit();
+    }
+
     @Override
     public void onBackPressed() {
         Fragment current = getSupportFragmentManager().findFragmentById(R.id.settings);

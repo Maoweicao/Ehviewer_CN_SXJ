@@ -347,11 +347,49 @@ if (editing != null) {
                     null,
                     true
                 );
-                actions.add(action);
-                LinearLayout container = findViewById(R.id.actions_layout);
-                TextView countText = findViewById(R.id.actions_count);
-                if (container != null && countText != null) refreshActionsList(container, countText);
+                if (com.hippo.ehviewer.task.LabSyncTask.class.getName().equals(m.getTaskClassName())) {
+                    showLabSyncDirection(action);
+                } else {
+                    addAction(action);
+                }
             })
+            .show();
+    }
+
+    private void addAction(AutomationAction action) {
+        actions.add(action);
+        LinearLayout container = findViewById(R.id.actions_layout);
+        TextView countText = findViewById(R.id.actions_count);
+        if (container != null && countText != null) refreshActionsList(container, countText);
+    }
+
+    /** 设备同步动作：方向随动作保存到 params（§5.30.6）。 */
+    private void showLabSyncDirection(AutomationAction base) {
+        final String[] values = {"bidirectional", "pull", "push"};
+        int defaultIndex = 0;
+        String current = Settings.getLabSyncDirection();
+        for (int i = 0; i < values.length; i++) {
+            if (values[i].equals(current)) {
+                defaultIndex = i;
+                break;
+            }
+        }
+        new AlertDialog.Builder(this)
+            .setTitle(R.string.lab_sync_direction)
+            .setSingleChoiceItems(R.array.lab_sync_direction_entries, defaultIndex, (dialog, which) -> {
+                com.alibaba.fastjson.JSONObject params = new com.alibaba.fastjson.JSONObject();
+                params.put("direction", values[which]);
+                addAction(new AutomationAction(
+                    base.getId(),
+                    base.getTaskClassName(),
+                    base.getDisplayName(),
+                    base.getTaskType(),
+                    params.toJSONString(),
+                    true
+                ));
+                dialog.dismiss();
+            })
+            .setNegativeButton(android.R.string.cancel, null)
             .show();
     }
 

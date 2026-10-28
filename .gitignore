@@ -25,3 +25,6 @@ open_source_licenses.html
 *.tsbuildinfo
 /build_err.txt
 /analyze_settings.py
+/build_apk.txt
+/build_new.txt
+/build_test.txt

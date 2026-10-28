@@ -85,6 +85,13 @@ export default function Settings() {
           >
             远程删除
           </List.Item>
+          <List.Item
+            clickable
+            onClick={() => navigate('/settings/eh-account')}
+            extra={<span style={{ color: 'var(--text-light)' }}>&#8250;</span>}
+          >
+            E-Hentai 账号
+          </List.Item>
         </List>
 
         <List header="数据管理" style={{ marginTop: 16 }}>

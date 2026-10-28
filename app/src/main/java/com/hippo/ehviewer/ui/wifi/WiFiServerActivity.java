@@ -198,8 +198,8 @@ public class WiFiServerActivity extends ToolbarActivity implements AdapterView.O
     }
 
     private void createFavoriteData() {
-        List<GalleryInfo> list = EhDB.getAllLocalFavorites();
         new Thread(() -> {
+            List<GalleryInfo> list = EhDB.getAllLocalFavorites();
             int pageSize = 10;
             int pageCount = totalPage(list.size(), pageSize);
 
@@ -224,8 +224,8 @@ public class WiFiServerActivity extends ToolbarActivity implements AdapterView.O
     }
 
     private void createBookmarkData() {
-        List<QuickSearch> list = EhDB.getAllQuickSearch();
         new Thread(() -> {
+            List<QuickSearch> list = EhDB.getAllQuickSearch();
             int pageSize = 10;
             int pageCount = totalPage(list.size(), pageSize);
 

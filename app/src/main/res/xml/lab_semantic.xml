@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory
+        android:title="@string/lab_semantic_basic"
+        app:allowDividerAbove="false">
+
+        <com.hippo.preference.SwitchPreference
+            android:key="semantic_enabled"
+            android:title="@string/lab_semantic_enable"
+            android:summary="@string/lab_semantic_enable_summary"
+            android:defaultValue="false" />
+
+        <Preference
+            android:key="semantic_capability"
+            android:title="@string/lab_semantic_capability"
+            android:summary="@string/lab_semantic_capability_summary"
+            android:selectable="false"
+            app:allowDividerAbove="true" />
+
+        <ListPreference
+            android:key="semantic_backend"
+            android:title="@string/lab_semantic_backend"
+            android:summary="@string/lab_semantic_backend_summary"
+            android:entries="@array/semantic_backend_entries"
+            android:entryValues="@array/semantic_backend_values"
+            android:defaultValue="auto"
+            app:allowDividerAbove="true" />
+
+        <ListPreference
+            android:key="semantic_dim"
+            android:title="@string/lab_semantic_dim"
+            android:summary="@string/lab_semantic_dim_summary"
+            android:entries="@array/semantic_dim_entries"
+            android:entryValues="@array/semantic_dim_values"
+            android:defaultValue="256"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_semantic_native"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="semantic_model"
+            android:title="@string/lab_semantic_model"
+            android:summary="@string/lab_semantic_model_summary"
+            app:allowDividerAbove="false" />
+
+        <Preference
+            android:key="semantic_model_download"
+            android:title="@string/lab_semantic_model_download"
+            android:summary="@string/lab_semantic_model_download_summary"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="semantic_gpu_index"
+            android:title="@string/lab_semantic_gpu_index"
+            android:summary="@string/lab_semantic_gpu_index_summary"
+            android:defaultValue="true"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="semantic_index_on_charge"
+            android:title="@string/lab_semantic_index_on_charge"
+            android:summary="@string/lab_semantic_index_on_charge_summary"
+            android:defaultValue="true"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_semantic_remote"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="semantic_remote_url"
+            android:title="@string/lab_semantic_remote_url"
+            android:summary="@string/lab_semantic_remote_url_summary"
+            app:allowDividerAbove="false" />
+
+        <Preference
+            android:key="semantic_remote_model"
+            android:title="@string/lab_semantic_remote_model"
+            android:summary="@string/lab_semantic_remote_model_summary"
+            app:allowDividerAbove="true" />
+
+        <ListPreference
+            android:key="semantic_remote_protocol"
+            android:title="@string/lab_semantic_remote_protocol"
+            android:summary="@string/lab_semantic_remote_protocol_summary"
+            android:entries="@array/semantic_protocol_entries"
+            android:entryValues="@array/semantic_protocol_values"
+            android:defaultValue="openai"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="semantic_remote_key"
+            android:title="@string/lab_semantic_remote_key"
+            android:summary="@string/lab_semantic_remote_key_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="semantic_remote_test"
+            android:title="@string/lab_semantic_remote_test"
+            android:summary="@string/lab_semantic_remote_test_summary"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_semantic_index"
+        app:allowDividerAbove="true">
+
+        <Preference
+            android:key="semantic_index_status"
+            android:title="@string/lab_semantic_index_status"
+            android:summary="@string/lab_semantic_index_status_summary"
+            android:selectable="false"
+            app:allowDividerAbove="false" />
+
+        <Preference
+            android:key="semantic_index_start"
+            android:title="@string/lab_semantic_index_start"
+            android:summary="@string/lab_semantic_index_start_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="semantic_index_clear"
+            android:title="@string/lab_semantic_index_clear"
+            android:summary="@string/lab_semantic_index_clear_summary"
+            app:allowDividerAbove="true" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:key="semantic_blend"
+            android:title="@string/lab_semantic_blend"
+            android:defaultValue="65"
+            app:sliderEntries="@array/semantic_blend_entries"
+            app:sliderEntryValues="@array/semantic_blend_entry_values"
+            app:showValue="true"
+            app:allowDividerAbove="true" />
+
+    </PreferenceCategory>
+
+</PreferenceScreen>

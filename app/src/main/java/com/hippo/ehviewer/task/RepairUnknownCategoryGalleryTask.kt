@@ -31,15 +31,20 @@ class RepairUnknownCategoryGalleryTask(
     
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
     
     private var totalProgress = 0
+
+    /**
+     * 已处理的画廊数。
+     *
+     * 注意：不能用继承来的 `currentProgress` 当计数器 —— 基类的
+     * `updateProgress(current, total, detail)` 会把那个字段改写成**百分比**，
+     * 传回去就等于每次循环都把计数重置，进度条会永远卡在 0%。
+     */
+    private var processedCount = 0
     private var successCount = 0
     private var failedCount = 0
 
-    private fun notifyStatus() {
-        statusListener?.onStatus(currentProgress, totalProgress, successCount, failedCount)
-    }
     
     override fun getTaskId(): String = "repair_unknown_category"
     
@@ -65,7 +70,6 @@ class RepairUnknownCategoryGalleryTask(
                 Log.d(TAG, "没有需要修复的下载画廊")
                 appendTaskLog("没有需要修复的下载画廊")
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
             
@@ -76,14 +80,12 @@ class RepairUnknownCategoryGalleryTask(
                 Log.d(TAG, "没有分类为未知的下载画廊")
                 appendTaskLog("没有分类为未知的下载画廊")
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
             
             totalProgress = unknownCategoryGalleries.size
             successCount = 0
             failedCount = 0
-            notifyStatus()
             
             Log.d(TAG, "总共需要修复 $totalProgress 个分类未知的画廊")
             appendTaskLog("总共需要修复 $totalProgress 个分类未知的画廊")
@@ -115,19 +117,17 @@ class RepairUnknownCategoryGalleryTask(
                 
                 // 统计结果
                 batchResults.forEach { result ->
-                    currentProgress++
+                    processedCount++
                     if (result) {
                         successCount++
                     } else {
                         failedCount++
                     }
                 }
-                
-                val progressPercent = if (totalProgress > 0) currentProgress * 100 / totalProgress else 0
-                val progressDetail = "修复中 $currentProgress/$totalProgress (成功: $successCount, 失败: $failedCount)"
-                
-                updateProgress(currentProgress, totalProgress, progressDetail)
-                notifyStatus()
+
+                val progressDetail = "修复中 $processedCount/$totalProgress (成功: $successCount, 失败: $failedCount)"
+
+                updateProgress(processedCount, totalProgress, progressDetail)
                 
                 // 检查是否已取消
                 coroutineContext[Job]?.ensureActive()
@@ -205,21 +205,11 @@ class RepairUnknownCategoryGalleryTask(
         notifyCancelled()
     }
 
-    override fun getProgressDetail(): String? {
-        return if (totalProgress > 0) {
-            "$currentProgress/$totalProgress (成功: $successCount, 失败: $failedCount)"
-        } else {
-            null
-        }
-    }
+    // 不覆写 getProgressDetail()：基类会返回 updateProgress 传进去的那句
+    // 「修复中 12/57 (成功: …, 失败: …)」。覆写它只能拿到被改写成百分比的
+    // currentProgress，会渲染成「45/57」这种鬼话。
 
-    fun setStatusListener(listener: StatusListener?) {
-        statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, success: Int, failed: Int)
-    }
     
     /**
      * 阻塞执行任务（供 Java 代码调用）

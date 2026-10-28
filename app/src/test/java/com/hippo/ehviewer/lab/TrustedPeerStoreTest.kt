@@ -17,6 +17,7 @@
 package com.hippo.ehviewer.lab
 
 import android.content.Context
+import android.os.Looper
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -84,6 +86,8 @@ class TrustedPeerStoreTest {
 
         store.upsert(newPeer())
 
+        // 监听器回调投递主线程，Robolectric PAUSED looper 需手动 idle
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(latch.await(1, TimeUnit.SECONDS))
         assertNotNull(received)
         assertEquals("uuid-1", received!!.deviceId)
@@ -104,6 +108,7 @@ class TrustedPeerStoreTest {
         val updated = TrustedPeer.Builder("uuid-1", "Pixel-1-updated", "android").port(8080).build()
         val old = store.upsert(updated)
 
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(latch.await(1, TimeUnit.SECONDS))
         assertNotNull(old)
         assertEquals("Pixel-1", oldName)
@@ -125,6 +130,7 @@ class TrustedPeerStoreTest {
 
         val result = store.remove("uuid-1")
 
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue(latch.await(1, TimeUnit.SECONDS))
         assertNotNull(removed)
         assertNotNull(result)

@@ -35,6 +35,10 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.hippo.ehviewer.client.data.GalleryInfo;
+import com.hippo.ehviewer.client.tag.TagSuggestRepository;
+import com.hippo.ehviewer.lab.semantic.SemanticSearchManager;
+import com.hippo.ehviewer.lab.semantic.search.SemanticRanker;
+import com.hippo.ehviewer.download.progressive.ProgressiveStats;
 import com.hippo.ehviewer.client.data.ListUrlBuilder;import com.hippo.ehviewer.dao.BlackList;
 import com.hippo.ehviewer.dao.BlackListDao;
 import com.hippo.ehviewer.dao.DaoMaster;
@@ -65,6 +69,7 @@ import com.hippo.ehviewer.dao.SystemDownloadTaskDao;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.dao.QuickSearchDao;
 import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.util.DownloadHistoryStatusResolver;
 import com.hippo.util.ExceptionUtils;
 import com.hippo.util.SqlUtils;
 import com.hippo.lib.yorozuya.IOUtils;
@@ -73,7 +78,6 @@ import com.hippo.lib.yorozuya.collect.SparseJLArray;
 
 import org.greenrobot.greendao.AbstractDao;
 import org.greenrobot.greendao.query.CloseableListIterator;
-import org.greenrobot.greendao.query.LazyList;
 import org.greenrobot.greendao.query.QueryBuilder;
 
 import java.io.File;
@@ -85,9 +89,11 @@ import java.io.OutputStream;
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -118,6 +124,20 @@ public class EhDB {
         public void onCreate(SQLiteDatabase db) {
             super.onCreate(db);
             sNewDB = true;
+        }
+
+        @Override
+        public void onOpen(SQLiteDatabase db) {
+            super.onOpen(db);
+            // 幂等补齐历史库缺失的列：旧版本 onUpgrade(oldVersion<=5) 建 Gallery_Tags 时没有 LOCATION，
+            // 而实体/DAO 已包含 location，缺列会导致 queryGalleryTags 选 T."LOCATION" 直接崩溃。
+            // 这里每次打开都尝试补一次，列已存在（新库）时忽略 duplicate column 异常。
+            try {
+                db.execSQL("ALTER TABLE \"Gallery_Tags\" ADD COLUMN \"LOCATION\" TEXT");
+                android.util.Log.i("EhDB", "Gallery_Tags.LOCATION column added");
+            } catch (Exception ignored) {
+                // 列已存在或表结构已正确，忽略
+            }
         }
 
         @Override
@@ -243,7 +263,8 @@ public class EhDB {
                             "\"PARODY\" TEXT," + // 12: parody
                             "\"RECLASS\" TEXT," + // 13: reclass
                             "\"CREATE_TIME\" INTEGER," + // 14: create_time
-                            "\"UPDATE_TIME\" INTEGER);"); // 15: update_time
+                            "\"UPDATE_TIME\" INTEGER," + // 15: update_time
+                            "\"LOCATION\" TEXT);"); // 16: location
                 }
                 
                 if (oldVersion <= 6) {
@@ -521,6 +542,15 @@ public class EhDB {
     }
 
     public static void mergeOldDB(Context context) {
+        // 整段迁移放进一个事务：旧实现每条记录单独提交事务，历史数据量大时
+        // 会做大量磁盘同步，主线程直接卡到 ANR。
+        // 同时与其它 EhDB 操作串行，避免迁移期间后台线程并发访问同一 DAO。
+        synchronized (EhDB.class) {
+            sDaoSession.runInTx(() -> mergeOldDBInner(context));
+        }
+    }
+
+    private static void mergeOldDBInner(Context context) {
         sNewDB = false;
 
         OldDBHelper oldDBHelper = new OldDBHelper(context);
@@ -864,11 +894,16 @@ public class EhDB {
         }
     }
 
-    public static synchronized void moveDownloadInfo(List<DownloadInfo> infos, int fromPosition, int toPosition){
+    /**
+     * 调整下载顺序（拖拽排序）。
+     *
+     * <p>时间戳的重排在内存里同步完成，保证 UI 立即响应；数据库写入放到后台，
+     * 避免拖动时主线程被全局 DB 锁拖住。
+     */
+    public static void moveDownloadInfo(List<DownloadInfo> infos, int fromPosition, int toPosition){
         if (fromPosition == toPosition) {
             return;
         }
-        DownloadsDao dao = sDaoSession.getDownloadsDao();
         boolean reverse = fromPosition > toPosition;
         int offset = reverse ? toPosition : fromPosition;
         int limit = reverse ? fromPosition - toPosition + 1 : toPosition - fromPosition + 1;
@@ -883,7 +918,17 @@ public class EhDB {
             list.get(i).setTime(list.get(i + step).getTime());
         }
         list.get(start).setTime(toTime);
-        dao.updateInTx(list);
+
+        final List<DownloadInfo> changed = new ArrayList<>(list);
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                synchronized (EhDB.class) {
+                    sDaoSession.getDownloadsDao().updateInTx(changed);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "moveDownloadInfo async write failed", t);
+            }
+        });
     }
 
     // Insert or update
@@ -896,6 +941,16 @@ public class EhDB {
             // Insert
             dao.insert(downloadInfo);
         }
+    }
+
+    /**
+     * 在一个数据库事务内执行批量写入。
+     *
+     * <p>逐条写入各自开事务会产生大量磁盘同步；设备同步（§5.30）一批最多 500 行，
+     * 在主线程逐条写就是一次可感知的卡顿甚至 ANR。批量合并统一包进一次事务。
+     */
+    public static synchronized void runInTransaction(@NonNull Runnable action) {
+        sDaoSession.runInTx(action);
     }
 
     public static synchronized void removeDownloadInfo(long gid) {
@@ -936,12 +991,13 @@ public class EhDB {
      * @param infoList 被删除的下载信息列表
      * @return 新补充的下载历史条数
      */
-    public static synchronized int ensureDownloadHistoryDeletedBulk(final List<DownloadInfo> infoList) {
+    public static int ensureDownloadHistoryDeletedBulk(final List<DownloadInfo> infoList) {
         if (infoList == null || infoList.isEmpty()) {
             return 0;
         }
 
-        // 先在事务外获取所有画廊的文件信息，避免在事务内频繁查询
+        // 先在锁外获取所有画廊的文件信息：这段可能很慢，旧实现整段都在
+        // synchronized 里，会长时间阻塞主线程的任意 DB 读，直接表现为 ANR。
         final Map<Long, FileTokensInfo> fileTokensMap = new java.util.HashMap<>();
         try {
             com.hippo.ehviewer.DownloadedFileManager dfm =
@@ -956,9 +1012,16 @@ public class EhDB {
             Log.e(TAG, "Failed to get file tokens in bulk", e);
         }
 
+        int created = ensureDownloadHistoryDeletedBulkLocked(infoList, fileTokensMap);
+        DownloadHistoryStatusResolver.invalidateAll();
+        return created;
+    }
+
+    private static synchronized int ensureDownloadHistoryDeletedBulkLocked(
+            final List<DownloadInfo> infoList,
+            final Map<Long, FileTokensInfo> finalFileTokensMap) {
         final DownloadHistoryDao historyDao = sDaoSession.getDownloadHistoryDao();
         final int[] createdCount = new int[1];
-        final Map<Long, FileTokensInfo> finalFileTokensMap = fileTokensMap;
         sDaoSession.runInTx(new Runnable() {
             @Override
             public void run() {
@@ -1028,6 +1091,7 @@ public class EhDB {
         history.setDeletionType(DownloadHistory.DELETION_NORMAL);
         history.setDeletedAt(System.currentTimeMillis());
         dao.update(history);
+        DownloadHistoryStatusResolver.invalidate(gid);
     }
 
     /**
@@ -1089,6 +1153,52 @@ public class EhDB {
         return sDaoSession.getDownloadHistoryDao().loadAll();
     }
 
+    /**
+     * 「递进传递」关系的一条边：{@code source} 的内容被传递/合并进了 {@code target}。
+     */
+    public static final class MergeEdge {
+        public final long sourceGid;
+        public final long targetGid;
+
+        MergeEdge(long sourceGid, long targetGid) {
+            this.sourceGid = sourceGid;
+            this.targetGid = targetGid;
+        }
+    }
+
+    /**
+     * 一次性读出所有「递进/重复合并」关系边，供 {@link com.hippo.ehviewer.download.progressive
+     * .ProgressiveStats} 建索引。
+     *
+     * <p>只统计 {@link DownloadHistory#DELETION_DUPLICATE_MERGED} 与
+     * {@link DownloadHistory#DELETION_PROGRESSIVE_MERGED}；{@code DELETION_NORMAL}
+     * （用户普通删除）不算递进传递。{@code MERGED_TARGET_GID <= 0} 表示没有合并目标，也跳过。
+     *
+     * <p>注意：这是全表扫描，调用方必须缓存结果，不能放在下载列表渲染这种热路径上逐条调。
+     */
+    public static synchronized List<MergeEdge> queryProgressiveMergeEdges() {
+        List<MergeEdge> edges = new ArrayList<>();
+        Cursor cursor = null;
+        try {
+            cursor = sDaoSession.getDownloadHistoryDao().getDatabase().rawQuery(
+                    "SELECT \"GID\",\"MERGED_TARGET_GID\" FROM \"DOWNLOAD_HISTORY\""
+                            + " WHERE \"DELETION_TYPE\" IN (?,?) AND \"MERGED_TARGET_GID\" > 0",
+                    new String[]{
+                            String.valueOf(DownloadHistory.DELETION_DUPLICATE_MERGED),
+                            String.valueOf(DownloadHistory.DELETION_PROGRESSIVE_MERGED)});
+            while (cursor.moveToNext()) {
+                edges.add(new MergeEdge(cursor.getLong(0), cursor.getLong(1)));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "queryProgressiveMergeEdges failed", e);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return edges;
+    }
+
     public static synchronized void recordDownloadCompleted(DownloadInfo info, @Nullable String filePath) {
         DownloadHistoryDao dao = sDaoSession.getDownloadHistoryDao();
         DownloadHistory history = dao.load(info.gid);
@@ -1109,6 +1219,7 @@ public class EhDB {
         history.setMergedTargetGid(0);
         history.setDeletedAt(0);
         dao.insertOrReplace(history);
+        DownloadHistoryStatusResolver.invalidate(info.gid);
     }
 
     public static synchronized void markDownloadHistoryDeleted(long gid, int deletionType, long mergedTargetGid) {
@@ -1118,6 +1229,8 @@ public class EhDB {
         history.setMergedTargetGid(mergedTargetGid);
         history.setDeletedAt(System.currentTimeMillis());
         sDaoSession.getDownloadHistoryDao().update(history);
+        ProgressiveStats.invalidate();
+        DownloadHistoryStatusResolver.invalidate(gid);
     }
 
     /**
@@ -1145,6 +1258,7 @@ public class EhDB {
         history.setDownloadedFiles(downloadedFiles);
         history.setFileTokens(fileTokens);
         dao.insertOrReplace(history);
+        DownloadHistoryStatusResolver.invalidate(gid);
     }
 
     /**
@@ -1221,6 +1335,8 @@ public class EhDB {
             }
         }
         dao.insertOrReplace(history);
+        ProgressiveStats.invalidate();
+        DownloadHistoryStatusResolver.invalidate(info.gid);
     }
 
     /**
@@ -1263,6 +1379,7 @@ public class EhDB {
         history.setMergedTargetGid(0);
         history.setDeletedAt(0);
         dao.insert(history);
+        DownloadHistoryStatusResolver.invalidate(gid);
     }
 
     /**
@@ -1325,6 +1442,7 @@ public class EhDB {
         } else {
             dao.update(history);
         }
+        DownloadHistoryStatusResolver.invalidate(gid);
         return true;
     }
 
@@ -1665,7 +1783,47 @@ public class EhDB {
         LocalFavoritesDao dao = sDaoSession.getLocalFavoritesDao();
         List<LocalFavoriteInfo> list = dao.queryBuilder().orderDesc(LocalFavoritesDao.Properties.Time)
                 .where(LocalFavoritesDao.Properties.Title.like(query)).list();
-        return new ArrayList<>(list);
+        List<GalleryInfo> result = new ArrayList<>(list);
+        appendSemanticFavorites(result, query);
+        return result;
+    }
+
+    /**
+     * 语义搜索补充召回（实验室功能）。
+     *
+     * <p>原有 LIKE 匹配只能命中标题字面包含关键词的条目；启用语义搜索后，这里会
+     * 额外补上「语义相近但字面不匹配」的收藏，例如中文关键词命中日文/英文标题。
+     * 功能关闭、索引为空或推理失败时完全不改变原有行为。
+     */
+    private static void appendSemanticFavorites(List<GalleryInfo> target, String rawQuery) {
+        try {
+            if (!SemanticSearchManager.isEnabled() || rawQuery == null || rawQuery.trim().isEmpty()) {
+                return;
+            }
+            List<SemanticRanker.ScoredGallery> hits = SemanticRanker.semanticSearch(rawQuery, 60);
+            if (hits.isEmpty()) {
+                return;
+            }
+            java.util.Set<Long> existing = new java.util.HashSet<>();
+            for (GalleryInfo info : target) {
+                existing.add(info.gid);
+            }
+            LocalFavoritesDao dao = sDaoSession.getLocalFavoritesDao();
+            for (SemanticRanker.ScoredGallery hit : hits) {
+                if (existing.contains(hit.gid)) {
+                    continue;
+                }
+                // 只补充确实存在于本地收藏中的条目，避免语义索引命中下载列表时串库
+                LocalFavoriteInfo info = dao.load(hit.gid);
+                if (info != null) {
+                    target.add(info);
+                    existing.add(hit.gid);
+                }
+            }
+        } catch (Throwable t) {
+            // 语义搜索是可选增强，任何异常都不应影响原有搜索
+            Log.w(TAG, "appendSemanticFavorites failed: " + t);
+        }
     }
 
     public static synchronized GalleryInfo searchLocalFavorites(long query) {
@@ -1682,9 +1840,12 @@ public class EhDB {
 
     public static synchronized void removeLocalFavorites(long[] gidArray) {
         LocalFavoritesDao dao = sDaoSession.getLocalFavoritesDao();
-        for (long gid : gidArray) {
-            dao.deleteByKey(gid);
-        }
+        // 批量删除放进一个事务，避免选中多个收藏时逐条提交
+        sDaoSession.runInTx(() -> {
+            for (long gid : gidArray) {
+                dao.deleteByKey(gid);
+            }
+        });
     }
 
     public static synchronized boolean containLocalFavorites(long gid) {
@@ -1709,6 +1870,49 @@ public class EhDB {
     public static synchronized void putLocalFavorites(List<GalleryInfo> galleryInfoList) {
         for (GalleryInfo gi : galleryInfoList) {
             putLocalFavorite(gi);
+        }
+    }
+
+    // ==================== 收藏批量操作的异步入口 ====================
+    // 本地收藏多选删除/移动、云端失败回滚等操作可能涉及成百上千条记录，
+    // 旧实现直接在对话框点击回调（主线程）里同步写库，容易长时间占用全局锁。
+
+    public static void removeLocalFavoritesAsync(@Nullable long[] gidArray, @Nullable Runnable onComplete) {
+        if (gidArray == null || gidArray.length == 0) {
+            postMain(onComplete);
+            return;
+        }
+        final long[] copy = gidArray.clone();
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                removeLocalFavorites(copy);
+            } catch (Throwable t) {
+                Log.w(TAG, "removeLocalFavoritesAsync failed", t);
+            }
+            postMain(onComplete);
+        });
+    }
+
+    public static void putLocalFavoritesAsync(@Nullable List<GalleryInfo> galleryInfoList,
+                                              @Nullable Runnable onComplete) {
+        if (galleryInfoList == null || galleryInfoList.isEmpty()) {
+            postMain(onComplete);
+            return;
+        }
+        final List<GalleryInfo> copy = new ArrayList<>(galleryInfoList);
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                putLocalFavorites(copy);
+            } catch (Throwable t) {
+                Log.w(TAG, "putLocalFavoritesAsync failed", t);
+            }
+            postMain(onComplete);
+        });
+    }
+
+    private static void postMain(@Nullable Runnable action) {
+        if (action != null) {
+            com.hippo.lib.yorozuya.SimpleHandler.getInstance().post(action);
         }
     }
 
@@ -1744,21 +1948,61 @@ public class EhDB {
 
     public static synchronized List<GalleryTags> getAllGalleryTags() {
         GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
-        return dao.queryBuilder().orderAsc(GalleryTagsDao.Properties.Gid).list();
+        try {
+            return dao.queryBuilder().orderAsc(GalleryTagsDao.Properties.Gid).list();
+        } catch (SQLiteException e) {
+            Log.w(TAG, "getAllGalleryTags failed", e);
+            return new ArrayList<>();
+        }
     }
 
     public static synchronized boolean inGalleryTags(long gid) {
         GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
-        return dao.queryRaw("where gid =" + gid).size() != 0;
+        try {
+            return dao.queryRaw("where gid =" + gid).size() != 0;
+        } catch (SQLiteException e) {
+            Log.w(TAG, "inGalleryTags failed for gid=" + gid, e);
+            return false;
+        }
+    }
+
+    /**
+     * 所有已有标签行的 gid。
+     *
+     * <p>用于「标签规则能看到多少条目」的统计（排除面板的提示），一次查询替代逐条
+     * {@link #inGalleryTags(long)}，避免几千次 DB 往返。
+     */
+    public static synchronized Set<Long> getAllGalleryTagGids() {
+        Set<Long> gids = new HashSet<>();
+        Cursor cursor = null;
+        try {
+            GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
+            cursor = dao.getDatabase().rawQuery("SELECT GID FROM Gallery_Tags", null);
+            while (cursor.moveToNext()) {
+                gids.add(cursor.getLong(0));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getAllGalleryTagGids failed", e);
+        } finally {
+            if (cursor != null) {
+                cursor.close();
+            }
+        }
+        return gids;
     }
 
     public static synchronized GalleryTags queryGalleryTags(long gid) {
         GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
-        List<GalleryTags> list = dao.queryRaw("where gid =" + gid);
-        if (list.isEmpty()) {
+        try {
+            List<GalleryTags> list = dao.queryRaw("where gid =" + gid);
+            if (list.isEmpty()) {
+                return null;
+            }
+            return list.get(0);
+        } catch (SQLiteException e) {
+            Log.w(TAG, "queryGalleryTags failed for gid=" + gid, e);
             return null;
         }
-        return list.get(0);
     }
 
     public static synchronized void insertGalleryTags(GalleryTags galleryTags) {
@@ -1766,17 +2010,20 @@ public class EhDB {
         galleryTags.create_time = new Date();
         galleryTags.update_time = galleryTags.create_time;
         dao.insert(galleryTags);
+        TagSuggestRepository.invalidate();
     }
 
     public static synchronized void updateGalleryTags(GalleryTags galleryTags) {
         GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
         galleryTags.update_time = new Date();
         dao.update(galleryTags);
+        TagSuggestRepository.invalidate();
     }
 
     public static synchronized void deleteGalleryTags(GalleryTags galleryTags) {
         GalleryTagsDao dao = sDaoSession.getGalleryTagsDao();
         dao.delete(galleryTags);
+        TagSuggestRepository.invalidate();
     }
 
     public static synchronized List<QuickSearch> getAllQuickSearch() {
@@ -1832,6 +2079,26 @@ public class EhDB {
         dao.update(quickSearch);
     }
 
+    /**
+     * 批量更新快速搜索条目（单事务）。
+     * 书签抽屉打开时会重写大量翻译后的名称，逐条 update 在主线程就是 N 次事务。
+     */
+    public static void updateQuickSearchBulkAsync(@Nullable List<QuickSearch> quickSearchList) {
+        if (quickSearchList == null || quickSearchList.isEmpty()) {
+            return;
+        }
+        final List<QuickSearch> copy = new ArrayList<>(quickSearchList);
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                synchronized (EhDB.class) {
+                    sDaoSession.getQuickSearchDao().updateInTx(copy);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "updateQuickSearchBulkAsync failed", t);
+            }
+        });
+    }
+
     public static synchronized void deleteQuickSearch(QuickSearch quickSearch) {
         QuickSearchDao dao = sDaoSession.getQuickSearchDao();
         dao.delete(quickSearch);
@@ -1880,12 +2147,61 @@ public class EhDB {
         dao.updateInTx(list);
     }
 
-    public static synchronized LazyList<HistoryInfo> getHistoryLazyList() {
-        return sDaoSession.getHistoryDao().queryBuilder().orderDesc(HistoryDao.Properties.Time).listLazy();
+    /**
+     * 一次性读出全部历史记录（按时间倒序）。
+     *
+     * <p>历史页旧实现使用 greenDAO 的 LazyList，滚动到未缓存区间时会在主线程逐行
+     * 查库；条目多时表现为滚动掉帧。整表一次读出（约几百条）后纯内存访问。
+     */
+    @NonNull
+    public static synchronized List<HistoryInfo> getHistoryList() {
+        return sDaoSession.getHistoryDao().queryBuilder().orderDesc(HistoryDao.Properties.Time).list();
     }
 
-    public static synchronized void putHistoryInfo(GalleryInfo galleryInfo) {
-        HistoryDao dao = sDaoSession.getHistoryDao();
+    // 历史写入专用串行执行器：详情页打开、清空历史等 UI 操作不再占用主线程做 DB 事务。
+    private static final java.util.concurrent.ExecutorService sAsyncWriteExecutor =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "EhDB-Async");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /**
+     * 异步写入历史记录。
+     *
+     * <p>详情页旧实现在 onCreate 里同步 {@link #putHistoryInfo(GalleryInfo)}，
+     * 每打开一个画廊就在主线程做一次 DB 读 + 写（必要时还要裁剪旧记录），
+     * 后台批量任务持锁时直接表现为卡顿。
+     */
+    public static void putHistoryInfoAsync(@Nullable GalleryInfo galleryInfo) {
+        if (galleryInfo == null) {
+            return;
+        }
+        final GalleryInfo info = galleryInfo;
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                putHistoryInfo(info);
+            } catch (Throwable t) {
+                Log.w(TAG, "putHistoryInfoAsync failed", t);
+            }
+        });
+    }
+
+    /** 异步清空历史记录；[onComplete] 在操作结束后回主线程执行。 */
+    public static void clearHistoryInfoAsync(@Nullable Runnable onComplete) {
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                clearHistoryInfo();
+            } catch (Throwable t) {
+                Log.w(TAG, "clearHistoryInfoAsync failed", t);
+            }
+            if (onComplete != null) {
+                com.hippo.lib.yorozuya.SimpleHandler.getInstance().post(onComplete);
+            }
+        });
+    }
+
+    public static synchronized void putHistoryInfo(GalleryInfo galleryInfo) {        HistoryDao dao = sDaoSession.getHistoryDao();
         HistoryInfo info = dao.load(galleryInfo.gid);
         boolean isNew = (info == null);
         if (!isNew) {

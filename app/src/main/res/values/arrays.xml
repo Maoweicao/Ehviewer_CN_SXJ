@@ -788,4 +788,80 @@
         <item>1</item>
     </string-array>
 
+    <!-- 语义搜索：后端模式 -->
+    <string-array name="semantic_backend_entries">
+        <item>@string/lab_semantic_backend_auto</item>
+        <item>@string/lab_semantic_backend_native_cpu</item>
+        <item>@string/lab_semantic_backend_native_gpu</item>
+        <item>@string/lab_semantic_backend_remote</item>
+        <item>@string/lab_semantic_backend_off</item>
+    </string-array>
+
+    <string-array name="semantic_backend_values" translatable="false">
+        <item>auto</item>
+        <item>native_cpu</item>
+        <item>native_gpu</item>
+        <item>remote</item>
+        <item>off</item>
+    </string-array>
+
+    <!-- 语义搜索：向量维度（Matrioshka 截断） -->
+    <string-array name="semantic_dim_entries">
+        <item>@string/lab_semantic_dim_768</item>
+        <item>@string/lab_semantic_dim_512</item>
+        <item>@string/lab_semantic_dim_256</item>
+        <item>@string/lab_semantic_dim_128</item>
+    </string-array>
+
+    <string-array name="semantic_dim_values" translatable="false">
+        <item>768</item>
+        <item>512</item>
+        <item>256</item>
+        <item>128</item>
+    </string-array>
+
+    <!-- 语义搜索：远程协议 -->
+    <string-array name="semantic_protocol_entries">
+        <item>@string/lab_semantic_protocol_openai</item>
+        <item>@string/lab_semantic_protocol_ollama</item>
+        <item>@string/lab_semantic_protocol_tei</item>
+    </string-array>
+
+    <string-array name="semantic_protocol_values" translatable="false">
+        <item>openai</item>
+        <item>ollama</item>
+        <item>tei</item>
+    </string-array>
+
+    <!-- 语义搜索：关键词/语义融合权重 -->
+    <string-array name="semantic_blend_entries">
+        <item>@string/lab_semantic_blend_keyword_only</item>
+        <item>@string/lab_semantic_blend_20</item>
+        <item>@string/lab_semantic_blend_40</item>
+        <item>@string/lab_semantic_blend_65</item>
+        <item>@string/lab_semantic_blend_80</item>
+        <item>@string/lab_semantic_blend_semantic_only</item>
+    </string-array>
+
+    <string-array name="semantic_blend_entry_values" translatable="false">
+        <item>0</item>
+        <item>20</item>
+        <item>40</item>
+        <item>65</item>
+        <item>80</item>
+        <item>100</item>
+    </string-array>
+
+    <string-array name="lab_sync_direction_entries">
+        <item>Bidirectional</item>
+        <item>Pull only (peer → this device)</item>
+        <item>Push only (this device → peer)</item>
+    </string-array>
+
+    <string-array name="lab_sync_direction_values" translatable="false">
+        <item>bidirectional</item>
+        <item>pull</item>
+        <item>push</item>
+    </string-array>
+
 </resources>

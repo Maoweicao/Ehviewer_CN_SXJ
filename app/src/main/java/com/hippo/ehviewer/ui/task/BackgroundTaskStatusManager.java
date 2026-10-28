@@ -193,6 +193,18 @@ public class BackgroundTaskStatusManager {
     }
 
     /**
+     * 移除已完成列表里同 ID 的旧记录（不通知 UI）。
+     *
+     * <p>同名任务重新开始时使用：否则同一 taskId 会同时出现在"运行中"和"已完成"，
+     * 并且需要排队时会被 {@link #enqueueUniqueWaitingTask} 当作重复任务拒绝。
+     */
+    public void discardCompletedRecord(@NonNull String taskId) {
+        if (mCompletedTasks.remove(taskId) != null) {
+            savePersistedTasksAsync();
+        }
+    }
+
+    /**
      * 仅从已完成队列移除指定 taskId，不影响活跃任务。
      * 返回是否真的移除了一条记录。
      */
@@ -373,6 +385,9 @@ public class BackgroundTaskStatusManager {
         //     被提交执行 —— 任务永久滞留活跃列表，无日志、无进度、无法完成。
         //  2. 跨组静默丢弃：不同组的 unique 任务通过 submitBackgroundTask 的组冲突
         //     检查后，却在这里被静默拒绝（返回 null），UI 上毫无痕迹。
+        // 同名任务重新开始（例如再次扫描本地画廊）时，先移除上次的完成记录，
+        // 否则同一 taskId 会同时出现在"运行中"和"已完成"两个列表里。
+        mCompletedTasks.remove(taskId);
         BackgroundTaskInfo taskInfo = new BackgroundTaskInfo(taskId, taskName, taskDescription, future, taskType,
                 uniqueTask, taskClassName, taskPersistData, mutexGroup, System.currentTimeMillis());
         taskInfo.setQueued(future != null);

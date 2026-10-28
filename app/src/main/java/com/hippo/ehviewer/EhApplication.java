@@ -57,6 +57,7 @@ import com.hippo.ehviewer.download.DownloadLogger;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.network.NetworkSecurityManager;
 import com.hippo.ehviewer.network.NetworkStateManager;
+import com.hippo.ehviewer.service.HealthWatchdog;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.ui.CommonOperations;
 import com.hippo.lib.image.Image;
@@ -116,6 +117,9 @@ public class EhApplication extends RecordingApplication {
     private static final long DEBUG_PRINT_INTERVAL = 3000L;
 
     private static EhApplication instance;
+
+    /** 下载管理器首次创建会全表加载，锁用于避免预热与首次访问并发创建两个实例。 */
+    private static final Object sDownloadManagerLock = new Object();
 
     private final IntIdGenerator mIdGenerator = new IntIdGenerator();
     private final HashMap<Integer, Object> mGlobalStuffMap = new HashMap<>();
@@ -180,6 +184,11 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
+        // 常驻看门狗：预判主线程阻塞并保留现场，同时在阻塞/恢复后驱动 ANR 弹窗清除。
+        // 之前只有设置页手动切换开关才会启动，进程重启后完全不生效。
+        if (Settings.getPreAnrDetectionEnabled()) {
+            HealthWatchdog.INSTANCE.start();
+        }
         DownloadLogger.initialize(this);
         NetworkStateManager.INSTANCE.init(this);
         NetworkSecurityManager.INSTANCE.init();
@@ -199,7 +208,13 @@ public class EhApplication extends RecordingApplication {
         // 实际作用不确定，但是与64位应用有冲突
 //        A7Zip.loadLibrary(A7ZipExtractLite.LIBRARY, libname -> ReLinker.loadLibrary(EhApplication.this, libname));
         // 64位适配
-        A7Zip.initialize(this);
+        try {
+            A7Zip.initialize(this);
+        } catch (Throwable t) {
+            // 原生库不可用（例如 JVM/Robolectric 单元测试环境）时降级，
+            // 不让 Application 初始化崩溃；解压功能届时不可用。
+            android.util.Log.w("EhApplication", "A7Zip.initialize failed: " + t);
+        }
         if (EhDB.needMerge()) {
             EhDB.mergeOldDB(this);
         }
@@ -212,6 +227,14 @@ public class EhApplication extends RecordingApplication {
         new AsyncTask<Void, Void, Void>() {
             @Override
             protected Void doInBackground(Void... voids) {
+                // 预热下载管理器：首次构造会全表加载下载记录，放到后台避免第一次
+                // 进入下载管理/画廊列表时由主线程承担这段 I/O。
+                try {
+                    getDownloadManager(EhApplication.this);
+                } catch (Throwable t) {
+                    ExceptionUtils.throwIfFatal(t);
+                }
+
                 // Check no media file
                 try {
                     UniFile downloadLocation = Settings.getDownloadLocation();
@@ -258,6 +281,19 @@ public class EhApplication extends RecordingApplication {
         }
 
         initialized = true;
+
+        // 后台预热 EventBus：历史 pre-ANR 抓到的卡顿点是 GalleryListScene.onDestroy
+        // 主线程里首次初始化 EventBus（AndroidComponents.<clinit>）。提前在 IO 线程完成
+        // 类初始化，避免首次使用落在主线程的生命周期回调上。
+        try {
+            IoThreadPoolExecutor.Companion.getInstance().execute(() -> {
+                try {
+                    org.greenrobot.eventbus.EventBus.getDefault();
+                } catch (Throwable ignored) {
+                }
+            });
+        } catch (Throwable ignored) {
+        }
     }
 
     private void clearTempDir() {
@@ -646,10 +682,13 @@ public class EhApplication extends RecordingApplication {
     @NonNull
     public static DownloadManager getDownloadManager(@NonNull Context context) {
         EhApplication application = ((EhApplication) context.getApplicationContext());
-        if (application.mDownloadManager == null) {
-            application.mDownloadManager = new DownloadManager(application);
+        // 首次访问会全表加载下载记录；加锁避免后台预热与主线程首次访问并发创建两个实例。
+        synchronized (sDownloadManagerLock) {
+            if (application.mDownloadManager == null) {
+                application.mDownloadManager = new DownloadManager(application);
+            }
+            return application.mDownloadManager;
         }
-        return application.mDownloadManager;
     }
 
     /**

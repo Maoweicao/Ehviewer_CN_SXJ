@@ -56,7 +56,7 @@ class PairingCodeManager private constructor() {
             TAG,
             "Issued pairing code (hashed): ${maskCode(code)}, ttl=${TTL_MS}ms",
         )
-        return PairingIssue(code, expiresAt, TTL_MS, activeDeviceNameHint)
+        return PairingIssue(code, expiresAt, TTL_MS / 1000, activeDeviceNameHint)
     }
 
     /**

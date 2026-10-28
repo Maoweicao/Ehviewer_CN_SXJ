@@ -2,6 +2,8 @@ package com.hippo.ehviewer.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
@@ -25,10 +27,10 @@ import java.util.Locale
  *
  * 生效门槛（缺一不可，避免平时误干预）：
  * - Settings.isAnrAutoDismissEnabled() 为 true；
- * - BackgroundTaskManager 存在活跃后台任务（用户选择"仅后台任务运行时生效"）；
+ * - 存在活跃后台任务，或最近 30s 内看门狗判定过主线程阻塞（覆盖纯界面操作导致的 ANR）；
  * - 窗口特征匹配：存在 ANR 特征文本（"无响应"/"isn't responding" 等），
- *   且存在可点击的"等待/Wait"按钮；系统窗口（包名 android / systemui）之外
- *   的窗口需同时满足两条特征才处理，防止误点应用自身界面。
+ *   且存在可点击的"等待/Wait"按钮；系统窗口（包名 android / systemui 及常见
+ *   OEM 系统组件）之外的窗口需同时满足两条特征才处理，防止误点应用自身界面。
  */
 class AnrDialogDismissService : AccessibilityService() {
 
@@ -41,9 +43,20 @@ class AnrDialogDismissService : AccessibilityService() {
             listOf("无响应", "没有响应", "isn't responding", "not responding")
 
         // ANR 弹窗中"等待"按钮文本：点击后应用继续运行，进程不被杀死。
-        // 中文 ROM 常见 "等待"/"等待应用"，AOSP 英文为 "Wait"。
+        // 中文 ROM 常见 "等待"/"等待应用"/"继续等待"/"等待响应"，AOSP 英文为 "Wait"。
         private const val WAIT_EN = "wait"
         private const val WAIT_ZH_PREFIX = "等待"
+
+        // 各 OEM 的 ANR/系统弹窗常由自家系统组件托管，包名不在 AOSP 白名单内。
+        // 这些窗口同样要通过"ANR 文本 + 等待按钮"双特征校验，不会误点普通界面。
+        private val OEM_SYSTEM_PACKAGE_PREFIXES = listOf(
+            "com.miui.", "com.xiaomi.",
+            "com.oplus.", "com.coloros.", "com.oppo.",
+            "com.samsung.", "com.sec.android.",
+            "com.vivo.", "com.bbk.", "com.iqoo.",
+            "com.huawei.", "com.hihonor.",
+            "com.meizu.", "com.nubia.", "com.zte.",
+        )
 
         // 事件驱动路径的尝试节流：窗口内容变化事件非常频繁，避免风暴期间反复遍历节点树
         private const val EVENT_ATTEMPT_INTERVAL_MS = 500L
@@ -65,6 +78,10 @@ class AnrDialogDismissService : AccessibilityService() {
 
         @Volatile
         private var sLastClickAt = 0L
+
+        /** 节流窗口内被丢弃的事件需要补扫一次，避免唯一一次弹窗事件被吞掉。 */
+        @Volatile
+        private var sRetryScheduled = false
 
         /** 无障碍服务是否已连接（用户已在系统设置中开启） */
         @JvmStatic
@@ -92,8 +109,11 @@ class AnrDialogDismissService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         sInstance = this
+        sRetryScheduled = false
         Log.i(TAG, "AnrDialogDismissService connected")
     }
+
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun onUnbind(intent: Intent?): Boolean {
         sInstance = null
@@ -103,6 +123,8 @@ class AnrDialogDismissService : AccessibilityService() {
 
     override fun onDestroy() {
         sInstance = null
+        sRetryScheduled = false
+        mainHandler.removeCallbacksAndMessages(null)
         super.onDestroy()
     }
 
@@ -122,13 +144,33 @@ class AnrDialogDismissService : AccessibilityService() {
         if (pkg != null && !isSystemWindowPackage(pkg)) return
 
         val now = SystemClock.uptimeMillis()
-        if (now - sLastEventAttemptAt < EVENT_ATTEMPT_INTERVAL_MS) return
+        val elapsed = now - sLastEventAttemptAt
+        if (elapsed < EVENT_ATTEMPT_INTERVAL_MS) {
+            // 节流窗口内的事件不能直接丢弃：ANR 弹窗可能只产生一次窗口事件，
+            // 丢掉就再也没有机会补上。延迟到节流结束后补扫一次。
+            scheduleRetry(EVENT_ATTEMPT_INTERVAL_MS - elapsed)
+            return
+        }
         sLastEventAttemptAt = now
         try {
             tryDismissAnrDialog("event")
         } catch (e: Throwable) {
             Log.w(TAG, "onAccessibilityEvent dismiss failed", e)
         }
+    }
+
+    /** 延迟补扫一次（节流窗口内被丢弃的事件） */
+    private fun scheduleRetry(delayMs: Long) {
+        if (sRetryScheduled) return
+        sRetryScheduled = true
+        mainHandler.postDelayed({
+            sRetryScheduled = false
+            try {
+                tryDismissAnrDialog("event-retry")
+            } catch (e: Throwable) {
+                Log.w(TAG, "event retry dismiss failed", e)
+            }
+        }, delayMs.coerceAtLeast(50L))
     }
 
     /**
@@ -141,8 +183,10 @@ class AnrDialogDismissService : AccessibilityService() {
         // 生效门槛 1：设置开关
         if (!Settings.isAnrAutoDismissEnabled()) return false
 
-        // 生效门槛 2：仅当存在活跃后台任务时工作（平时绝不干扰）
-        if (!isBackgroundTaskActive()) return false
+        // 生效门槛 2：存在活跃后台任务，或最近主线程阻塞过。
+        // 旧实现只认活跃后台任务，纯界面操作导致的 ANR（无后台任务）永远不会被清理；
+        // 看门狗在恢复后保留 30s 余震窗口，覆盖"弹窗晚于恢复弹出"的情况。
+        if (!isBackgroundTaskActive() && !HealthWatchdog.isRecentlyBlocked()) return false
 
         // 点击后的冷却期内不再重复处理
         val now = SystemClock.uptimeMillis()
@@ -185,7 +229,11 @@ class AnrDialogDismissService : AccessibilityService() {
     }
 
     private fun isSystemWindowPackage(pkg: String): Boolean {
-        return pkg == "android" || pkg == "com.android.systemui" || pkg.startsWith("com.miui.")
+        if (pkg == "android" || pkg == "com.android.systemui") return true
+        for (prefix in OEM_SYSTEM_PACKAGE_PREFIXES) {
+            if (pkg.startsWith(prefix)) return true
+        }
+        return false
     }
 
     /**
@@ -263,12 +311,17 @@ class AnrDialogDismissService : AccessibilityService() {
     }
 
     private fun isWaitButtonLabel(rawText: String): Boolean {
-        val t = rawText.trim().lowercase(Locale.ROOT)
-        if (t.isEmpty()) return false
-        // 英文：精确匹配 "wait"（避免把含 wait 的长文案误当按钮）
-        if (t == WAIT_EN) return true
-        // 中文：允许 "等待"/"等待应用" 等以"等待"开头的短文案
-        return rawText.trim().startsWith(WAIT_ZH_PREFIX) && rawText.trim().length <= 6
+        // text 与 contentDescription 可能被拼成 "文本/描述"，逐段判断，避免长文案误判。
+        for (part in rawText.split('/')) {
+            val text = part.trim()
+            if (text.isEmpty()) continue
+            val lower = text.lowercase(Locale.ROOT)
+            // 英文：wait / Wait… / Wait for response 等短按钮文案
+            if (lower == WAIT_EN || (lower.startsWith(WAIT_EN) && text.length <= 12)) return true
+            // 中文：等待 / 等待应用 / 继续等待 / 等待响应 等短文案
+            if (text.contains(WAIT_ZH_PREFIX) && text.length <= 8) return true
+        }
+        return false
     }
 
     /** 返回节点自身或最近的可点击祖先（按钮有时不可点击而由父容器代理） */

@@ -28,6 +28,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.flexbox.FlexboxLayout;
 
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.client.tag.TagSuggestRepository;
+import com.hippo.ehviewer.widget.TagInputView;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhTagDatabase;
 
@@ -82,6 +84,8 @@ public class TagSelectorActivity extends EhActivity {
     private final LinkedHashMap<String, String> selectedTags = new LinkedHashMap<>();
     private final List<SelectedTagGroup> selectedGroupsForDisplay = new ArrayList<>();
     private List<TagGroup> allGroups = new ArrayList<>();
+    /** 标签搜索框的当前文本，用于过滤下方列表。 */
+    private String mFilterText = "";
     // Mixed list for Adapter (Headers + Items + Footers)
     // 混合列表，Adapter 会根据类型区分渲染
     private List<Object> displayList = new ArrayList<>();
@@ -151,12 +155,35 @@ public class TagSelectorActivity extends EhActivity {
         }
         toolbar.setNavigationOnClickListener(v -> finish());
 
-//        tvSelectedCount = findViewById(R.id.tv_selected_count);
+        tvSelectedCount = findViewById(R.id.tv_selected_count);
         recyclerView = findViewById(R.id.rv_tag_list);
         tvSelectedSectionTitle = findViewById(R.id.tv_selected_section_title);
         tvSelectedEmpty = findViewById(R.id.tv_selected_empty);
         rvSelectedByGroup = findViewById(R.id.rv_selected_by_group);
         cardSelectedTags = findViewById(R.id.card_selected_tags);
+
+        // 标签搜索框：边输边过滤下方列表，同时给标签智能提示
+        TagInputView tagFilter = findViewById(R.id.et_tag_filter);
+        if (tagFilter != null) {
+            tagFilter.setSuggestScope(TagSuggestRepository.SuggestScope.TAG);
+            tagFilter.addTextChangedListener(new android.text.TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                }
+
+                @Override
+                public void afterTextChanged(android.text.Editable s) {
+                    mFilterText = s == null ? "" : s.toString();
+                    refreshList();
+                }
+            });
+            TagSuggestRepository.warmUpAsync();
+        }
+        updateSelectedCount();
 
         tvSelectedSectionTitle.setText(R.string.tag_selector_selected_section_title);
         tvSelectedEmpty.setText(R.string.tag_selector_empty_selected);
@@ -222,6 +249,7 @@ public class TagSelectorActivity extends EhActivity {
         boolean empty = selectedTags.isEmpty();
         tvSelectedEmpty.setVisibility(empty ? View.VISIBLE : View.GONE);
         rvSelectedByGroup.setVisibility(empty ? View.GONE : View.VISIBLE);
+        updateSelectedCount();
     }
 
     private void rebuildSelectedGroups() {
@@ -466,17 +494,46 @@ public class TagSelectorActivity extends EhActivity {
 
     private void buildDisplayList() {
         displayList = new ArrayList<>();
+        String filter = mFilterText == null ? "" : mFilterText.trim().toLowerCase(java.util.Locale.ROOT);
         for (TagGroup group : allGroups) {
-            displayList.add(group);
+            List<TagItem> visible = new ArrayList<>();
             int limit = Math.min(group.visibleCount, group.loadedTags.size());
-            for (int i = 0; i < limit; i++) displayList.add(group.loadedTags.get(i));
+            for (int i = 0; i < limit; i++) {
+                TagItem item = group.loadedTags.get(i);
+                if (filter.isEmpty()
+                        || containsIgnoreCase(item.key, filter)
+                        || containsIgnoreCase(item.show, filter)) {
+                    visible.add(item);
+                }
+            }
+            if (!filter.isEmpty() && visible.isEmpty()) {
+                // 过滤后没命中就整组隐藏，免得只剩一堆组头
+                continue;
+            }
+            displayList.add(group);
+            displayList.addAll(visible);
             displayList.add(new FooterItem(group));
         }
     }
 
+    private static boolean containsIgnoreCase(String value, String needleLowerCase) {
+        return value != null
+                && value.toLowerCase(java.util.Locale.ROOT).contains(needleLowerCase);
+    }
+
     private void refreshList() {
         buildDisplayList();
-        adapter.notifyDataSetChanged();
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    /** 搜索框右侧的已选计数。 */
+    private void updateSelectedCount() {
+        if (tvSelectedCount != null) {
+            tvSelectedCount.setText(
+                    getString(R.string.tag_selector_selected_count, selectedTags.size()));
+        }
     }
 
     // ================== Data Classes ==================

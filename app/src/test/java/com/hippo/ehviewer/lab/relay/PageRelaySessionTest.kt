@@ -23,6 +23,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
 /**
  * 单元测试：PageRelaySession（仅测试 result 包装与纯逻辑）
@@ -34,6 +38,8 @@ import org.junit.Test
  *   <li>扩展名嗅探（通过 guessExtension 私有方法）</li>
  * </ul>
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class PageRelaySessionTest {
 
     private fun newPeer(): TrustedPeer {
@@ -82,32 +88,8 @@ class PageRelaySessionTest {
 
     @Test
     fun session_constructor_acceptsEmptyPages() {
-        // 仅测试构造；execute() 会因网络失败返回失败 result，不会抛
-        val session = TrustedPeer.___testConstruct(newPeer(), 12345L, emptyList())
+        // 空页列表也能正常构造；execute() 会因网络失败返回失败 result，不会抛
+        val session = PageRelaySession(RuntimeEnvironment.application, newPeer(), 12345L, emptyList())
         assertNotNull(session)
-    }
-
-    /**
-     * 通过反射调用私有构造函数（仅测试用）
-     */
-    companion object {
-        internal fun TrustedPeer.Companion.___testConstruct(
-            peer: TrustedPeer,
-            gid: Long,
-            pages: List<Int>,
-        ): PageRelaySession? {
-            return try {
-                val ctor = PageRelaySession::class.java.getDeclaredConstructors().first {
-                    it.parameterCount == 4
-                }
-                ctor.isAccessible = true
-                // 仅 mock 第一/第二/三参数，第四个是 Context
-                // 这里直接传 null 会 NPE；仅验证构造器存在即可
-                ctor.newInstance(null, peer, gid, pages)
-                null
-            } catch (e: Throwable) {
-                null
-            }
-        }
     }
 }

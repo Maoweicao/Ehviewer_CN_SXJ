@@ -29,6 +29,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadService;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.DataChangeBus;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.lib.yorozuya.collect.LongList;
@@ -324,6 +325,9 @@ public class DownloadApiHandler extends BaseApiHandler {
             // 清除缓存
             ResponseCache.getInstance().invalidateGalleries();
 
+            // §5.28 广播数据变更
+            DataChangeBus.publish(DataChangeBus.TYPE_DOWNLOAD_ADDED, gid, state, null);
+
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("message", "Download added");
@@ -366,6 +370,8 @@ public class DownloadApiHandler extends BaseApiHandler {
             info = downloadManager.getDownloadInfo(gid);
             String stateName = info != null ? getStateName(info.state) : "unknown";
 
+            DataChangeBus.publish(DataChangeBus.TYPE_DOWNLOAD_CHANGED, gid, info != null ? info.state : null, null);
+
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("message", "Download started");
@@ -404,6 +410,8 @@ public class DownloadApiHandler extends BaseApiHandler {
             // 重新获取状态
             info = downloadManager.getDownloadInfo(gid);
             String stateName = info != null ? getStateName(info.state) : "unknown";
+
+            DataChangeBus.publish(DataChangeBus.TYPE_DOWNLOAD_CHANGED, gid, info != null ? info.state : null, null);
 
             JSONObject response = new JSONObject();
             response.put("success", true);
@@ -574,6 +582,12 @@ public class DownloadApiHandler extends BaseApiHandler {
         }
         // 从内存列表中移除（即时刷新 UI）
         downloadManager.removeFromMemoryRange(gidList);
+        // 受理瞬间即失效列表缓存，避免客户端在任务跑完前重新拉到仍含已删 gid 的旧快照
+        // §5.28 广播删除事件
+        for (Long removedGid : gids) {
+            DataChangeBus.publish(DataChangeBus.TYPE_DOWNLOAD_REMOVED, removedGid, null, null);
+        }
+        ResponseCache.getInstance().invalidateGalleries();
         DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
                 context, downloadManager, infoList, deleteFiles, null);
         BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);

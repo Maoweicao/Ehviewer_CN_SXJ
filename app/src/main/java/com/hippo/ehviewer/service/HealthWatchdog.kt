@@ -32,7 +32,19 @@ object HealthWatchdog {
     private const val HEARTBEAT_INTERVAL_MS = 2000L
     private const val BLOCK_THRESHOLD_MS = 3500L
     private const val DUMP_COOLDOWN_MS = 30_000L
+    // 阻塞时长上报上限：进程被冻结/看门狗自身被挂起时，基线会过期而算出一个
+    // 离谱的时长（历史出现过 1183054ms ≈ 19 分钟），上报前钳制并重置基线。
+    private const val MAX_BLOCK_REPORT_MS = 120_000L
     private const val SAMPLE_INTERVAL_MS = 10_000L
+
+    /**
+     * 主线程恢复后的"余震窗口"。
+     *
+     * 系统 ANR 弹窗的判定（约 5s）晚于看门狗的预判（3.5s），因此弹窗经常在主线程
+     * 刚刚恢复之后才真正弹出。旧逻辑只在"仍在阻塞"时请求清理，恢复后立即停止，
+     * 导致残留弹窗没人关。这里在恢复后继续清理一段时间。
+     */
+    private const val RECOVERY_DISMISS_WINDOW_MS = 30_000L
 
     @Volatile
     private var running = false
@@ -41,6 +53,10 @@ object HealthWatchdog {
 
     @Volatile
     private var lastProcessedTime = 0L
+
+    /** 最近一次判定主线程阻塞的 uptimeMillis；用于恢复后的余震清理与弹窗清除门槛。 */
+    @Volatile
+    private var lastBlockedAt = 0L
 
     private val blocked = AtomicBoolean(false)
 
@@ -61,6 +77,7 @@ object HealthWatchdog {
         // previously produced false "blocked for hours" reports after doze.
         lastProcessedTime = SystemClock.uptimeMillis()
         lastDumpMs = 0L
+        lastBlockedAt = 0L
 
         dumpExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "HealthWatchdog-Dump").apply {
@@ -100,6 +117,17 @@ object HealthWatchdog {
 
     fun isMainThreadBlocked(): Boolean = blocked.get()
 
+    /**
+     * 最近 [RECOVERY_DISMISS_WINDOW_MS] 内是否判定过主线程阻塞。
+     *
+     * 供 [AnrDialogDismissService] 作为清理门槛：纯界面操作导致的 ANR 没有活跃
+     * 后台任务，旧门槛会直接跳过，弹窗只能手动关。
+     */
+    fun isRecentlyBlocked(): Boolean {
+        val last = lastBlockedAt
+        return last != 0L && SystemClock.uptimeMillis() - last <= RECOVERY_DISMISS_WINDOW_MS
+    }
+
     private fun runLoop() {
         while (running) {
             try {
@@ -112,17 +140,34 @@ object HealthWatchdog {
                 val sinceProcessed = now - lastProcessedTime
 
                 if (sinceProcessed >= BLOCK_THRESHOLD_MS) {
+                    lastBlockedAt = now
                     // 主线程阻塞持续中：周期性请求清除系统 ANR 弹窗（点击"等待"）。
                     // 系统 ANR 弹窗通常在无响应约 5 秒后弹出，看门狗 3.5s 即预判阻塞，
                     // 心跳 2s 一次的调用配合服务内部防抖正好覆盖弹窗出现前后的窗口期；
-                    // 服务内部会再校验设置开关与活跃后台任务数，平时不产生任何动作。
+                    // 服务内部会再校验设置开关与"活跃任务/最近阻塞"条件，平时不产生任何动作。
                     AnrDialogDismissService.requestDismiss()
                     if (blocked.compareAndSet(false, true)) {
+                        val reported = if (sinceProcessed > MAX_BLOCK_REPORT_MS) MAX_BLOCK_REPORT_MS else sinceProcessed
                         Log.w(TAG, "Main thread blocked for ${sinceProcessed}ms, dumping diagnostics")
-                        requestDump("main_thread_blocked(${sinceProcessed}ms)", false)
+                        requestDump("main_thread_blocked(${reported}ms)", false)
+                        if (sinceProcessed > MAX_BLOCK_REPORT_MS) {
+                            // 基线明显过期（跨前后台/冻结），重置，避免后续持续误判
+                            lastProcessedTime = now
+                        }
                     }
                 } else {
                     blocked.set(false)
+                    // 心跳恢复：刷新基线，保证下一次判定基于最新时间
+                    lastProcessedTime = now
+                    // 余震窗口：系统 ANR 弹窗常在阻塞刚结束时才弹出，或阻塞期间点击
+                    // "等待"失败；恢复后继续请求清理，直到窗口期结束。
+                    if (lastBlockedAt != 0L) {
+                        if (now - lastBlockedAt <= RECOVERY_DISMISS_WINDOW_MS) {
+                            AnrDialogDismissService.requestDismiss()
+                        } else {
+                            lastBlockedAt = 0L
+                        }
+                    }
                 }
 
                 // 即使主线程卡住，也由看门狗线程周期性采集性能快照并落盘

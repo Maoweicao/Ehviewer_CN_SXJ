@@ -373,7 +373,8 @@ class DbSnapshotCache private constructor(private val appContext: Context) {
         try {
             db.delete(SnapshotDbHelper.TABLE_GALLERY, null, null)
             db.delete(SnapshotDbHelper.TABLE_FAVORITES, null, null)
-            putMeta(db, SnapshotDbHelper.META_KEY_LAST_VERSION, "0")
+            // -1 表示"尚未同步"，与 getLastVersion() 的语义保持一致
+            putMeta(db, SnapshotDbHelper.META_KEY_LAST_VERSION, "-1")
             putMeta(db, SnapshotDbHelper.META_KEY_LAST_SYNC_AT, "0")
             putMeta(db, SnapshotDbHelper.META_KEY_LAST_DEVICE_ID, "")
             db.setTransactionSuccessful()

@@ -218,6 +218,16 @@
             android:label="@string/lab_relay_center"
             android:theme="@style/AppTheme.Toolbar" />
         <activity
+            android:name=".ui.lab.storage.StorageAnalysisActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/storage_analysis_title"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
+            android:name=".ui.lab.storage.GalleryCleanupActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/storage_cleanup_title"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
             android:name=".ui.SystemInfoActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/settings_about_system_info"

@@ -24,6 +24,7 @@ import com.hippo.scene.Announcer;
 import com.hippo.lib.yorozuya.AssertUtils;
 import com.hippo.lib.yorozuya.ViewUtils;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class BookmarksDraw {
@@ -62,6 +63,8 @@ public class BookmarksDraw {
         AssertUtils.assertNotNull(context);
 
         List<QuickSearch> quickSearchList = EhDB.getAllQuickSearch();
+        // 需要回写的条目先收集，统一在后台批量更新，避免打开抽屉时逐条写库
+        List<QuickSearch> quickSearchToUpdate = new ArrayList<>();
         //汉化标签
         final boolean judge = Settings.getShowTagTranslations();
         if (judge && !quickSearchList.isEmpty()) {
@@ -70,7 +73,7 @@ public class BookmarksDraw {
                 //重设标签名称,并跳过已翻译的标签
                 if (name != null && 2 == name.split(":").length) {
                     quickSearchList.get(i).setName(TagTranslationUtil.getTagCN(name.split(":"), ehTags));
-                    EhDB.updateQuickSearch(quickSearchList.get(i));
+                    quickSearchToUpdate.add(quickSearchList.get(i));
                 }
             }
         } else if (!judge && !quickSearchList.isEmpty()) {
@@ -79,9 +82,12 @@ public class BookmarksDraw {
                 //重设标签名称,并跳过未翻译的标签
                 if (null != name && 1 == name.split(":").length) {
                     quickSearchList.get(i).setName(quickSearchList.get(i).getKeyword());
-                    EhDB.updateQuickSearch(quickSearchList.get(i));
+                    quickSearchToUpdate.add(quickSearchList.get(i));
                 }
             }
+        }
+        if (!quickSearchToUpdate.isEmpty()) {
+            EhDB.updateQuickSearchBulkAsync(quickSearchToUpdate);
         }
 
 

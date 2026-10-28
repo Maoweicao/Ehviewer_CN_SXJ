@@ -36,11 +36,39 @@
             android:summary="@string/lab_ai_analyze_summary"
             app:fragment="com.hippo.ehviewer.ui.fragment.lab.AiAnalyzeFragment" />
 
+        <com.hippo.ehviewer.ui.fragment.lab.LabPreference
+            android:key="lab_semantic"
+            android:title="@string/lab_semantic"
+            android:summary="@string/lab_semantic_summary"
+            app:fragment="com.hippo.ehviewer.ui.fragment.lab.SemanticSearchFragment" />
+
         <com.hippo.ehviewer.preference.ProgressiveManagerPreference
             android:key="lab_progressive_manager" />
 
         <com.hippo.ehviewer.preference.RelayCenterPreference
             android:key="lab_relay_center" />
+
+        <com.hippo.ehviewer.preference.StorageAnalysisPreference
+            android:key="lab_storage_analysis" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:title="@string/lab_sync_section"
+        app:allowDividerAbove="true">
+
+        <com.hippo.preference.ListPreference
+            android:defaultValue="bidirectional"
+            android:key="lab_sync_direction"
+            android:summary="%s"
+            android:title="@string/lab_sync_direction"
+            app:entries="@array/lab_sync_direction_entries"
+            app:entryValues="@array/lab_sync_direction_values" />
+
+        <Preference
+            android:key="lab_sync_hint"
+            android:summary="@string/lab_sync_section_summary"
+            android:selectable="false" />
 
     </PreferenceCategory>
 

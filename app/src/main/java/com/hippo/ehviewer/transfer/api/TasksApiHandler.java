@@ -18,6 +18,8 @@ package com.hippo.ehviewer.transfer.api;
 
 import android.content.Context;
 
+import androidx.annotation.Nullable;
+
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -34,6 +36,7 @@ import com.hippo.ehviewer.ui.task.BackgroundTaskStatusManager;
 import java.io.File;
 import java.io.FileInputStream;
 import java.util.List;
+import java.util.Locale;
 
 import fi.iki.elonen.NanoHTTPD;
 
@@ -254,15 +257,36 @@ public class TasksApiHandler extends BaseApiHandler {
 
     /**
      * GET /api/v1/tasks/{taskId}
+     *
+     * <p>需要同时兼容两类任务：
+     * <ol>
+     *   <li>传输类任务（push / compress / 旧式 delete）：注册在 {@link TaskManager} 中；</li>
+     *   <li>后台任务（{@link BackgroundTaskManager} 提交，如 DeleteRangeDownloadTask）：
+     *       只注册在 {@link BackgroundTaskStatusManager} 中，{@link TaskManager} 查不到。</li>
+     * </ol>
+     *
+     * <p>删除类接口（DELETE /api/v1/galleries/{gid}、/api/v1/galleries/batch、
+     * DELETE /api/v1/downloads/... 等）返回的 taskId 全部属于第 2 类，
+     * 而客户端统一用 /api/v1/tasks/{taskId} 轮询任务结果。
+     * 若这里不做回落，客户端会拿到 404 "Task not found"，误判删除失败后
+     * 对同一批 gid 重复提交删除——而删除接口在受理时已把这些 gid 移出内存下载表，
+     * 于是每一次重试都变成 404 "Gallery not found"。
      */
     private NanoHTTPD.Response handleGetTask(NanoHTTPD.IHTTPSession session, String taskId) {
         try {
             TransferLogger.getInstance().d(TAG, "获取统一任务状态: taskId=" + taskId);
             UnifiedTask task = taskManager.getTask(taskId);
-            if (task == null) {
-                return ResponseBuilder.notFound("Task");
+            if (task != null) {
+                return ResponseBuilder.jsonSuccess(task.toApiJson().toJSONString());
             }
-            return ResponseBuilder.jsonSuccess(task.toApiJson().toJSONString());
+
+            BackgroundTaskInfo info = findBackgroundTask(taskId);
+            if (info != null) {
+                TransferLogger.getInstance().d(TAG, "传输任务表中无此任务，回落后台任务表: taskId=" + taskId);
+                return ResponseBuilder.jsonSuccess(backgroundTaskToUnifiedJson(info).toJSONString());
+            }
+
+            return ResponseBuilder.notFound("Task");
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Failed to get task", e);
             return ResponseBuilder.internalError(e.getMessage());
@@ -271,13 +295,31 @@ public class TasksApiHandler extends BaseApiHandler {
 
     /**
      * DELETE /api/v1/tasks/{taskId}
+     *
+     * <p>与 {@link #handleGetTask} 一样兼容后台任务：未结束时取消，已结束则从列表移除。
      */
     private NanoHTTPD.Response handleDeleteTask(NanoHTTPD.IHTTPSession session, String taskId) {
         try {
             TransferLogger.getInstance().i(TAG, "删除统一任务: taskId=" + taskId);
             UnifiedTask task = taskManager.getTask(taskId);
             if (task == null) {
-                return ResponseBuilder.notFound("Task");
+                BackgroundTaskInfo info = findBackgroundTask(taskId);
+                if (info == null) {
+                    return ResponseBuilder.notFound("Task");
+                }
+                TransferLogger.getInstance().i(TAG, "回落后台任务处理: taskId=" + taskId
+                        + ", completed=" + info.isCompleted() + ", cancelled=" + info.isCancelled());
+                BackgroundTaskManager manager = BackgroundTaskManager.getInstance();
+                if (info.isCompleted() || info.isCancelled()) {
+                    manager.removeTask(taskId);
+                } else {
+                    manager.cancelTask(taskId);
+                }
+
+                JSONObject response = new JSONObject();
+                response.put("success", true);
+                response.put("message", "Task cancelled/removed");
+                return ResponseBuilder.jsonSuccess(response.toJSONString());
             }
 
             if (!task.isTerminal()) {
@@ -720,6 +762,129 @@ public class TasksApiHandler extends BaseApiHandler {
 
     // ==================== Helpers ====================
 
+    /**
+     * 把后台任务转换为 /api/v1/tasks/{taskId} 的统一任务 JSON。
+     *
+     * <p>核心字段与 {@link UnifiedTask#toApiJson()} 保持一致，便于客户端用同一套解析逻辑处理；
+     * 另外附带 taskClassName / state / progressDetail 便于排错。
+     *
+     * <p>注意：后台任务的进度是百分比刻度（0-100），不是条目计数，
+     * 因此 progress 取百分比、total/completed 直接沿用进度刻度，
+     * 并且不输出 result 这类基于计数的字段，避免给出误导性的 deleted 数量。
+     */
+    private JSONObject backgroundTaskToUnifiedJson(BackgroundTaskInfo info) {
+        String status = resolveUnifiedStatus(info);
+        boolean terminal = UnifiedTask.STATUS_COMPLETED.equals(status)
+                || UnifiedTask.STATUS_FAILED.equals(status)
+                || UnifiedTask.STATUS_CANCELLED.equals(status);
+        long now = System.currentTimeMillis();
+
+        String type = resolveUnifiedType(info);
+        // getProgressPercentage() 在总进度不确定时返回 -1
+        int percentage = Math.max(0, info.getProgressPercentage());
+
+        JSONObject json = new JSONObject();
+        json.put("taskId", info.getTaskId());
+        json.put("type", type);
+        json.put("subType", UnifiedTask.TYPE_DELETE.equals(type)
+                ? "gallery"
+                : info.getTaskType().name().toLowerCase(Locale.ROOT));
+        json.put("status", status);
+        json.put("sourceDevice", "android");
+        json.put("progress", percentage / 100.0);
+        json.put("total", info.getTotalProgress());
+        json.put("completed", info.getCurrentProgress());
+        json.put("failed", 0);
+        json.put("createdTime", info.getStartTime());
+        json.put("updatedTime", now);
+        json.put("completedTime", terminal ? now : 0L);
+        json.put("paused", info.isPaused());
+
+        // 附加信息：便于定位是哪个后台任务、当前处于什么阶段
+        json.put("taskName", info.getTaskName());
+        json.put("taskClassName", info.getTaskClassName());
+        json.put("state", backgroundTaskState(info));
+        String detail = info.getProgressDetail();
+        if (detail != null) {
+            json.put("progressDetail", detail);
+        }
+        String error = info.getErrorMessage();
+        if (error != null) {
+            json.put("error", error);
+            json.put("errorMessage", error);
+        }
+        return json;
+    }
+
+    /**
+     * 后台任务 → 统一任务状态。
+     * 排队中映射为 pending，运行中映射为 in_progress（客户端会继续轮询），
+     * 暂停保持 in_progress 并用 paused 字段表达——统一任务没有单独的 paused 状态。
+     */
+    private String resolveUnifiedStatus(BackgroundTaskInfo info) {
+        if (info.isCancelled()) {
+            return UnifiedTask.STATUS_CANCELLED;
+        }
+        if (info.isCompleted()) {
+            return info.getErrorMessage() != null ? UnifiedTask.STATUS_FAILED : UnifiedTask.STATUS_COMPLETED;
+        }
+        if (info.isQueued()) {
+            return UnifiedTask.STATUS_PENDING;
+        }
+        return UnifiedTask.STATUS_IN_PROGRESS;
+    }
+
+    /**
+     * 后台任务 → 统一任务类型。按任务类名推断，避免把扫描/校验类任务误标成传输任务。
+     */
+    private String resolveUnifiedType(BackgroundTaskInfo info) {
+        String simpleName = info.getTaskClassName();
+        if (simpleName != null) {
+            int dot = simpleName.lastIndexOf('.');
+            if (dot >= 0) {
+                simpleName = simpleName.substring(dot + 1);
+            }
+            if (simpleName.contains("Delete") || simpleName.contains("Remove")) {
+                return UnifiedTask.TYPE_DELETE;
+            }
+            if (simpleName.contains("Compress") || simpleName.contains("Archive")) {
+                return UnifiedTask.TYPE_COMPRESS;
+            }
+        }
+        return UnifiedTask.TYPE_BACKGROUND;
+    }
+
+    private String backgroundTaskState(BackgroundTaskInfo info) {
+        if (info.isCancelled()) {
+            return "CANCELLED";
+        }
+        if (info.isCompleted()) {
+            return info.getErrorMessage() != null ? "FAILED" : "COMPLETED";
+        }
+        if (info.isQueued()) {
+            return "PENDING";
+        }
+        if (info.isPaused()) {
+            return "PAUSED";
+        }
+        return "RUNNING";
+    }
+
+    /**
+     * 查询后台任务表。
+     * BackgroundTaskStatusManager 未初始化时视为查不到，避免把"任务不存在"报成 500。
+     */
+    @Nullable
+    private BackgroundTaskInfo findBackgroundTask(String taskId) {
+        BackgroundTaskStatusManager manager;
+        try {
+            manager = BackgroundTaskStatusManager.getInstance();
+        } catch (IllegalStateException e) {
+            return null;
+        }
+        return manager.getTaskInfo(taskId);
+    }
+
     private JSONObject backgroundTaskToJson(BackgroundTaskInfo info) {
         JSONObject json = new JSONObject();
         json.put("taskId", info.getTaskId());
@@ -741,17 +906,7 @@ public class TasksApiHandler extends BaseApiHandler {
         }
 
         // State
-        if (info.isCancelled()) {
-            json.put("state", "CANCELLED");
-        } else if (info.isCompleted()) {
-            json.put("state", info.getErrorMessage() != null ? "FAILED" : "COMPLETED");
-        } else if (info.isQueued()) {
-            json.put("state", "PENDING");
-        } else if (info.isPaused()) {
-            json.put("state", "PAUSED");
-        } else {
-            json.put("state", "RUNNING");
-        }
+        json.put("state", backgroundTaskState(info));
 
         json.put("isPaused", info.isPaused());
         json.put("isCompleted", info.isCompleted());

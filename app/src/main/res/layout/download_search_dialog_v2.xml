@@ -38,6 +38,22 @@
 
             <!-- 分区1: 搜索选项 -->
             <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_quick_presets"
+                style="@style/CardView.Normal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:sectionExpanded="true"
+                app:sectionTitle="@string/filter_section_quick_presets">
+
+                <com.hippo.ehviewer.widget.QuickPresetBar
+                    android:id="@+id/quick_preset_bar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
+            <com.hippo.ehviewer.widget.FilterSectionCard
                 android:id="@+id/section_search_options"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -242,6 +258,12 @@
                     </LinearLayout>
 
                     <!-- 仅显示重复 -->
+                    <com.hippo.ehviewer.widget.FilterExtraOptionsView
+                        android:id="@+id/extra_options_view"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp" />
+
                     <CheckBox
                         android:id="@+id/duplicate_only_checkbox"
                         android:layout_width="match_parent"
@@ -253,6 +275,22 @@
             </com.hippo.ehviewer.widget.FilterSectionCard>
 
             <!-- 分区4: 下载状态 -->
+            <com.hippo.ehviewer.widget.FilterSectionCard
+                android:id="@+id/section_exclude"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                app:sectionCollapsible="true"
+                app:sectionExpanded="false"
+                app:sectionTitle="@string/filter_section_exclude">
+
+                <com.hippo.ehviewer.widget.FilterExcludeView
+                    android:id="@+id/filter_exclude_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </com.hippo.ehviewer.widget.FilterSectionCard>
+
             <com.hippo.ehviewer.widget.FilterSectionCard
                 android:id="@+id/section_download_status"
                 android:layout_width="match_parent"

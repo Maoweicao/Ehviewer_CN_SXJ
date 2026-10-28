@@ -1,0 +1,6 @@
+flask>=3.0
+# Only needed for local (non-proxy) mode:
+#   pip install llama-cpp-python
+# For CUDA (Tesla P4 / RTX / etc.) build from source:
+#   CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python --no-binary llama-cpp-python
+llama-cpp-python>=0.3.0

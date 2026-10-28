@@ -71,7 +71,25 @@ public final class QuickSearchScene extends ToolbarScene {
     @Override
     public void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        mQuickSearchList = EhDB.getAllQuickSearch();
+        // 快速搜索整表读取放后台，避免进入该页时主线程读库；结果回主线程刷新。
+        new Thread(() -> {
+            final List<QuickSearch> list;
+            try {
+                list = EhDB.getAllQuickSearch();
+            } catch (Throwable t) {
+                return;
+            }
+            com.hippo.lib.yorozuya.SimpleHandler.getInstance().post(() -> {
+                if (!isAdded()) {
+                    return;
+                }
+                mQuickSearchList = list;
+                if (mAdapter != null) {
+                    mAdapter.notifyDataSetChanged();
+                }
+                updateView();
+            });
+        }, "QuickSearchLoad").start();
     }
 
     @Override

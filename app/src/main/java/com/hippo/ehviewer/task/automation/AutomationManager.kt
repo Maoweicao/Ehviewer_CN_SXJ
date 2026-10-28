@@ -382,7 +382,11 @@ class AutomationManager private constructor(private val context: Context) {
         return try {
             val taskClass = Class.forName(action.taskClassName)
             val ctor: Constructor<*> = taskClass.getDeclaredConstructor(Context::class.java)
-            ctor.newInstance(context) as? BackgroundTask
+            (ctor.newInstance(context) as? BackgroundTask)?.also { task ->
+                if (task is com.hippo.ehviewer.task.ParamAwareTask) {
+                    task.setAutomationParams(action.params)
+                }
+            }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create task: ${action.taskClassName}", e)
             null

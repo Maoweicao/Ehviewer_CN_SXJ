@@ -388,17 +388,11 @@ public class LocalGalleryViewerActivity extends EhActivity implements SeekBar.On
         for (File file : files) {
             if (file.isFile()) {
                 String name = file.getName().toLowerCase();
-                Log.d("LocalGalleryViewer", "loadImagePaths: 检查文件 - " + name);
-                if (name.endsWith(".jpg") || name.endsWith(".jpeg") || 
-                    name.endsWith(".png") || name.endsWith(".gif") || 
+                if (name.endsWith(".jpg") || name.endsWith(".jpeg") ||
+                    name.endsWith(".png") || name.endsWith(".gif") ||
                     name.endsWith(".webp")) {
                     mImagePaths.add(file.getAbsolutePath());
-                    Log.d("LocalGalleryViewer", "loadImagePaths: 添加图片文件 - " + file.getAbsolutePath());
-                } else {
-                    Log.d("LocalGalleryViewer", "loadImagePaths: 跳过非图片文件 - " + name);
                 }
-            } else {
-                Log.d("LocalGalleryViewer", "loadImagePaths: 跳过目录 - " + file.getName());
             }
         }
         

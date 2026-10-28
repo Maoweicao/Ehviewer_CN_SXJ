@@ -137,7 +137,9 @@ components:
           example: "[作者] 日文标题"
         thumb:
           type: string
-          format: uri
+          description: |
+            缩略图：详情接口或显式 thumb=1 时返回 data URI（base64）或远端 URL；
+            列表接口默认不再返回（请改用 /api/v1/galleries/{gid}/thumbnail 懒加载）。
         category:
           type: string
           enum: [Doujinshi, Manga, Artist CG, Game CG, Image Set, Cosplay]
@@ -736,7 +738,11 @@ components:
           example: "compress-uuid-xxx"
         type:
           type: string
-          enum: [push, compress, relay, delete]
+          enum: [push, compress, relay, delete, background]
+          description: |
+            任务类型。`background` 表示手机端后台任务（BackgroundTaskManager 提交，
+            如删除、扫描、校验）；`GET /api/v1/tasks/{taskId}` 在传输任务表中查不到时
+            会回落到后台任务表并以该类型返回。
         subType:
           type: string
           example: "downloads"
@@ -766,6 +772,22 @@ components:
         error:
           type: string
           nullable: true
+        taskName:
+          type: string
+          description: 后台任务名称（仅 background 类型返回）
+          example: "删除下载记录"
+        taskClassName:
+          type: string
+          description: 后台任务实现类名（仅 background 类型返回）
+          example: "com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask"
+        state:
+          type: string
+          description: 后台任务原始状态（仅 background 类型返回）
+          enum: [PENDING, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED]
+        progressDetail:
+          type: string
+          description: 后台任务进度描述（仅 background 类型返回）
+          example: "删除数据库记录 40/100"
         createdTime:
           type: integer
           format: int64
@@ -806,6 +828,9 @@ components:
           type: string
         thumb:
           type: string
+          description: |
+            缩略图：详情接口或显式 thumb=1 时返回 data URI（base64）或远端 URL；
+            列表接口默认不再返回（请改用 /api/v1/galleries/{gid}/thumbnail 懒加载）。
         category:
           type: integer
         posted:
@@ -1017,6 +1042,15 @@ paths:
           description: 搜索关键词
           schema:
             type: string
+        - name: thumb
+          in: query
+          description: |
+            是否内联 base64 缩略图。默认 false（列表不再返回 thumb，客户端改用
+            `/api/v1/galleries/{gid}/thumbnail` 懒加载）。传 1/true 才内联；
+            堆内存紧张时即使请求也会被服务端跳过。别名：includeThumb。
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: 画廊列表
@@ -1041,6 +1075,9 @@ paths:
                   type: integer
                 limit:
                   type: integer
+                thumb:
+                  type: boolean
+                  description: 是否内联 base64 缩略图，默认 false。别名 includeThumb。
                 filter:
                   type: object
                   properties:
@@ -2126,6 +2163,11 @@ paths:
     get:
       tags: [Tasks]
       summary: 获取任务详情
+      description: |
+        同时支持传输任务（push/compress）与后台任务（如删除接口返回的
+        `DeleteRangeDownloadTask`）。删除类接口在受理时会立即把目标 gid 移出内存下载表，
+        因此客户端轮询本接口失败时不得对同一批 gid 重复提交删除，
+        否则会得到 `404 Gallery not found`。
       operationId: getTask
       parameters:
         - name: taskId
@@ -2149,7 +2191,9 @@ paths:
     delete:
       tags: [Tasks]
       summary: 取消/删除任务
-      description: 进行中的任务将被取消，已完成的任务将被移除
+      description: |
+        进行中的任务将被取消，已完成的任务将被移除。
+        传输任务表中查不到时回落到后台任务表执行同样的取消/移除语义。
       operationId: deleteTask
       parameters:
         - name: taskId

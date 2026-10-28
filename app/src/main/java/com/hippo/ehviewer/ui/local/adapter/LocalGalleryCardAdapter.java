@@ -34,6 +34,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.data.LocalGalleryInfo;
+import com.hippo.ehviewer.ui.local.LocalThumbnailLoader;
 import com.hippo.ehviewer.ui.local.LocalGalleryDetailActivity;
 import com.hippo.ehviewer.ui.local.LocalGalleryViewerActivity;
 import com.hippo.ehviewer.ui.scene.gallery.detail.GalleryDetailScene;
@@ -154,48 +155,14 @@ public class LocalGalleryCardAdapter extends RecyclerView.Adapter<LocalGalleryCa
         }
 
         private void loadThumbnail(LocalGalleryInfo gallery) {
-            if (gallery.thumb != null && !gallery.thumb.isEmpty()) {
-                File thumbFile = new File(gallery.thumb);
-                if (thumbFile.exists()) {
-                    thumb.setImageBitmap(BitmapFactory.decodeFile(thumbFile.getAbsolutePath()));
-                } else {
-                    // 如果缩略图不存在，尝试加载第一张图片
-                    loadFirstImageAsThumbnail(gallery);
+            // 后台降采样解码 + 内存缓存，回调在主线程；绝不在 bind 里做磁盘 I/O / 大图解码
+            thumb.setImageDrawable(null);
+            LocalThumbnailLoader.loadThumbnail(gallery.thumb, gallery.path, bitmap -> {
+                // holder 可能已被复用给另一个画廊
+                if (mCurrentGallery == gallery) {
+                    thumb.setImageBitmap(bitmap);
                 }
-            } else {
-                // 尝试加载第一张图片作为缩略图
-                loadFirstImageAsThumbnail(gallery);
-            }
-        }
-
-        private void loadFirstImageAsThumbnail(LocalGalleryInfo gallery) {
-            if (gallery.path == null) return;
-            
-            File galleryDir = new File(gallery.path);
-            if (!galleryDir.exists() || !galleryDir.isDirectory()) return;
-
-            File[] files = galleryDir.listFiles();
-            if (files == null) return;
-
-            // 查找第一张图片
-            for (File file : files) {
-                if (file.isFile()) {
-                    String name = file.getName().toLowerCase();
-                    if (name.endsWith(".jpg") || name.endsWith(".jpeg") || 
-                        name.endsWith(".png") || name.endsWith(".gif") || 
-                        name.endsWith(".webp")) {
-                        // 异步加载图片
-                        new Thread(() -> {
-                            Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath());
-                            if (bitmap != null) {
-                                // 在主线程设置图片
-                                thumb.post(() -> thumb.setImageBitmap(bitmap));
-                            }
-                        }).start();
-                        break;
-                    }
-                }
-            }
+            });
         }
 
         @Override

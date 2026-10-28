@@ -52,6 +52,19 @@ import java.util.List;
 public class LocalGalleryPreviewsFragment extends Fragment {
     
     private static final String KEY_GALLERY_INFO = "gallery_info";
+
+    /** 目录枚举/排序放后台，避免打开预览页时在主线程做磁盘 I/O。 */
+    private static final java.util.concurrent.ExecutorService IO_EXECUTOR =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "LocalPreviewScan");
+                t.setPriority(Thread.MIN_PRIORITY);
+                t.setDaemon(true);
+                return t;
+            });
+
+    private final android.os.Handler mMainHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private volatile boolean mDestroyed;
     
     private LocalGalleryInfo mGalleryInfo;
     private RecyclerView mRecyclerView;
@@ -98,43 +111,55 @@ public class LocalGalleryPreviewsFragment extends Fragment {
     }
     
     private void loadImagePaths() {
-        mImagePaths = new ArrayList<>();
-        
-        if (mGalleryInfo.path == null) {
+        final String galleryPath = mGalleryInfo != null ? mGalleryInfo.path : null;
+        if (galleryPath == null) {
+            mImagePaths = new ArrayList<>();
+            if (mAdapter != null) {
+                mAdapter.setImagePaths(mImagePaths);
+            }
             return;
         }
-        
-        File galleryDir = new File(mGalleryInfo.path);
-        if (!galleryDir.exists() || !galleryDir.isDirectory()) {
-            return;
-        }
-        
-        File[] files = galleryDir.listFiles();
-        if (files == null) {
-            return;
-        }
-        
-        // 排序并过滤图片文件
-        Arrays.sort(files, (f1, f2) -> {
-            String n1 = f1.getName().toLowerCase();
-            String n2 = f2.getName().toLowerCase();
-            return n1.compareTo(n2);
-        });
-        
-        for (File file : files) {
-            if (file.isFile()) {
-                String name = file.getName().toLowerCase();
-                if (name.endsWith(".jpg") || name.endsWith(".jpeg") || 
-                    name.endsWith(".png") || name.endsWith(".gif") || 
-                    name.endsWith(".webp")) {
-                    mImagePaths.add(file.getAbsolutePath());
+
+        mDestroyed = false;
+        IO_EXECUTOR.execute(() -> {
+            List<String> paths = new ArrayList<>();
+            File galleryDir = new File(galleryPath);
+            if (galleryDir.isDirectory()) {
+                File[] files = galleryDir.listFiles();
+                if (files != null) {
+                    Arrays.sort(files, (f1, f2) -> {
+                        String n1 = f1.getName().toLowerCase();
+                        String n2 = f2.getName().toLowerCase();
+                        return n1.compareTo(n2);
+                    });
+                    for (File file : files) {
+                        if (file.isFile()) {
+                            String name = file.getName().toLowerCase();
+                            if (name.endsWith(".jpg") || name.endsWith(".jpeg")
+                                    || name.endsWith(".png") || name.endsWith(".gif")
+                                    || name.endsWith(".webp")) {
+                                paths.add(file.getAbsolutePath());
+                            }
+                        }
+                    }
                 }
             }
-        }
-        
-        if (mAdapter != null) {
-            mAdapter.setImagePaths(mImagePaths);
-        }
+            mMainHandler.post(() -> {
+                if (mDestroyed || !isAdded()) {
+                    return;
+                }
+                mImagePaths = paths;
+                if (mAdapter != null) {
+                    mAdapter.setImagePaths(mImagePaths);
+                }
+            });
+        });
+    }
+
+    @Override
+    public void onDestroyView() {
+        mDestroyed = true;
+        super.onDestroyView();
     }
     
     private class LocalGalleryPreviewAdapter extends RecyclerView.Adapter<LocalGalleryPreviewAdapter.PreviewHolder> {
@@ -167,6 +192,7 @@ public class LocalGalleryPreviewsFragment extends Fragment {
         
         class PreviewHolder extends RecyclerView.ViewHolder {
             private final ImageView thumb;
+            private String boundPath;
             
             public PreviewHolder(@NonNull View itemView) {
                 super(itemView);
@@ -174,8 +200,14 @@ public class LocalGalleryPreviewsFragment extends Fragment {
             }
             
             public void bind(String path) {
-                // 加载图片缩略图
-                thumb.setImageBitmap(BitmapFactory.decodeFile(path));
+                boundPath = path;
+                thumb.setImageDrawable(null);
+                // 后台降采样解码，回调校验 holder 是否已被复用
+                com.hippo.ehviewer.ui.local.LocalThumbnailLoader.loadImage(path, bitmap -> {
+                    if (path.equals(boundPath)) {
+                        thumb.setImageBitmap(bitmap);
+                    }
+                });
             }
         }
     }

@@ -51,15 +51,22 @@ class LanImageFetcherTest {
     @Before
     fun setUp() {
         context = RuntimeEnvironment.application
+        context.getSharedPreferences("lab_trusted_peers", Context.MODE_PRIVATE)
+                .edit().clear().commit()
         LabConfigStore.resetForTest()
         TrustedPeerStore.resetForTest()
+        // LanImageFetcher 在构造时捕获 peerStore，必须一并重置，否则跨测试持有旧 store
+        LanImageFetcher.resetForTest()
         LabManager.getInstance(context).configStore.replace(LabConfig.defaultConfig())
     }
 
     @After
     fun tearDown() {
+        context.getSharedPreferences("lab_trusted_peers", Context.MODE_PRIVATE)
+                .edit().clear().commit()
         LabConfigStore.resetForTest()
         TrustedPeerStore.resetForTest()
+        LanImageFetcher.resetForTest()
     }
 
     private fun peer(id: String, host: String?, port: Int, rtt: Long): TrustedPeer {
@@ -67,6 +74,7 @@ class LanImageFetcherTest {
                 .host(host)
                 .port(port)
                 .rttMs(rtt)
+                .online(true)
                 .build()
     }
 

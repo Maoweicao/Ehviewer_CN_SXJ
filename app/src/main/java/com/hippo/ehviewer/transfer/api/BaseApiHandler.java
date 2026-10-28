@@ -87,6 +87,23 @@ public abstract class BaseApiHandler {
     }
     
     /**
+     * 判断当前请求是否以“QUERY 语义”提交（承载 JSON 查询体）。
+     *
+     * <p>内嵌 NanoHTTPD 2.3.1 的 Method 枚举不含 QUERY，真实 QUERY 请求会在 HTTP
+     * 解析阶段被拒（400）。因此客户端改用 {@code POST + X-HTTP-Method-Override: QUERY}
+     * 承载查询体，这里统一识别。
+     */
+    protected boolean isQueryBody(NanoHTTPD.IHTTPSession session) {
+        NanoHTTPD.Method method = session.getMethod();
+        if (method != null && "QUERY".equals(method.name())) {
+            return true;
+        }
+        Map<String, String> headers = session.getHeaders();
+        String override = headers != null ? headers.get("x-http-method-override") : null;
+        return override != null && "QUERY".equalsIgnoreCase(override.trim());
+    }
+
+    /**
      * 记录请求日志
      */
     protected void logRequest(String method, String uri) {

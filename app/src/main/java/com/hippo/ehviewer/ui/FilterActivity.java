@@ -37,6 +37,8 @@ import com.google.android.material.textfield.TextInputLayout;
 import com.hippo.easyrecyclerview.EasyRecyclerView;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.client.EhFilter;
+import com.hippo.ehviewer.client.tag.TagSuggestRepository;
+import com.hippo.ehviewer.widget.TagInputView;
 import com.hippo.ehviewer.dao.Filter;
 import com.hippo.util.DrawableManager;
 import com.hippo.view.ViewTransition;
@@ -180,6 +182,32 @@ public class FilterActivity extends ToolbarActivity {
             if (null != button) {
                 button.setOnClickListener(this);
             }
+            // 标签模式给 ns:value 建议，标题/作者模式给裸词
+            if (mEditText instanceof TagInputView && mSpinner != null) {
+                final TagInputView tagInput = (TagInputView) mEditText;
+                mSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(android.widget.AdapterView<?> parent, View view,
+                                               int position, long id) {
+                        tagInput.setSuggestScope(isTagMode(position)
+                                ? TagSuggestRepository.SuggestScope.TAG
+                                : TagSuggestRepository.SuggestScope.TEXT);
+                    }
+
+                    @Override
+                    public void onNothingSelected(android.widget.AdapterView<?> parent) {
+                    }
+                });
+                tagInput.setSuggestScope(isTagMode(mSpinner.getSelectedItemPosition())
+                        ? TagSuggestRepository.SuggestScope.TAG
+                        : TagSuggestRepository.SuggestScope.TEXT);
+                TagSuggestRepository.warmUpAsync();
+            }
+        }
+
+        /** {@link com.hippo.ehviewer.client.EhFilter} 的 MODE_TAG / MODE_TAG_NAMESPACE。 */
+        private boolean isTagMode(int mode) {
+            return mode == EhFilter.MODE_TAG || mode == EhFilter.MODE_TAG_NAMESPACE;
         }
 
         @Override

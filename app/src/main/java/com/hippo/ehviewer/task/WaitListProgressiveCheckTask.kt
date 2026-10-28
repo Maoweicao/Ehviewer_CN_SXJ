@@ -5,11 +5,10 @@ import android.util.Log
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
 import com.hippo.ehviewer.dao.DownloadInfo
-import com.hippo.ehviewer.spider.SpiderDen
-import com.hippo.ehviewer.spider.SpiderInfo
-import com.hippo.ehviewer.spider.SpiderQueen
+import com.hippo.ehviewer.task.TaskState
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import com.hippo.lib.yorozuya.SimpleHandler
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.coroutineContext
 
@@ -49,7 +48,13 @@ class WaitListProgressiveCheckTask(
     @Volatile
     private var finishPosted = false
 
-    override fun getTaskId(): String = "wait_list_progressive_check_${targetGid}_${System.currentTimeMillis()}"
+    @Volatile private var isPaused = false
+    @Volatile private var isCancelled = false
+
+    // 任务 id 必须稳定：注册与 appendTaskLog 都调用 getTaskId()，不能每次返回新时间戳。
+    private val taskId = "wait_list_progressive_check_${targetGid}_${System.currentTimeMillis()}"
+
+    override fun getTaskId(): String = taskId
 
     override fun getTaskName(): String = context.getString(R.string.pre_download_collision_check_task_name)
 
@@ -171,11 +176,13 @@ class WaitListProgressiveCheckTask(
         for (info in all) {
             // 跳过自身
             if (info.gid == target.gid) continue
-            // 仅考虑尚未实质下载的等待项，避免与 PreDownloadMergeTask 重复或冲突
+            // 考虑尚未实质下载的等待项，以及已下载完成的画廊：
+            // 后者用于判断等待项是否为已完成画廊的旧版本（target ⊂ cand）。
             when (info.state) {
                 DownloadInfo.STATE_WAIT,
                 DownloadInfo.STATE_NONE,
-                DownloadInfo.STATE_FAILED -> Unit
+                DownloadInfo.STATE_FAILED,
+                DownloadInfo.STATE_FINISH -> Unit
                 else -> continue
             }
             // 排除正在下载中的任务
@@ -190,105 +197,46 @@ class WaitListProgressiveCheckTask(
     }
 
     /**
-     * 拉取指定画廊的 token 集，按以下顺序：
-     *   1. SimpleScanCache
-     *   2. PtokenIndex（已下载完成或之前缓存过的画廊）
-     *   3. 本地 .ehviewer（已有目录）
-     *   4. 网络拉取（兜底）；拉取后写入 PtokenIndex 与 SimpleScanCache
-     *
-     * 拉取失败时返回 null，由调用方决定是否保守放弃。
+     * 拉取指定画廊的 token 集。实现集中在 [SpiderTokenUtils.fetchHashSetResilient]，
+     * 失败时返回 null，由调用方决定是否保守放弃。
      */
-    private suspend fun fetchHashSetResilient(info: DownloadInfo): HashSet<String>? {
-        // 1) SimpleScanCache
-        SimpleScanCache.getHashSet(info.gid)?.let { return it }
-
-        // 2) PtokenIndex
-        EhDB.getPtokensIndex(info.gid)?.let { pi ->
-            val set = SpiderTokenUtils.parsePtokenString(pi.getPtokens())
-            if (set.isNotEmpty()) {
-                SimpleScanCache.putHashSet(info.gid, set)
-                return set
-            }
-        }
-
-        // 3) 本地 .ehviewer
-        val localSet = readLocalHashSet(info)
-        if (localSet != null && localSet.isNotEmpty()) {
-            // 本地不完整时尝试网络补齐
-            val remoteSet = tryFetchRemoteAndMerge(info, localSet)
-            if (remoteSet != null) {
-                SimpleScanCache.putHashSet(info.gid, remoteSet)
-                return remoteSet
-            }
-            SimpleScanCache.putHashSet(info.gid, localSet)
-            return localSet
-        }
-
-        // 4) 网络拉取（兜底）
-        val spi = SpiderTokenUtils.fetchSpiderInfoFromRemote(context, info)
-            ?: return null
-        val set = SpiderTokenUtils.toHashSet(spi)
-        if (set.isEmpty()) return null
-        try {
-            EhDB.putPtokensIndex(info.gid, SpiderTokenUtils.serializePtokens(set), spi.pages)
-        } catch (_: Exception) {
-        }
-        SimpleScanCache.putHashSet(info.gid, set)
-        return set
-    }
-
-    /** 读本地 .ehviewer 拿到 token 集（不完整也算）。 */
-    private fun readLocalHashSet(info: DownloadInfo): HashSet<String>? {
-        val dir = SpiderDen.getExistingGalleryDownloadDir(info) ?: return null
-        val f = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null
-        val spi = SpiderInfo.read(f) ?: return null
-        return SpiderTokenUtils.toHashSet(spi)
-    }
-
-    /**
-     * 本地有 .ehviewer 但可能不完整（页数 < 远程）时，
-     * 拉一遍远程 preview 列表并补齐缺失的 token，再合并写入。
-     * 拉取失败时返回 null（回退使用本地集）。
-     */
-    private suspend fun tryFetchRemoteAndMerge(
-        info: DownloadInfo,
-        localSet: HashSet<String>
-    ): HashSet<String>? {
-        val dir = SpiderDen.getExistingGalleryDownloadDir(info) ?: return null
-        val localSpi = SpiderInfo.read(dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null)
-            ?: return null
-        val token = info.token ?: return null
-        // 远程列表不完整时 (local.pages 缺失) 才补齐
-        val remoteSpi = SpiderTokenUtils.fetchSpiderInfoFromRemote(context, info) ?: return null
-        if (remoteSpi.pages <= localSpi.pages) {
-            // 远程不比本地完整，无需补齐；尝试写回最新 PtokenIndex 即可
-            try {
-                EhDB.putPtokensIndex(info.gid, SpiderTokenUtils.serializePtokens(localSet), localSpi.pages)
-            } catch (_: Exception) {
-            }
-            return localSet
-        }
-        // 合并：取两者并集
-        val merged = HashSet<String>(localSet)
-        merged.addAll(SpiderTokenUtils.toHashSet(remoteSpi))
-        // 写回 .ehviewer，使后续 SpiderQueen 复用完整 token 集
-        try {
-            val target = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return merged
-            target.openOutputStream().use { os -> remoteSpi.write(os) }
-        } catch (_: Exception) {
-        }
-        try {
-            EhDB.putPtokensIndex(info.gid, SpiderTokenUtils.serializePtokens(merged), remoteSpi.pages)
-        } catch (_: Exception) {
-        }
-        return merged
-    }
+    private suspend fun fetchHashSetResilient(info: DownloadInfo): HashSet<String>? =
+        SpiderTokenUtils.fetchHashSetResilient(context, info)
 
     private suspend fun ensureNotCancelled() {
+        // 暂停：在这里等，恢复后继续
+        while (isPaused && !isCancelled) {
+            delay(200)
+        }
+        if (isCancelled) {
+            throw kotlinx.coroutines.CancellationException("预碰撞检测已取消")
+        }
         coroutineContext.ensureActive()
         if (Thread.currentThread().isInterrupted) {
             throw kotlinx.coroutines.CancellationException("预碰撞检测已取消")
         }
+    }
+
+    // 之前这个任务宣称 isPausable()=true 却没实现 pause/resume/cancel，
+    // BackgroundTaskController 会吞掉 UnsupportedOperationException 返回 false，
+    // 用户在任务列表点暂停/取消都毫无反应。
+    override suspend fun pause() {
+        isPaused = true
+        updateState(TaskState.PAUSED)
+        appendTaskLog("任务已暂停")
+    }
+
+    override suspend fun resume() {
+        isPaused = false
+        updateState(TaskState.RUNNING)
+        appendTaskLog("任务已恢复")
+    }
+
+    override suspend fun cancel() {
+        isCancelled = true
+        isPaused = false
+        appendTaskLog("任务已取消")
+        notifyCancelled()
     }
 
     private fun postProgress(percent: Int, detail: String?) {

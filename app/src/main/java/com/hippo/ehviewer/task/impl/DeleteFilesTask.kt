@@ -29,7 +29,10 @@ class DeleteFilesTask(
                 if (file.exists()) {
                     val info = com.hippo.ehviewer.client.data.LocalGalleryInfo(file.getUri().getPath())
                     manager.deleteGallery(info)
-                } else if (file.exists()) {
+                } else {
+                    // 目标已经不在了，直接删掉残留的占位（比如被移走的目录项）。
+                    // 之前这里写的是 `else if (file.exists())`，恒为 false，
+                    // 这个分支永远执行不到。
                     file.delete()
                 }
             }

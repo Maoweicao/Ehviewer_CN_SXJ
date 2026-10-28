@@ -617,20 +617,4 @@ class ScanDownloadHistoryTask(
         isPaused = false
         notifyCancelled()
     }
-
-    override fun getProgressDetail(): String? {
-        val phase1Total = totalGalleries
-        val phase1Current = phase1Processed.get()
-        val phase2Total = phase1Total - phase1Processed.get() // 估算
-        val phase2Current = phase2Processed.get()
-        val phase3Total = needApiGids.size + phase3Processed.get()
-        val phase3Current = phase3Processed.get()
-
-        return when {
-            phase1Current < phase1Total -> "阶段一: $phase1Current/$phase1Total"
-            phase2Current < phase2Total -> "阶段二: $phase2Current/$phase2Total"
-            phase3Current < phase3Total -> "阶段三: $phase3Current/$phase3Total"
-            else -> "完成: 阶段一+$phase1Added, 阶段二+$phase2Updated, 阶段三+$phase3Updated/$phase3Failed"
-        }
-    }
 }

@@ -29,6 +29,7 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhTagDatabase;
+import com.hippo.ehviewer.client.tag.TagSuggestRepository;
 
 public class EhFragment extends BasePreferenceFragmentCompat
         implements Preference.OnPreferenceChangeListener {
@@ -46,6 +47,8 @@ public class EhFragment extends BasePreferenceFragmentCompat
         Preference thumbSize = findPreference(Settings.KEY_THUMB_SIZE);
         Preference historyInfoSize = findPreference(Settings.KEY_HISTORY_INFO_SIZE);
         Preference showTagTranslations = findPreference(Settings.KEY_SHOW_TAG_TRANSLATIONS);
+        Preference tagSuggestLocal = findPreference(Settings.KEY_TAG_SUGGEST_LOCAL_ENABLED);
+        Preference tagSuggestDict = findPreference(Settings.KEY_TAG_SUGGEST_DICT_ENABLED);
         Preference showGalleryComment = findPreference(Settings.KEY_SHOW_GALLERY_COMMENT);
         Preference enableCommentRatingFilter = findPreference(Settings.KEY_ENABLE_COMMENT_RATING_FILTER);
         Preference commentRatingThreshold = findPreference(Settings.KEY_COMMENT_RATING_THRESHOLD);
@@ -79,6 +82,18 @@ public class EhFragment extends BasePreferenceFragmentCompat
             getPreferenceScreen().removePreference(showTagTranslations);
             getPreferenceScreen().removePreference(tagDatabaseManagement);
             getPreferenceScreen().removePreference(tagTranslationsSource);
+            // 词库不可用时，这个开关也没意义
+            if (tagSuggestDict != null) {
+                getPreferenceScreen().removePreference(tagSuggestDict);
+            }
+        }
+
+        // 本地标签源开关变了就重建索引（关掉再打开时索引可能已经过期）
+        if (tagSuggestLocal != null) {
+            tagSuggestLocal.setOnPreferenceChangeListener((preference, newValue) -> {
+                TagSuggestRepository.invalidate();
+                return true;
+            });
         }
     }
 

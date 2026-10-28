@@ -9,6 +9,7 @@ import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.dao.SystemDownloadTask
 import com.hippo.ehviewer.network.NetworkLogger
+import com.hippo.ehviewer.spider.SpiderDen
 import okhttp3.HttpUrl
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -41,9 +42,16 @@ class SystemDMBackend private constructor(private val appContext: Context) {
         val existing = EhDB.getSystemDownloadTasksForGid(galleryInfo.gid) ?: emptyList()
         val existingPages = existing.map { it.pageIndex }.toSet()
 
+        // 磁盘上已存在的页（含预下载合并剪切进来的文件）也跳过，只对缺失部分入队
+        val downloadDir = SpiderDen.getExistingGalleryDownloadDir(galleryInfo)
+
         val enqueued = AtomicInteger(0)
         for (page in 0 until totalPages) {
             if (page in existingPages) {
+                continue
+            }
+            if (downloadDir != null && SpiderDen.findImageFile(downloadDir, page) != null) {
+                log(galleryInfo.gid, "skip page=$page: file already on disk")
                 continue
             }
             val imageUrl = ImageUrlResolver.resolve(appContext, galleryInfo, page)

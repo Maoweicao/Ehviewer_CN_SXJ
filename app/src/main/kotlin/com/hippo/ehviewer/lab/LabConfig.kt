@@ -61,6 +61,8 @@ class LabConfig private constructor(builder: Builder) {
     fun getSubSwitches(): SubSwitches = subSwitches
 
     fun isSubEnabled(key: String?): Boolean {
+        // 总开关关闭时，所有子开关一律视为关闭
+        if (!enabled) return false
         if (subSwitches == null) return false
         return when (key) {
             "autoRelay" -> subSwitches.autoRelay

@@ -17,6 +17,7 @@
 package com.hippo.ehviewer.lab
 
 import android.content.Context
+import android.os.Looper
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -28,6 +29,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -102,6 +104,8 @@ class LabConfigStoreTest {
         }
         store.update { it.toBuilder().role(LabConfig.ROLE_MASTER).build() }
 
+        // 监听器回调投递主线程，Robolectric PAUSED looper 需手动 idle
+        shadowOf(Looper.getMainLooper()).idle()
         assertTrue("listener not invoked within 1s", latch.await(1, TimeUnit.SECONDS))
         assertNotNull(receivedNew)
         assertEquals(LabConfig.ROLE_MASTER, receivedNew!!.getRole())
@@ -192,8 +196,10 @@ class LabConfigStoreTest {
         val l = LabConfigStore.Listener { _, _ -> count++ }
         store.addListener(l)
         store.update { it.toBuilder().enabled(true).build() }
+        shadowOf(Looper.getMainLooper()).idle()
         store.removeListener(l)
         store.update { it.toBuilder().enabled(false).build() }
+        shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, count)
     }
 

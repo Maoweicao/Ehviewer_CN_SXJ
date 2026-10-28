@@ -263,6 +263,12 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         sendFavoritesSelect = findViewById(R.id.send_favorites_select);
         sendAllData = findViewById(R.id.send_all_data);
 
+        android.widget.Button labSyncButton = findViewById(R.id.lab_sync_button);
+        if (labSyncButton != null) {
+            labSyncButton.setOnClickListener(v ->
+                    com.hippo.ehviewer.ui.lab.LabSyncDialog.show(this));
+        }
+
         // Connect to
         addressInput = findViewById(R.id.address_input);
         connectButton = findViewById(R.id.connect_button);

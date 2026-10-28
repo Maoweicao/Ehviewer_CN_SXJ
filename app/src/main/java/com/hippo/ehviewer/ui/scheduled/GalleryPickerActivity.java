@@ -203,24 +203,39 @@ public class GalleryPickerActivity extends AppCompatActivity {
     }
 
     private void loadData() {
-        allItems.clear();
-
-        switch (source) {
-            case SOURCE_DOWNLOADS:
-                List<DownloadInfo> downloads = EhDB.getAllDownloadInfo();
-                allItems.addAll(downloads);
-                break;
-            case SOURCE_FAVORITES:
-                List<GalleryInfo> favorites = EhDB.getAllLocalFavorites();
-                allItems.addAll(favorites);
-                break;
-            case SOURCE_ALL:
-                allItems.addAll(EhDB.getAllDownloadInfo());
-                allItems.addAll(EhDB.getAllLocalFavorites());
-                break;
-        }
-
-        filterItems(searchInput.getText().toString());
+        // 切 tab / 打开页面时不再在主线程读整张表；后台读完回主线程分页。
+        final String requestedSource = source;
+        new Thread(() -> {
+            final List<GalleryInfo> items = new ArrayList<>();
+            try {
+                switch (requestedSource) {
+                    case SOURCE_DOWNLOADS:
+                        items.addAll(EhDB.getAllDownloadInfo());
+                        break;
+                    case SOURCE_FAVORITES:
+                        items.addAll(EhDB.getAllLocalFavorites());
+                        break;
+                    case SOURCE_ALL:
+                    default:
+                        items.addAll(EhDB.getAllDownloadInfo());
+                        items.addAll(EhDB.getAllLocalFavorites());
+                        break;
+                }
+            } catch (Throwable ignored) {
+            }
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                // 加载期间用户可能已经切了 tab，丢弃过期结果
+                if (!requestedSource.equals(source)) {
+                    return;
+                }
+                allItems.clear();
+                allItems.addAll(items);
+                filterItems(searchInput.getText().toString());
+            });
+        }, "GalleryPickerLoad").start();
     }
 
     private void filterItems(String query) {

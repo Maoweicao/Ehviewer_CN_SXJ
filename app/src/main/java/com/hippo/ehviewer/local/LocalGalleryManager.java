@@ -70,9 +70,57 @@ public class LocalGalleryManager {
     private boolean mCacheLoaded;
     private String mLastScanTrigger = "auto";
     
+    /**
+     * 一次扫描进度的快照。
+     *
+     * <p>一次扫描分两个阶段（先本地画廊目录、后回收站），各自有自己的总数，
+     * 所以「第几个 / 共几个」必须带上所属阶段才有意义。
+     */
+    public static class ScanProgress {
+        /** 已处理的画廊目录数，从 1 开始；未知时为 0。 */
+        public final int current;
+        /** 本阶段待处理的画廊目录总数；未知时为 0。 */
+        public final int total;
+        /** 当前正在处理的目录名。 */
+        public final String name;
+        /** 当前扫的是回收站（false 表示本地画廊目录）。 */
+        public final boolean recycleBin;
+
+        public ScanProgress(int current, int total, String name, boolean recycleBin) {
+            this.current = current;
+            this.total = total;
+            this.name = name == null ? "" : name;
+            this.recycleBin = recycleBin;
+        }
+
+        /** 总数未知时只当「有个目录在处理」用。 */
+        public static ScanProgress of(String name, boolean recycleBin) {
+            return new ScanProgress(0, 0, name, recycleBin);
+        }
+    }
+
     public interface LocalGalleryListener {
         void onScanStart();
-        void onScanProgress(String current);
+
+        /**
+         * 只给目录名的旧回调。默认什么都不做。
+         *
+         * <p>保留它是为了不打断已有监听器；新的带进度版本见
+         * {@link #onScanProgress(ScanProgress)}。
+         */
+        default void onScanProgress(String current) {
+        }
+
+        /**
+         * 带进度数据的扫描回调。
+         *
+         * <p>默认回退到只给目录名的旧回调，所以只覆写 {@code onScanProgress(String)}
+         * 的老监听器不用改任何代码。
+         */
+        default void onScanProgress(ScanProgress progress) {
+            onScanProgress(progress == null ? "" : progress.name);
+        }
+
         void onScanComplete(List<LocalGalleryInfo> localGalleries, List<LocalGalleryInfo> recycleBinGalleries);
         void onGalleryDeleted(LocalGalleryInfo gallery, boolean success);
         void onGalleryRestored(LocalGalleryInfo gallery, boolean success);
@@ -392,16 +440,26 @@ public class LocalGalleryManager {
         });
     }
     
-    private void notifyScanProgress(String current) {
+    private void notifyScanProgress(ScanProgress progress) {
         mMainHandler.post(() -> {
             for (LocalGalleryListener listener : mListeners) {
-                listener.onScanProgress(current);
+                listener.onScanProgress(progress);
             }
         });
     }
 
     public void reportScanProgress(String detail) {
-        notifyScanProgress(detail);
+        notifyScanProgress(ScanProgress.of(detail, false));
+    }
+
+    /**
+     * 扫描执行器（后台任务）上报带计数的进度，转发给所有界面监听器。
+     * 后台任务详情页的进度来自任务自身的 ProgressListener，这里只负责界面侧。
+     */
+    public void reportScanProgress(ScanProgress progress) {
+        if (progress != null) {
+            notifyScanProgress(progress);
+        }
     }
     
     private void notifyScanComplete(List<LocalGalleryInfo> localGalleries, List<LocalGalleryInfo> recycleBinGalleries) {
@@ -656,7 +714,7 @@ public class LocalGalleryManager {
         });
     }
     
-    private class ScanTask extends AsyncTask<Void, String, ScanResult> {
+    private class ScanTask extends AsyncTask<Void, ScanProgress, ScanResult> {
         
         @Override
         protected void onPreExecute() {
@@ -681,10 +739,19 @@ public class LocalGalleryManager {
             File[] files = downloadDir.listFiles();
             if (files != null) {
                 Log.d(TAG, "找到 " + files.length + " 个文件/文件夹");
+                // 先数一遍本阶段真正的画廊目录，好让进度有分母（要排除回收站目录本身）
+                int localTotal = 0;
                 for (File file : files) {
                     if (file.isDirectory() && !file.getName().equals(RECYCLE_BIN_DIR_NAME)) {
-                        publishProgress(file.getName());
-                        
+                        localTotal++;
+                    }
+                }
+                int localIndex = 0;
+                for (File file : files) {
+                    if (file.isDirectory() && !file.getName().equals(RECYCLE_BIN_DIR_NAME)) {
+                        localIndex++;
+                        publishProgress(new ScanProgress(localIndex, localTotal, file.getName(), false));
+
                         if (isInDownloadList(file.getAbsolutePath())) {
                             Log.d(TAG, "正在下载中，跳过本地画廊: " + file.getAbsolutePath());
                             continue;
@@ -711,10 +778,13 @@ public class LocalGalleryManager {
                 File[] recycleFiles = recycleBinDir.listFiles();
                 if (recycleFiles != null) {
                     Log.d(TAG, "回收站找到 " + recycleFiles.length + " 个文件/文件夹");
+                    int recycleIndex = 0;
                     for (File file : recycleFiles) {
                         if (file.isDirectory()) {
-                            publishProgress("Recycle: " + file.getName());
-                            
+                            recycleIndex++;
+                            publishProgress(new ScanProgress(
+                                    recycleIndex, recycleFiles.length, file.getName(), true));
+
                             LocalGalleryInfo info = new LocalGalleryInfo(file.getAbsolutePath());
                             if (info.isValid()) {
                                 info.type = LocalGalleryInfo.TYPE_RECYCLE_BIN;
@@ -737,10 +807,12 @@ public class LocalGalleryManager {
         }
         
         @Override
-        protected void onProgressUpdate(String... values) {
-            if (values.length > 0) {
-                Log.d(TAG, "扫描进度更新: " + values[0]);
-                notifyScanProgress(values[0]);
+        protected void onProgressUpdate(ScanProgress... values) {
+            if (values.length > 0 && values[0] != null) {
+                ScanProgress p = values[0];
+                Log.d(TAG, "扫描进度更新: " + p.current + "/" + p.total
+                        + (p.recycleBin ? " [回收站] " : " [本地] ") + p.name);
+                notifyScanProgress(p);
             }
         }
         

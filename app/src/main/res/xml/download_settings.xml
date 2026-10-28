@@ -235,6 +235,87 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        android:key="category_download_filter"
+        android:title="@string/settings_category_download_filter"
+        android:summary="@string/filter_quick_filter_manager_title">
+
+        <Preference
+            android:key="filter_low_rating"
+            android:title="@string/settings_download_filter_low_rating"
+            android:summary="@string/settings_download_filter_low_rating_summary" />
+
+        <Preference
+            android:key="filter_low_rating_by_category"
+            android:title="@string/settings_download_filter_low_rating_by_category"
+            android:summary="@string/settings_download_filter_low_rating_by_category_summary" />
+
+        <Preference
+            android:key="filter_global_exclusions"
+            android:title="@string/settings_download_filter_global_exclusions"
+            android:summary="@string/settings_download_filter_global_exclusions_summary" />
+
+        <Preference
+            android:key="quick_filter_manager"
+            android:title="@string/settings_download_quick_filter_manager"
+            android:summary="@string/settings_download_quick_filter_manager_summary" />
+
+        <Preference
+            android:key="quick_preset_manager"
+            android:title="@string/settings_download_quick_preset_manager"
+            android:summary="@string/settings_download_quick_preset_manager_summary" />
+
+        <Preference
+            android:key="export_filter_config"
+            android:title="@string/settings_download_export_filter_config"
+            android:summary="@string/settings_download_export_filter_config_summary" />
+
+        <Preference
+            android:key="import_filter_config"
+            android:title="@string/settings_download_import_filter_config"
+            android:summary="@string/settings_download_import_filter_config_summary" />
+
+        <Preference
+            android:key="reset_filter_config"
+            android:title="@string/settings_download_reset_filter_config"
+            android:summary="@string/settings_download_reset_filter_config_summary" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_download_delete_protect"
+        android:title="@string/settings_category_download_delete_protect"
+        android:summary="@string/settings_category_download_delete_protect_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="show_progressive_count"
+            android:summary="@string/settings_download_show_progressive_count_summary"
+            android:title="@string/settings_download_show_progressive_count" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="delete_protect_favorited"
+            android:summary="@string/settings_download_delete_protect_favorited_summary"
+            android:title="@string/settings_download_delete_protect_favorited" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="delete_protect_progressive"
+            android:summary="@string/settings_download_delete_protect_progressive_summary"
+            android:title="@string/settings_download_delete_protect_progressive" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="3"
+            android:dependency="delete_protect_progressive"
+            android:key="delete_protect_progressive_threshold"
+            android:title="@string/settings_download_delete_protect_progressive_threshold"
+            app:minValue="1"
+            app:maxValue="20"
+            app:stepSize="1"
+            app:showValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
         android:key="category_download_maintenance"
         android:title="@string/settings_category_download_maintenance"
         android:summary="@string/settings_category_download_maintenance_summary">

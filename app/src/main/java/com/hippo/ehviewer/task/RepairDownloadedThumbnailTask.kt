@@ -41,15 +41,20 @@ class RepairDownloadedThumbnailTask(
 
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
 
     private var totalProgress = 0
+
+    /**
+     * 已处理的画廊数。
+     *
+     * 注意：不能用继承来的 `currentProgress` 当计数器 —— 基类的
+     * `updateProgress(current, total, detail)` 会把那个字段改写成**百分比**，
+     * 传回去就等于每次循环都把计数重置，进度条会永远卡在 0%。
+     */
+    private var processedCount = 0
     private var fixedCount = 0
     private var skippedCount = 0
 
-    private fun notifyStatus() {
-        statusListener?.onStatus(currentProgress, totalProgress, fixedCount, skippedCount)
-    }
 
     override fun getTaskId(): String = "repair_thumbnail"
 
@@ -74,14 +79,12 @@ class RepairDownloadedThumbnailTask(
                 Log.d(TAG, "没有已下载的画廊")
                 appendTaskLog("没有已下载的画廊")
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
 
             totalProgress = downloadInfoList.size
             fixedCount = 0
             skippedCount = 0
-            notifyStatus()
 
             Log.d(TAG, "总共需要检查 $totalProgress 个画廊")
             appendTaskLog("总共需要检查 $totalProgress 个画廊")
@@ -101,18 +104,16 @@ class RepairDownloadedThumbnailTask(
                     skippedCount++
                 }
 
-                currentProgress++
+                processedCount++
                 val detail = context.getString(R.string.repair_thumbnail_progress,
-                    currentProgress, totalProgress, fixedCount, skippedCount)
-                updateProgress(currentProgress, totalProgress, detail)
-                notifyStatus()
+                    processedCount, totalProgress, fixedCount, skippedCount)
+                updateProgress(processedCount, totalProgress, detail)
             }
 
             val msg = context.getString(R.string.repair_thumbnail_complete, fixedCount, skippedCount)
             Log.i(TAG, msg)
             appendTaskLog(msg)
             notifyCompleted()
-            notifyStatus()
             Result.success(Unit)
         } catch (e: CancellationException) {
             Log.d(TAG, "任务被取消")
@@ -310,17 +311,9 @@ class RepairDownloadedThumbnailTask(
         notifyCancelled()
     }
 
-    override fun getProgressDetail(): String? {
-        return if (totalProgress > 0) {
-            "$currentProgress/$totalProgress (${context.getString(R.string.repair_thumbnail_progress, currentProgress, totalProgress, fixedCount, skippedCount)})"
-        } else null
-    }
+    // 不覆写 getProgressDetail()：基类会返回 updateProgress 传进去的那句
+    // 「修复进度 12/57 (已修复: …, 已跳过: …)」。覆写它只能拿到被改写成百分比的
+    // currentProgress，会渲染成「45/57 (修复进度 45/57 …)」这种重复鬼话。
 
-    fun setStatusListener(listener: StatusListener?) {
-        this.statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, fixed: Int, skipped: Int)
-    }
 }

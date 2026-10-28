@@ -92,6 +92,7 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.Filter;
 import com.hippo.ehviewer.download.DownloadDeleteHelper;
 import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.download.progressive.ProgressiveStats;
 import com.hippo.ehviewer.lab.analyze.AiAnalyzeManager;
 import com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis;
 import com.hippo.ehviewer.lab.analyze.model.AiPageAnalysis;
@@ -237,6 +238,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
     private TextView mPosted;
     @Nullable
     private TextView mFavoredTimes;
+    private TextView mProgressiveInfo;
     // Actions
     @Nullable
     private View mActions;
@@ -371,7 +373,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             mGalleryInfo = args.getParcelable(KEY_GALLERY_INFO);
             // Add history
             if (null != mGalleryInfo) {
-                EhDB.putHistoryInfo(mGalleryInfo);
+                EhDB.putHistoryInfoAsync(mGalleryInfo);
             }
         } else if (ACTION_GID_TOKEN.equals(action)) {
             mGid = args.getLong(KEY_GID);
@@ -385,12 +387,12 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
                 mDownloadInfo = args.getParcelable(KEY_GALLERY_INFO);
                 mGalleryInfo = mDownloadInfo;
                 if (null != mGalleryInfo) {
-                    EhDB.putHistoryInfo(mGalleryInfo);
+                    EhDB.putHistoryInfoAsync(mGalleryInfo);
                 }
             } catch (ClassCastException e) {
                 mGalleryInfo = args.getParcelable(KEY_GALLERY_INFO);
                 if (null != mGalleryInfo) {
-                    EhDB.putHistoryInfo(mGalleryInfo);
+                    EhDB.putHistoryInfoAsync(mGalleryInfo);
                 }
             }
             // Add history
@@ -645,6 +647,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
         mSize = (TextView) ViewUtils.$$(mInfo, R.id.size);
         mPosted = (TextView) ViewUtils.$$(mInfo, R.id.posted);
         mFavoredTimes = (TextView) ViewUtils.$$(mInfo, R.id.favoredTimes);
+        mProgressiveInfo = (TextView) ViewUtils.$$(mInfo, R.id.progressive_info);
         Ripple.addRipple(mInfo, isDarkTheme);
         mInfo.setOnClickListener(this);
 
@@ -1132,6 +1135,8 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
             mFavoredTimes.setText(resources.getString(R.string.favored_times, gd.favoriteCount));
             mTorrent.setText(resources.getString(R.string.torrent_count, gd.torrentCount));
         }
+
+        bindProgressiveInfo(galleryInfo);
 
         updateFavoriteDrawable();
         bindArchiverProgress(gd);
@@ -1685,6 +1690,30 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
      * 刷新本地评分覆盖的显示。
      * 已设置时显示本地星星 + “本地 x.x / EH y.y”，未设置时显示提示文字。
      */
+    /**
+     * 「更多资料」里显示递进传递情况：这个画廊吸收了多少个画廊、最长链条有多长。
+     *
+     * 开关关着或者这个画廊没吸收过任何画廊（绝大多数）就整行隐藏，不占位。
+     */
+    private void bindProgressiveInfo(GalleryInfo galleryInfo) {
+        if (mProgressiveInfo == null) {
+            return;
+        }
+        if (galleryInfo == null || !Settings.getShowProgressiveCount()) {
+            mProgressiveInfo.setVisibility(View.GONE);
+            return;
+        }
+        ProgressiveStats.warmUpAsync();
+        int absorbed = ProgressiveStats.absorbedCount(galleryInfo.gid);
+        if (absorbed <= 0) {
+            mProgressiveInfo.setVisibility(View.GONE);
+            return;
+        }
+        mProgressiveInfo.setText(getString(R.string.progressive_count_detail,
+                absorbed, ProgressiveStats.longestChainGalleries(galleryInfo.gid)));
+        mProgressiveInfo.setVisibility(View.VISIBLE);
+    }
+
     private void refreshLocalRatingDisplay() {
         if (mLocalRatingSection == null || mLocalRatingLabel == null
                 || mLocalRatingView == null || mLocalRatingText == null || mGalleryDetail == null) {

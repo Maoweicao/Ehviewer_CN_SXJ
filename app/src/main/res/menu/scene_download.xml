@@ -185,36 +185,8 @@
                 android:id="@+id/quick_filter"
                 android:title="@string/quick_filter"
                 app:showAsAction="ifRoom">
-                <menu>
-                    <item
-                        android:id="@+id/quick_filter_big_low_rating"
-                        android:title="@string/quick_filter_big_low_rating"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_duplicates"
-                        android:title="@string/quick_filter_duplicates"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_low_space_efficiency"
-                        android:title="@string/quick_filter_low_space_efficiency"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_low_rating"
-                        android:title="@string/quick_filter_low_rating"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_huge_file"
-                        android:title="@string/quick_filter_huge_file"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_old_unfavorited"
-                        android:title="@string/quick_filter_old_unfavorited"
-                        app:showAsAction="ifRoom"/>
-                    <item
-                        android:id="@+id/quick_filter_ai_generated"
-                        android:title="@string/quick_filter_ai_generated"
-                        app:showAsAction="ifRoom"/>
-                </menu>
+                <!-- 子菜单项由 DownloadsScene.onMenuCreated 从 FilterSettingsStore 动态生成 -->
+                <menu />
             </item>
 
             <item
@@ -263,6 +235,11 @@
     <item
         android:id="@+id/repair_thumbnails"
         android:title="@string/repair_thumbnail_menu"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/action_recheck_downloading"
+        android:title="@string/download_recheck_downloading"
         app:showAsAction="never"/>
 
     <item

@@ -194,6 +194,18 @@
             android:summary="@string/settings_eh_show_tag_translations_summary"
             android:title="@string/settings_eh_show_tag_translations" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="tag_suggest_local_enabled"
+            android:summary="@string/settings_eh_tag_suggest_local_summary"
+            android:title="@string/settings_eh_tag_suggest_local" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="tag_suggest_dict_enabled"
+            android:summary="@string/settings_eh_tag_suggest_dict_summary"
+            android:title="@string/settings_eh_tag_suggest_dict" />
+
         <Preference
             android:key="tag_database_management"
             android:summary="@string/settings_eh_tag_database_summary"

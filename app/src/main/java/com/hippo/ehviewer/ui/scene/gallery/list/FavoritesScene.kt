@@ -91,12 +91,14 @@ import com.hippo.ehviewer.widget.SearchBar
 import com.hippo.lib.yorozuya.AssertUtils
 import com.hippo.lib.yorozuya.ObjectUtils
 import com.hippo.lib.yorozuya.SimpleHandler
+import com.hippo.ehviewer.transfer.core.DataChangeBus
 import com.hippo.lib.yorozuya.ViewUtils
 import com.hippo.ripple.Ripple
 import com.hippo.scene.Announcer
 import com.hippo.scene.SceneFragment
 import com.hippo.util.AppHelper.Companion.hideSoftInput
 import com.hippo.util.DrawableManager
+import com.hippo.util.IoThreadPoolExecutor
 import com.hippo.widget.ContentLayout
 import com.hippo.widget.FabLayout
 import com.hippo.widget.FabLayout.OnClickFabListener
@@ -123,6 +125,21 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
     @ViewLifeCircle
     private var mHelper: FavoritesHelper? = null
+
+    /**
+     * §5.28 数据变更监听：Web 端增删收藏 / 下载后，进程内自动刷新本页。
+     */
+    @ViewLifeCircle
+    private val mDataChangeListener = DataChangeBus.Listener { type, _ ->
+        if (type == DataChangeBus.TYPE_FAVORITE_ADDED ||
+            type == DataChangeBus.TYPE_FAVORITE_REMOVED ||
+            type == DataChangeBus.TYPE_DOWNLOAD_CHANGED ||
+            type == DataChangeBus.TYPE_DOWNLOAD_REMOVED ||
+            type == DataChangeBus.TYPE_DATA_CHANGED
+        ) {
+            SimpleHandler.getInstance().post { mHelper?.refresh() }
+        }
+    }
 
     @ViewLifeCircle
     private var mSearchBarMover: SearchBarMover? = null
@@ -429,10 +446,15 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
         // Save recent fav cat
         Settings.putRecentFavCat(mUrlBuilder!!.getFavCat())
+
+        // §5.28 订阅数据变更（Web 端写入后自动刷新）
+        DataChangeBus.addListener(mDataChangeListener)
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+
+        DataChangeBus.removeListener(mDataChangeListener)
 
         if (null != mShowcaseView) {
             ViewUtils.removeFromParent(mShowcaseView)
@@ -1183,25 +1205,34 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
     }
 
     private fun onGetFavoritesLocal(keyword: String?, taskId: Int) {
-        if (mHelper != null && mHelper!!.isCurrentTask(taskId)) {
-            val list: MutableList<GalleryInfo?>?
-            if (TextUtils.isEmpty(keyword)) {
-                list = EhDB.getAllLocalFavorites()
-            } else {
-                list = EhDB.searchLocalFavorites(keyword)
+        if (mHelper == null || !mHelper!!.isCurrentTask(taskId)) {
+            return
+        }
+        // 本地收藏可能是几千条，整表查询/搜索放到 IO 线程，结果回主线程再交给 helper
+        IoThreadPoolExecutor.instance.execute {
+            val list: MutableList<GalleryInfo?>? = try {
+                if (TextUtils.isEmpty(keyword)) {
+                    EhDB.getAllLocalFavorites()
+                } else {
+                    EhDB.searchLocalFavorites(keyword)
+                }
+            } catch (t: Throwable) {
+                null
             }
-
-            if (list.size == 0) {
-                mHelper!!.onGetPageData(taskId, 0, 0, ArrayList())
-            } else {
-                mHelper!!.onGetPageData(taskId, 1, 0, list)
-            }
-
-            if (TextUtils.isEmpty(keyword)) {
-                mFavLocalCount = list.size
-                Settings.putFavLocalCount(mFavLocalCount)
-                if (mDrawerAdapter != null) {
-                    mDrawerAdapter!!.notifyDataSetChanged()
+            SimpleHandler.getInstance().post {
+                val helper = mHelper
+                if (helper == null || !helper.isCurrentTask(taskId) || list == null) {
+                    return@post
+                }
+                if (list.size == 0) {
+                    helper.onGetPageData(taskId, 0, 0, ArrayList())
+                } else {
+                    helper.onGetPageData(taskId, 1, 0, list)
+                }
+                if (TextUtils.isEmpty(keyword)) {
+                    mFavLocalCount = list.size
+                    Settings.putFavLocalCount(mFavLocalCount)
+                    mDrawerAdapter?.notifyDataSetChanged()
                 }
             }
         }
@@ -1217,9 +1248,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
     private fun removeFavorite(gi: GalleryInfo) {
         val context = getEHContext() ?: return
         if (mUrlBuilder!!.getFavCat() == FavListUrlBuilder.FAV_CAT_LOCAL) {
-            EhDB.removeLocalFavorites(longArrayOf(gi.gid))
-            if (mHelper != null) {
-                mHelper!!.refresh()
+            EhDB.removeLocalFavoritesAsync(longArrayOf(gi.gid)) {
+                mHelper?.refresh()
             }
         } else {
             mModifyGiList.clear()
@@ -1304,9 +1334,10 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                     gidArray[i] = mModifyGiList.get(i).gid
                     i++
                 }
-                EhDB.removeLocalFavorites(gidArray)
-                mModifyGiList.clear()
-                mHelper!!.refresh()
+                EhDB.removeLocalFavoritesAsync(gidArray) {
+                    mModifyGiList.clear()
+                    mHelper?.refresh()
+                }
             } else { // Delete cloud fav
                 mEnableModify = true
                 mModifyFavCat = -1
@@ -1347,17 +1378,19 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                     gidArray[i] = mModifyGiList.get(i).gid
                     i++
                 }
-                EhDB.removeLocalFavorites(gidArray)
-                mEnableModify = true
-                mModifyFavCat = dstCat
-                mModifyAdd = true
-                mHelper!!.refresh()
+                EhDB.removeLocalFavoritesAsync(gidArray) {
+                    mEnableModify = true
+                    mModifyFavCat = dstCat
+                    mModifyAdd = true
+                    mHelper?.refresh()
+                }
             } else if (dstCat == FavListUrlBuilder.FAV_CAT_LOCAL) { // Move from cloud to local
-                EhDB.putLocalFavorites(mModifyGiList)
-                mEnableModify = true
-                mModifyFavCat = -1
-                mModifyAdd = false
-                mHelper!!.refresh()
+                EhDB.putLocalFavoritesAsync(mModifyGiList) {
+                    mEnableModify = true
+                    mModifyFavCat = -1
+                    mModifyAdd = false
+                    mHelper?.refresh()
+                }
             } else {
                 mEnableModify = true
                 mModifyFavCat = dstCat
@@ -1667,7 +1700,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         override fun onFailure(e: Exception?) {
             // TODO It's a failure, add all of backup back to db.
             // But how to known which one is failed?
-            EhDB.putLocalFavorites(mBackup)
+            EhDB.putLocalFavoritesAsync(mBackup, null)
 
             val scene = getScene()
             if (scene != null) {

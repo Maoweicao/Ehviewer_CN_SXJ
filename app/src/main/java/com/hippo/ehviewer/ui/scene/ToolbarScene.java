@@ -100,6 +100,25 @@ public abstract class ToolbarScene extends BaseScene {
     public void onMenuCreated(Menu menu) {
     }
 
+    /**
+     * 重新加载菜单。
+     *
+     * 菜单里包含配置驱动的动态项（例如下载列表的快捷筛选子菜单）时，
+     * 配置变化后调用本方法让菜单重建。
+     */
+    public void reloadMenu() {
+        if (mToolbar == null) {
+            return;
+        }
+        mToolbar.getMenu().clear();
+        int menuResId = getMenuResId();
+        if (menuResId != 0) {
+            mToolbar.inflateMenu(menuResId);
+            mToolbar.setOnMenuItemClickListener(this::onMenuItemClick);
+            onMenuCreated(mToolbar.getMenu());
+        }
+    }
+
     public boolean onMenuItemClick(MenuItem item) {
         return false;
     }

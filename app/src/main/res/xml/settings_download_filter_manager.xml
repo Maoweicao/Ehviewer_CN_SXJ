@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  快捷筛选 / 快速设置按钮的管理面板是纯代码生成的列表，
+  这里只提供一个空的 PreferenceScreen 作为容器。
+-->
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android" />

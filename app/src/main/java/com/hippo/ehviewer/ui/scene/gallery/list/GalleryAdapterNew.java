@@ -45,6 +45,7 @@ import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.dao.DownloadHistory;
+import com.hippo.ehviewer.util.DownloadHistoryStatusResolver;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
 import com.hippo.ehviewer.widget.SimpleRatingView;
 import com.hippo.ehviewer.widget.TileThumbNew;
@@ -324,12 +325,27 @@ abstract class GalleryAdapterNew extends RecyclerView.Adapter<GalleryAdapterNew.
      *   提醒用户该画廊曾下载过、当前本地已不可读，避免重复下载。
      */
     private void bindDownloadHistoryStatus(@NonNull GalleryHolder holder, long gid) {
-        DownloadHistory history = EhDB.getDownloadHistory(gid);
-        boolean merged = history != null && (history.getDeletionType() == DownloadHistory.DELETION_DUPLICATE_MERGED
-                || history.getDeletionType() == DownloadHistory.DELETION_PROGRESSIVE_MERGED);
-        holder.merged.setVisibility(merged ? View.VISIBLE : View.GONE);
-        boolean deleted = history != null && !merged
+        holder.boundGid = gid;
+        int status = DownloadHistoryStatusResolver.getCached(gid);
+        if (status == DownloadHistoryStatusResolver.UNKNOWN) {
+            // 缓存未命中：先隐藏标记，后台解析后回主线程刷新，避免 bind 同步查库
+            holder.merged.setVisibility(View.GONE);
+            holder.deleted.setVisibility(View.GONE);
+            DownloadHistoryStatusResolver.resolve(gid, (resolvedGid, resolvedStatus) -> {
+                if (holder.boundGid == resolvedGid) {
+                    applyDownloadHistoryStatus(holder, resolvedGid, resolvedStatus);
+                }
+            });
+            return;
+        }
+        applyDownloadHistoryStatus(holder, gid, status);
+    }
+
+    private void applyDownloadHistoryStatus(@NonNull GalleryHolder holder, long gid, int status) {
+        boolean merged = status == DownloadHistoryStatusResolver.MERGED;
+        boolean deleted = status == DownloadHistoryStatusResolver.HISTORY_NORMAL
                 && !mDownloadManager.containDownloadInfo(gid);
+        holder.merged.setVisibility(merged ? View.VISIBLE : View.GONE);
         holder.deleted.setVisibility(deleted ? View.VISIBLE : View.GONE);
     }
 

@@ -108,7 +108,7 @@ class DbSnapshotCacheTest {
 
         val all = cache.querySince(0, 100)
         assertEquals(3, all.size)
-        assertEquals(0L, cache.getLastVersion())
+        assertEquals(1L, cache.getLastVersion())
     }
 
     @Test
@@ -216,11 +216,11 @@ class DbSnapshotCacheTest {
     @Test
     fun applyResponse_marksRemovedGids() {
         val cache = DbSnapshotCache.getInstance(context)
-        // 先插入
-        cache.applyResponse(buildResponse(1L, buildEntry(100L, "dev-A")))
+        // 先插入（来源设备与响应 deviceId 一致，removedGids 按 source_device_id 生效）
+        cache.applyResponse(buildResponse(1L, buildEntry(100L, "test-device")))
         // 再标记删除
         cache.applyResponse(buildResponse(2L,
-                buildEntry(101L, "dev-A"),
+                buildEntry(101L, "test-device"),
                 removedGids = listOf(100L)))
 
         // 已删除的 gid 不应在 aggregateByGid / queryByGid 中出现

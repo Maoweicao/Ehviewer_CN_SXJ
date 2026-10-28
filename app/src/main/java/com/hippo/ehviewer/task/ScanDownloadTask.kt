@@ -33,13 +33,9 @@ class ScanDownloadTask(
     
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
 
     private var totalProgress = 0
 
-    private fun notifyStatus(detail: String? = null) {
-        statusListener?.onStatus(currentProgress, totalProgress, detail)
-    }
     
     override fun getTaskId(): String = "scan_download"
     
@@ -74,11 +70,9 @@ class ScanDownloadTask(
                     currentProgress = current
                     totalProgress = total
                     updateProgress(current, total, "$current/$total")
-                    notifyStatus("$current/$total")
 
-                    Log.d(TAG, "扫描进度: $current/$total")
-                    appendTaskLog("扫描进度: $current/$total")
-
+                    // 逐目录不再写任务日志：TaskInfo.appendTaskLog 每次都会追加磁盘文件，
+                    // 目录多时会把 UI/IO 拖慢，进度本身已经通过 updateProgress 上报。
                     // 检查暂停状态
                     while (isPaused && !isCancelled) {
                         Thread.sleep(100)
@@ -196,17 +190,11 @@ class ScanDownloadTask(
         notifyCancelled()
     }
 
-    override fun getProgressDetail(): String? {
-        return if (totalProgress > 0) "$currentProgress/$totalProgress" else null
-    }
+    // 不覆写 getProgressDetail()：基类会返回 updateProgress 传进去的 "$current/$total"。
+    // 覆写它只能拿到被 3 参 updateProgress 改写成百分比的 currentProgress，
+    // 会渲染成「45/57」这种鬼话。
 
-    fun setStatusListener(listener: StatusListener?) {
-        statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, detail: String?)
-    }
     
     /**
      * 同步执行任务（用于Java调用）

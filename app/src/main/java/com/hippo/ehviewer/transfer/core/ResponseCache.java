@@ -19,6 +19,7 @@ package com.hippo.ehviewer.transfer.core;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,6 +32,11 @@ public class ResponseCache {
 
     private static final String TAG = "ResponseCache";
     private static final long DEFAULT_TTL_MS = 5 * 60 * 60 * 1000; // 5 hours
+
+    // 容量上限：避免带 base64 缩略图的大响应无限堆积导致 OOM。
+    private static final int MAX_ENTRIES = 32;
+    private static final long MAX_TOTAL_BYTES = 16L * 1024 * 1024; // 16 MB
+    private static final long MAX_ENTRY_BYTES = 2L * 1024 * 1024;  // 单条超过 2 MB 不入缓存
 
     private static volatile ResponseCache instance;
 
@@ -88,8 +94,46 @@ public class ResponseCache {
      * @param ttlMs TTL in milliseconds
      */
     public void put(String key, String json, long ttlMs) {
+        if (json == null) {
+            return;
+        }
+        int len = json.length();
+        if (len > MAX_ENTRY_BYTES) {
+            // 超大响应不入缓存，避免内存堆积
+            TransferLogger.getInstance().d(TAG, "跳过缓存超大响应: key=" + key + ", 字节数=" + len);
+            return;
+        }
         cache.put(key, new CacheEntry(json, System.currentTimeMillis(), ttlMs));
-        TransferLogger.getInstance().d(TAG, "写入缓存: key=" + key + ", 字节数=" + json.length() + ", ttlMs=" + ttlMs);
+        TransferLogger.getInstance().d(TAG, "写入缓存: key=" + key + ", 字节数=" + len + ", ttlMs=" + ttlMs);
+        evictIfNeeded();
+    }
+
+    /**
+     * 超出条数或总字节上限时，按 createdAt 从旧到新淘汰。
+     */
+    private void evictIfNeeded() {
+        if (cache.size() <= MAX_ENTRIES && estimateTotalBytes() <= MAX_TOTAL_BYTES) {
+            return;
+        }
+        List<Map.Entry<String, CacheEntry>> entries = new ArrayList<>(cache.entrySet());
+        entries.sort(Comparator.comparingLong(e -> e.getValue().createdAt));
+        long total = estimateTotalBytes();
+        for (Map.Entry<String, CacheEntry> entry : entries) {
+            if (cache.size() <= MAX_ENTRIES && total <= MAX_TOTAL_BYTES) {
+                break;
+            }
+            if (cache.remove(entry.getKey(), entry.getValue())) {
+                total -= entry.getValue().json.length();
+            }
+        }
+    }
+
+    private long estimateTotalBytes() {
+        long total = 0;
+        for (CacheEntry entry : cache.values()) {
+            total += entry.json.length();
+        }
+        return total;
     }
 
     /**

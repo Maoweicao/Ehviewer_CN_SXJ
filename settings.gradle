@@ -9,7 +9,13 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        google {
+            content {
+                // Robolectric 系列只发布在 Maven Central，避免 Gradle 先去 Google 仓库
+                // 走一遍网络（本机到 dl.google.com 的 IPv6 路由不通）。
+                excludeGroup("org.robolectric")
+            }
+        }
         mavenCentral()
         maven { url "https://jitpack.io" }
     }

@@ -246,4 +246,16 @@
     <color name="edit_text_background_focused">#1f000000</color>
     <color name="edit_text_underline">#4d000000</color>
 
+    <!-- 存储感知分析：环形图与分类卡片配色 -->
+    <color name="storage_chart_galleries">#FF009688</color>
+    <color name="storage_chart_recycle_bin">#FF78909C</color>
+    <color name="storage_chart_thumbnail_cache">#FF42A5F5</color>
+    <color name="storage_chart_network_cache">#FF66BB6A</color>
+    <color name="storage_chart_spider_cache">#FFAB47BC</color>
+    <color name="storage_chart_translate_cache">#FFFFA726</color>
+    <color name="storage_chart_database">#FF5C6BC0</color>
+    <color name="storage_chart_logs">#FF8D6E63</color>
+    <color name="storage_chart_temp">#FF26C6DA</color>
+    <color name="storage_chart_other">#FF9E9E9E</color>
+
 </resources>

@@ -28,20 +28,57 @@ import com.hippo.ehviewer.ui.MainActivity;
  */
 public class BackgroundTaskActivity extends EhActivity {
     
-    private static final long REFRESH_INTERVAL = 1500; // 1.5秒刷新一次
+    /** 事件驱动刷新：进度事件本身已按 300ms 合并，这里再合并一次避免重复重建列表。 */
+    private static final long REFRESH_THROTTLE_MS = 300;
     
     private RecyclerView mRecyclerView;
     private BackgroundTaskAdapter mAdapter;
     private BackgroundTaskStatusManager mTaskManager;
     private Handler mHandler;
+    private boolean mRefreshScheduled;
     
     private final Runnable mRefreshRunnable = new Runnable() {
         @Override
         public void run() {
+            mRefreshScheduled = false;
             refreshData();
-            mHandler.postDelayed(this, REFRESH_INTERVAL);
         }
     };
+
+    /**
+     * 任务状态事件：任务增删、进度、状态变化都直接刷新界面，
+     * 不再依赖 1.5s 轮询（轮询在任务结束后仍会空转，且进度显示延迟明显）。
+     */
+    private final BackgroundTaskStatusManager.TaskChangeListener mTaskChangeListener =
+            new BackgroundTaskStatusManager.TaskChangeListener() {
+                @Override
+                public void onTaskAdded(String taskId) {
+                    scheduleRefresh();
+                }
+
+                @Override
+                public void onTaskProgressChanged(String taskId) {
+                    scheduleRefresh();
+                }
+
+                @Override
+                public void onTaskStateChanged(String taskId) {
+                    scheduleRefresh();
+                }
+
+                @Override
+                public void onTaskRemoved(String taskId) {
+                    scheduleRefresh();
+                }
+            };
+
+    private void scheduleRefresh() {
+        if (mRefreshScheduled) {
+            return;
+        }
+        mRefreshScheduled = true;
+        mHandler.postDelayed(mRefreshRunnable, REFRESH_THROTTLE_MS);
+    }
     
     public static void start(@NonNull Context context) {
         Intent intent = new Intent(context, BackgroundTaskActivity.class);
@@ -140,11 +177,13 @@ public class BackgroundTaskActivity extends EhActivity {
     
     private void refreshData() {
         if (mAdapter != null && mTaskManager != null) {
-            mAdapter.updateData(
-                mTaskManager.getRunningTasks(),
-                mTaskManager.getWaitingTasks(),
-                mTaskManager.getCompletedTasks()
-            );
+            java.util.List<BackgroundTaskInfo> running = mTaskManager.getRunningTasks();
+            java.util.List<BackgroundTaskInfo> waiting = mTaskManager.getWaitingTasks();
+            java.util.List<BackgroundTaskInfo> completed = mTaskManager.getCompletedTasks();
+            // 结构不变时只刷新进度，避免每个进度事件都重建整个列表
+            if (!mAdapter.updateProgressInPlace(running, waiting, completed)) {
+                mAdapter.updateData(running, waiting, completed);
+            }
             updateToolbarTitle();
         }
     }
@@ -160,12 +199,20 @@ public class BackgroundTaskActivity extends EhActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        mHandler.postDelayed(mRefreshRunnable, REFRESH_INTERVAL);
+        if (mTaskManager != null) {
+            mTaskManager.addTaskChangeListener(mTaskChangeListener);
+        }
+        // 进入页面时做一次全量对账，覆盖暂停期间可能错过的事件
+        refreshData();
     }
 
     @Override
     protected void onPause() {
+        if (mTaskManager != null) {
+            mTaskManager.removeTaskChangeListener(mTaskChangeListener);
+        }
         mHandler.removeCallbacks(mRefreshRunnable);
+        mRefreshScheduled = false;
         super.onPause();
     }
 

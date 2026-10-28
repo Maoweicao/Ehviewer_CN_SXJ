@@ -18,6 +18,26 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
+            <com.hippo.ehviewer.widget.QuickPresetBar
+                android:id="@+id/quick_preset_bar"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="@string/filter_section_exclude"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.hippo.ehviewer.widget.FilterExcludeView
+                android:id="@+id/filter_exclude_view"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp" />
+
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -232,6 +252,12 @@
                     android:inputType="number"
                     android:maxLines="1" />
             </LinearLayout>
+
+            <com.hippo.ehviewer.widget.FilterExtraOptionsView
+                android:id="@+id/extra_options_view"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp" />
 
             <CheckBox
                 android:id="@+id/filter_duplicate_only_checkbox"

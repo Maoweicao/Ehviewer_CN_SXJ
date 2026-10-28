@@ -53,18 +53,23 @@ class RebuildDownloadRecordsTask(
     
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
     
     private var totalProgress = 0
+
+    /**
+     * 已处理的条目数。
+     *
+     * 注意：不能用继承来的 `currentProgress` 当计数器 —— 基类的
+     * `updateProgress(current, total, detail)` 会把那个字段改写成**百分比**，
+     * 传回去就等于每次循环都把计数重置，进度条会永远卡在 0%。
+     */
+    private var processedCount = 0
     private var rebuildCount = 0
     private var syncSuccess = 0
     private var syncFailed = 0
     private var syncSkipped = 0
     private val galleriesToSync = mutableListOf<GallerySyncInfo>()
 
-    private fun notifyStatus(detail: String? = null) {
-        statusListener?.onStatus(currentProgress, totalProgress, rebuildCount, detail)
-    }
     
     override fun getTaskId(): String = "rebuild_download_records"
     
@@ -105,7 +110,6 @@ class RebuildDownloadRecordsTask(
             syncFailed = 0
             syncSkipped = 0
             galleriesToSync.clear()
-            notifyStatus()
             
             val downloadManager = EhApplication.getDownloadManager(context)
             val galleriesToAdd = mutableListOf<GalleryInfo>()
@@ -130,9 +134,8 @@ class RebuildDownloadRecordsTask(
                     processDirectory(dir, downloadManager, galleriesToAdd)
                 }
                 
-                currentProgress++
-                updateProgress(currentProgress, totalProgress, "$currentProgress/$totalProgress")
-                notifyStatus("已发现待重建: ${galleriesToAdd.size}, 待同步: ${galleriesToSync.size}")
+                processedCount++
+                updateProgress(processedCount, totalProgress, "$processedCount/$totalProgress")
             }
             
             // 批量添加画廊信息
@@ -273,7 +276,7 @@ class RebuildDownloadRecordsTask(
         
         // 重置进度条为同步阶段
         totalProgress = totalCount
-        currentProgress = 0
+        processedCount = 0
         
         for ((index, info) in galleriesToSync.withIndex()) {
             // 检查取消状态
@@ -314,9 +317,8 @@ class RebuildDownloadRecordsTask(
             delay(API_REQUEST_DELAY_MS)
             
             // 更新进度
-            currentProgress = index + 1
-            updateProgress(currentProgress, totalCount, "同步: $currentProgress/$totalCount")
-            notifyStatus("同步详情: $currentProgress/$totalCount (成功=$syncSuccess, 失败=$syncFailed)")
+            processedCount = index + 1
+            updateProgress(processedCount, totalCount, "同步: $processedCount/$totalCount")
         }
         
         appendTaskLog("同步完成: 成功=$syncSuccess, 失败=$syncFailed, 跳过=$syncSkipped")
@@ -449,14 +451,10 @@ class RebuildDownloadRecordsTask(
         notifyCancelled()
     }
 
-    override fun getProgressDetail(): String? {
-        return if (totalProgress > 0) {
-            "$currentProgress/$totalProgress (重建: $rebuildCount, 同步: $syncSuccess/$syncFailed)"
-        } else {
-            null
-        }
-    }
-    
+    // 不覆写 getProgressDetail()：基类会返回 updateProgress 传进去的那句
+    // 「12/57」或「同步: 12/57」。覆写它只能拿到被改写成百分比的 currentProgress，
+    // 会渲染成「45/57」这种鬼话。
+
     /**
      * 同步执行任务（用于Java调用）
      */
@@ -481,11 +479,5 @@ class RebuildDownloadRecordsTask(
      */
     fun getSyncFailed(): Int = syncFailed
 
-    fun setStatusListener(listener: StatusListener?) {
-        statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, rebuilt: Int, detail: String?)
-    }
 }

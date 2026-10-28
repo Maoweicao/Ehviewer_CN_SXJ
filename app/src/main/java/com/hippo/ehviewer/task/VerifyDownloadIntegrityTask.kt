@@ -28,7 +28,6 @@ class VerifyDownloadIntegrityTask(
 
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
 
     private var totalProgress = 0
     private var verifyCurrent = 0
@@ -36,9 +35,6 @@ class VerifyDownloadIntegrityTask(
     private var incompleteCount = 0
     private var removedCount = 0
 
-    private fun notifyStatus() {
-        statusListener?.onStatus(verifyCurrent, totalProgress, completeCount, incompleteCount, removedCount)
-    }
 
     override fun getTaskId(): String = "verify_integrity"
 
@@ -64,7 +60,6 @@ class VerifyDownloadIntegrityTask(
                 Log.d(TAG, msg)
                 appendTaskLog(msg)
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
 
@@ -74,7 +69,6 @@ class VerifyDownloadIntegrityTask(
                 Log.d(TAG, msg)
                 appendTaskLog(msg)
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
 
@@ -85,7 +79,6 @@ class VerifyDownloadIntegrityTask(
                 Log.d(TAG, msg)
                 appendTaskLog(msg)
                 notifyCompleted()
-                notifyStatus()
                 return Result.success(Unit)
             }
 
@@ -94,7 +87,6 @@ class VerifyDownloadIntegrityTask(
             completeCount = 0
             incompleteCount = 0
             removedCount = 0
-            notifyStatus()
 
             appendTaskLog("总共需要校验 $totalProgress 个画廊（跳过 ${finishList.size - verifiableList.size} 个已删除/递进关系画廊）")
 
@@ -129,7 +121,6 @@ class VerifyDownloadIntegrityTask(
                 val detail = context.getString(R.string.verify_integrity_progress,
                     verifyCurrent, totalProgress, completeCount, incompleteCount)
                 updateProgress(verifyCurrent, totalProgress, detail)
-                notifyStatus()
             }
 
             val msg = context.getString(R.string.verify_integrity_complete, completeCount, incompleteCount)
@@ -137,7 +128,6 @@ class VerifyDownloadIntegrityTask(
             appendTaskLog(msg)
             appendTaskLog("校验完成: 完整 $completeCount 个, 不完整 $incompleteCount 个, 已删除 $removedCount 个")
             notifyCompleted()
-            notifyStatus()
             Result.success(Unit)
         } catch (e: CancellationException) {
             Log.d(TAG, "任务被取消")
@@ -303,13 +293,7 @@ class VerifyDownloadIntegrityTask(
         } else null
     }
 
-    fun setStatusListener(listener: StatusListener?) {
-        this.statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, complete: Int, incomplete: Int, removed: Int)
-    }
 
     private enum class VerifyResult {
         COMPLETE,

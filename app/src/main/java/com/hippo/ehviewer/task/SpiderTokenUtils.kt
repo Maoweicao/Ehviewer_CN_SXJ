@@ -3,12 +3,15 @@ package com.hippo.ehviewer.task
 import android.content.Context
 import android.util.SparseArray
 import com.hippo.ehviewer.EhApplication
+import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.data.PreviewSet
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser
 import com.hippo.ehviewer.dao.DownloadInfo
+import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.spider.SpiderInfo
+import com.hippo.ehviewer.spider.SpiderQueen
 import java.text.Normalizer
 import java.util.Locale
 
@@ -212,6 +215,93 @@ object SpiderTokenUtils {
                 spi.pTokenMap.put(r.page, pToken)
             }
         }
+    }
+
+    /**
+     * 以「SimpleScanCache → PtokenIndex → 本地 .ehviewer → 网络」的顺序尽力拉取画廊完整 token 集。
+     * 拉取失败返回 null，由调用方决定是否保守放弃判定。
+     * 供 [WaitListProgressiveCheckTask] 与 [DownloadingRecheckTask] 共用。
+     */
+    suspend fun fetchHashSetResilient(context: Context, info: DownloadInfo): HashSet<String>? {
+        // 1) SimpleScanCache
+        SimpleScanCache.getHashSet(info.gid)?.let { return it }
+
+        // 2) PtokenIndex
+        EhDB.getPtokensIndex(info.gid)?.let { pi ->
+            val set = parsePtokenString(pi.ptokens)
+            if (set.isNotEmpty()) {
+                SimpleScanCache.putHashSet(info.gid, set)
+                return set
+            }
+        }
+
+        // 3) 本地 .ehviewer（可能不完整时尝试网络补齐）
+        val localSet = readLocalHashSet(info)
+        if (localSet != null && localSet.isNotEmpty()) {
+            val remoteSet = tryFetchRemoteAndMerge(context, info, localSet)
+            if (remoteSet != null) {
+                SimpleScanCache.putHashSet(info.gid, remoteSet)
+                return remoteSet
+            }
+            SimpleScanCache.putHashSet(info.gid, localSet)
+            return localSet
+        }
+
+        // 4) 网络拉取（兜底）
+        val spi = fetchSpiderInfoFromRemote(context, info) ?: return null
+        val set = toHashSet(spi)
+        if (set.isEmpty()) return null
+        try {
+            EhDB.putPtokensIndex(info.gid, serializePtokens(set), spi.pages)
+        } catch (_: Exception) {
+        }
+        SimpleScanCache.putHashSet(info.gid, set)
+        return set
+    }
+
+    /** 读本地 .ehviewer 拿到 token 集（不完整也算）。 */
+    fun readLocalHashSet(info: DownloadInfo): HashSet<String>? {
+        val dir = SpiderDen.getExistingGalleryDownloadDir(info) ?: return null
+        val f = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null
+        val spi = SpiderInfo.read(f) ?: return null
+        return toHashSet(spi)
+    }
+
+    /**
+     * 本地有 .ehviewer 但可能不完整（页数 < 远程）时，拉一遍远程 preview 列表并补齐缺失的 token，
+     * 再合并写入。拉取失败时返回 null（回退使用本地集）。
+     */
+    private suspend fun tryFetchRemoteAndMerge(
+        context: Context,
+        info: DownloadInfo,
+        localSet: HashSet<String>
+    ): HashSet<String>? {
+        val dir = SpiderDen.getExistingGalleryDownloadDir(info) ?: return null
+        val localSpi = SpiderInfo.read(dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null)
+            ?: return null
+        if (info.token.isNullOrEmpty()) return null
+        val remoteSpi = fetchSpiderInfoFromRemote(context, info) ?: return null
+        if (remoteSpi.pages <= localSpi.pages) {
+            // 远程不比本地完整，无需补齐；尝试写回最新 PtokenIndex 即可
+            try {
+                EhDB.putPtokensIndex(info.gid, serializePtokens(localSet), localSpi.pages)
+            } catch (_: Exception) {
+            }
+            return localSet
+        }
+        // 合并：取两者并集，并写回 .ehviewer 使后续 SpiderQueen 复用完整 token 集
+        val merged = HashSet<String>(localSet)
+        merged.addAll(toHashSet(remoteSpi))
+        try {
+            val target = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return merged
+            target.openOutputStream().use { os -> remoteSpi.write(os) }
+        } catch (_: Exception) {
+        }
+        try {
+            EhDB.putPtokensIndex(info.gid, serializePtokens(merged), remoteSpi.pages)
+        } catch (_: Exception) {
+        }
+        return merged
     }
 
     private val DATE_REGEX = Regex(

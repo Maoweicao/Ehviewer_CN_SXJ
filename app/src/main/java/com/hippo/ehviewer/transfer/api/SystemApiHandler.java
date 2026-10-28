@@ -27,7 +27,10 @@ import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
+import com.hippo.ehviewer.transfer.core.DataChangeBus;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.index.BucketLayout;
+import com.hippo.ehviewer.transfer.index.GalleryIndexStore;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.unifile.UniFile;
 
@@ -94,7 +97,7 @@ public class SystemApiHandler extends BaseApiHandler {
             String cached = ResponseCache.getInstance().get(cacheKey);
             if (cached != null) {
                 TransferLogger.getInstance().d(TAG, "Cache hit for system info");
-                return ResponseBuilder.jsonSuccess(cached);
+                return ResponseBuilder.jsonSuccess(appendIndexFields(cached));
             }
 
             StringBuilder sb = new StringBuilder();
@@ -161,17 +164,18 @@ public class SystemApiHandler extends BaseApiHandler {
             sb.append(",\"syncDownloadEnabled\":").append(Settings.getSyncDownloadWhileReading());
             sb.append(",\"remoteManagementEnabled\":").append(Settings.isRemoteManagementEnabled());
             sb.append(",\"pageUploadEnabled\":").append(Settings.isRemotePageUploadEnabled());
+            sb.append(",\"auxDownloadEnabled\":").append(Settings.isAuxDownloadEnabled());
 
             sb.append("}");
             
             String responseJson = sb.toString();
-            
+
             // Store in cache (system info changes infrequently)
             ResponseCache.getInstance().put(cacheKey, responseJson);
 
             TransferLogger.getInstance().d(TAG, "系统信息: totalGalleries=" + totalGalleries +
                     ", downloadedGalleries=" + downloadedGalleries + ", totalPages=" + totalPages);
-            return ResponseBuilder.jsonSuccess(responseJson);
+            return ResponseBuilder.jsonSuccess(appendIndexFields(responseJson));
             
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Error getting system info", e);
@@ -179,6 +183,29 @@ public class SystemApiHandler extends BaseApiHandler {
         }
     }
     
+    /**
+     * 追加 §5.29 索引能力字段。
+     *
+     * <p>这些字段随写入实时变化（版本号、epoch），不能跟其余系统信息一起缓存，
+     * 因此在缓存体之外拼接。
+     */
+    private String appendIndexFields(String baseJson) {
+        StringBuilder sb = new StringBuilder(baseJson.length() + 160);
+        if (baseJson.endsWith("}")) {
+            sb.append(baseJson, 0, baseJson.length() - 1);
+        } else {
+            sb.append(baseJson);
+        }
+        GalleryIndexStore store = GalleryIndexStore.get(context);
+        sb.append(",\"capabilities\":[\"").append(BucketLayout.CAPABILITY)
+                .append("\",\"lab-sync-v1\"]");
+        sb.append(",\"dataVersion\":").append(DataChangeBus.getVersion());
+        sb.append(",\"dataEpoch\":\"").append(store.getEpoch()).append("\"");
+        sb.append(",\"indexBucketSize\":").append(store.getBucketSize());
+        sb.append('}');
+        return sb.toString();
+    }
+
     /**
      * 获取系统统计信息
      */

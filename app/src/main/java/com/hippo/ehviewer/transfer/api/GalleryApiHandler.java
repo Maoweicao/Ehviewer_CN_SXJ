@@ -27,6 +27,7 @@ import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.EhConfig;
+import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
@@ -35,6 +36,7 @@ import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.DataChangeBus;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.ehviewer.util.ImageMimeUtils;
@@ -65,6 +67,33 @@ import fi.iki.elonen.NanoHTTPD;
 public class GalleryApiHandler extends BaseApiHandler {
     
     private static final String TAG = "GalleryApiHandler";
+
+    // 画廊大小/文件数短 TTL 缓存：gid -> [size, fileCount, timestamp]。
+    // 列表接口对每条画廊都扫描目录开销很大，缓存避免重复扫描。
+    private static final long SIZE_COUNT_CACHE_TTL_MS = 60_000L;
+    private static final java.util.concurrent.ConcurrentHashMap<Long, long[]> sSizeCountCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    // 内联 base64 缩略图所需的最小堆余量：低于此值即使请求 thumb=1 也跳过，
+    // 避免内存紧张时把整份列表响应堆到 OOM（历史 OOM 多发生在传输列表 + 多下载并发时）。
+    private static final long THUMB_HEAP_HEADROOM_BYTES = 48L * 1024 * 1024;
+
+    /**
+     * 是否内联 base64 缩略图：仅当调用方显式请求（thumb=1 / includeThumb=1）
+     * 且当前堆余量充足时返回 true。列表接口默认不带缩略图。
+     */
+    private static boolean resolveIncludeThumb(NanoHTTPD.IHTTPSession session) {
+        boolean requested = RequestParser.getBooleanQueryParameter(session, "thumb", false)
+                || RequestParser.getBooleanQueryParameter(session, "includeThumb", false);
+        return requested && hasHeapHeadroom(THUMB_HEAP_HEADROOM_BYTES);
+    }
+
+    /** 当前堆可用余量是否大于 neededBytes。 */
+    private static boolean hasHeapHeadroom(long neededBytes) {
+        Runtime rt = Runtime.getRuntime();
+        long free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory());
+        return free > neededBytes;
+    }
     
     // 类别映射
     private static final String[] CATEGORY_NAMES = {
@@ -107,14 +136,39 @@ public class GalleryApiHandler extends BaseApiHandler {
 
         return ResponseBuilder.notFound("Endpoint");
     }
-    
+
+    @Override
+    public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
+        logRequest("POST", uri, session);
+
+        String path = uri.split("\\?")[0];
+
+        // §5.26.1 加入收藏（本地）
+        if (path.equals("/api/v1/favorites")) {
+            return handleAddFavorite(session);
+        }
+
+        // §5.26.3 源站收藏（带分类）
+        if (path.equals("/api/v1/favorites/remote")) {
+            return handleRemoteFavorite(session);
+        }
+
+        return ResponseBuilder.notFound("Endpoint");
+    }
+
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("DELETE", uri, session);
         
         // 移除查询参数进行匹配
         String path = uri.split("\\?")[0];
-        
+
+        // §5.26.2 取消收藏（本地）
+        if (path.matches("/api/v1/favorites/\\d+")) {
+            long gid = RequestParser.extractGid(path);
+            return handleRemoveFavorite(session, gid);
+        }
+
         // /api/v1/galleries/{gid} - 删除
         if (path.matches("/api/v1/galleries/\\d+")) {
             long gid = RequestParser.extractGid(path);
@@ -162,13 +216,17 @@ public class GalleryApiHandler extends BaseApiHandler {
             boolean hasExpression = (sortExpr != null && !sortExpr.isEmpty()) ||
                     (filterExpr != null && !filterExpr.isEmpty()) ||
                     (search != null && !search.isEmpty());
+            // 列表默认不内联 base64 缩略图（内存主因）：Web 端已改用 /thumbnail 懒加载，
+            // 需要内联的旧客户端可显式传 thumb=1 / includeThumb=1。堆紧张时即使请求也跳过。
+            boolean includeThumb = resolveIncludeThumb(session);
             TransferLogger.getInstance().d(TAG, "获取画廊列表: page=" + page + ", limit=" + limit +
-                    ", label=" + label + ", search=" + search);
+                    ", label=" + label + ", search=" + search + ", thumb=" + includeThumb);
 
             // Check cache (only for non-search / non-expression requests)
             String cacheKey = ResponseCache.buildKey("galleries", String.valueOf(page), String.valueOf(limit),
                     label != null ? label : "", search != null ? search : "",
-                    sortExpr != null ? sortExpr : "", filterExpr != null ? filterExpr : "");
+                    sortExpr != null ? sortExpr : "", filterExpr != null ? filterExpr : "",
+                    String.valueOf(includeThumb));
             if (!hasExpression) {
                 String cached = ResponseCache.getInstance().get(cacheKey);
                 if (cached != null) {
@@ -180,14 +238,14 @@ public class GalleryApiHandler extends BaseApiHandler {
             // 获取下载列表
             List<DownloadInfo> allList;
             if ("默认".equals(label) || "default".equals(label)) {
-                allList = downloadManager.getDefaultDownloadInfoList();
+                allList = downloadManager.getDefaultDownloadInfoSnapshot();
             } else if (label != null && !label.isEmpty()) {
-                allList = downloadManager.getLabelDownloadInfoList(label);
+                allList = downloadManager.getLabelDownloadInfoSnapshot(label);
                 if (allList == null) {
                     allList = new ArrayList<>();
                 }
             } else {
-                allList = downloadManager.getAllDownloadInfoList();
+                allList = downloadManager.getAllDownloadInfoSnapshot();
             }
 
             // 应用高级筛选表达式 + 关键字搜索
@@ -221,7 +279,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             for (DownloadInfo info : pageList) {
                 if (!first) sb.append(",");
                 first = false;
-                sb.append(formatGalleryJson(info, false));
+                sb.append(formatGalleryJson(info, false, includeThumb));
             }
 
             sb.append("]}");
@@ -262,7 +320,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                 return ResponseBuilder.notFound("Gallery");
             }
             
-            String json = formatGalleryJson(info, true);
+            String json = formatGalleryJson(info, true, hasHeapHeadroom(THUMB_HEAP_HEADROOM_BYTES));
             
             // Store in cache
             ResponseCache.getInstance().put(cacheKey, json);
@@ -446,6 +504,14 @@ public class GalleryApiHandler extends BaseApiHandler {
         }
         // 从内存列表中移除（即时刷新 UI）
         downloadManager.removeFromMemoryRange(gidList);
+        // 受理瞬间就要让列表缓存失效：任务真正跑完可能还要几分钟（尤其 deleteFiles=true 要扫盘），
+        // 期间若客户端重新拉取画廊列表，不失效就会继续拿到含已删 gid 的旧快照，
+        // 客户端再对这些 gid 发删除就只会拿到 404 Gallery not found。
+        // §5.28 广播删除事件
+        for (Long removedGid : gids) {
+            DataChangeBus.publish(DataChangeBus.TYPE_DOWNLOAD_REMOVED, removedGid, null, null);
+        }
+        ResponseCache.getInstance().invalidateGalleries();
         DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
                 context, downloadManager, infoList, deleteFiles, null);
         BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);
@@ -490,6 +556,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             String filterExpr = "";
             String search = "";
             String label = "";
+            boolean includeThumb = false;
 
             try {
                 com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(body);
@@ -500,24 +567,26 @@ public class GalleryApiHandler extends BaseApiHandler {
                     if (json.containsKey("filter")) filterExpr = json.getString("filter");
                     if (json.containsKey("search")) search = json.getString("search");
                     if (json.containsKey("label")) label = json.getString("label");
+                    includeThumb = json.getBooleanValue("thumb") || json.getBooleanValue("includeThumb");
                 }
             } catch (Exception e) {
                 TransferLogger.getInstance().w(TAG, "Failed to parse QUERY body, falling back", e);
             }
 
             limit = normalizeLimit(limit);
+            includeThumb = includeThumb && hasHeapHeadroom(THUMB_HEAP_HEADROOM_BYTES);
 
             // 获取下载列表
             List<DownloadInfo> allList;
             if ("默认".equals(label) || "default".equals(label)) {
-                allList = downloadManager.getDefaultDownloadInfoList();
+                allList = downloadManager.getDefaultDownloadInfoSnapshot();
             } else if (label != null && !label.isEmpty()) {
-                allList = downloadManager.getLabelDownloadInfoList(label);
+                allList = downloadManager.getLabelDownloadInfoSnapshot(label);
                 if (allList == null) {
                     allList = new ArrayList<>();
                 }
             } else {
-                allList = downloadManager.getAllDownloadInfoList();
+                allList = downloadManager.getAllDownloadInfoSnapshot();
             }
 
             // 应用高级筛选 + 关键字搜索
@@ -551,7 +620,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             for (DownloadInfo info : pageList) {
                 if (!first) sb.append(",");
                 first = false;
-                sb.append(formatGalleryJson(info, false));
+                sb.append(formatGalleryJson(info, false, includeThumb));
             }
 
             sb.append("]}");
@@ -577,8 +646,9 @@ public class GalleryApiHandler extends BaseApiHandler {
             String sortExpr = "";
             String filterExpr = "";
             String search = "";
+            boolean includeThumb = false;
 
-            if ("QUERY".equals(session.getMethod().name())) {
+            if (isQueryBody(session)) {
                 String body = RequestParser.readBody(session);
                 try {
                     com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(body);
@@ -588,6 +658,7 @@ public class GalleryApiHandler extends BaseApiHandler {
                         if (json.containsKey("sort")) sortExpr = json.getString("sort");
                         if (json.containsKey("filter")) filterExpr = json.getString("filter");
                         if (json.containsKey("search")) search = json.getString("search");
+                        includeThumb = json.getBooleanValue("thumb") || json.getBooleanValue("includeThumb");
                     }
                 } catch (Exception e) {
                     TransferLogger.getInstance().w(TAG, "Failed to parse favorites QUERY body", e);
@@ -598,9 +669,12 @@ public class GalleryApiHandler extends BaseApiHandler {
                 sortExpr = urlDecode(RequestParser.getQueryParameter(session, "sort", ""));
                 filterExpr = urlDecode(RequestParser.getQueryParameter(session, "filter", ""));
                 search = urlDecode(RequestParser.getQueryParameter(session, "search", ""));
+                includeThumb = RequestParser.getBooleanQueryParameter(session, "thumb", false)
+                        || RequestParser.getBooleanQueryParameter(session, "includeThumb", false);
             }
 
             limit = normalizeLimit(limit);
+            includeThumb = includeThumb && hasHeapHeadroom(THUMB_HEAP_HEADROOM_BYTES);
             TransferLogger.getInstance().d(TAG, "获取收藏列表: page=" + page + ", limit=" + limit + ", search=" + search);
 
             // 获取本地收藏
@@ -653,7 +727,7 @@ public class GalleryApiHandler extends BaseApiHandler {
             for (FavoriteView v : pageList) {
                 if (!first) sb.append(",");
                 first = false;
-                sb.append(formatFavoriteJson(v));
+                sb.append(formatFavoriteJson(v, includeThumb));
             }
 
             sb.append("]}");
@@ -666,11 +740,152 @@ public class GalleryApiHandler extends BaseApiHandler {
             return ResponseBuilder.internalError(e.getMessage());
         }
     }
+
+    // ==================== §5.26 收藏管理 ====================
+
+    /**
+     * §5.26.1 POST /api/v1/favorites —— 加入收藏（本地，可选 remote）
+     */
+    private NanoHTTPD.Response handleAddFavorite(NanoHTTPD.IHTTPSession session) {
+        try {
+            String body = RequestParser.readBody(session);
+            com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(body);
+            if (json == null) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                        "Invalid JSON body", 400);
+            }
+            long gid = json.getLongValue("gid");
+            if (gid <= 0) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                        "gid is required", 400);
+            }
+            if (EhDB.containLocalFavorites(gid)) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.CONFLICT,
+                        "Favorite already exists", 409);
+            }
+
+            GalleryInfo gi = buildGalleryInfoFromJson(json, gid);
+            EhDB.putLocalFavorite(gi);
+
+            boolean remote = json.getBooleanValue("remote");
+            boolean remoteOk = false;
+            if (remote) {
+                int favCat = json.containsKey("favCat") ? json.getIntValue("favCat") : 0;
+                String note = json.getString("favNote");
+                EhEngine.addFavorites(null, EhApplication.getOkHttpClient(context),
+                        gid, gi.token, favCat, note);
+                remoteOk = true;
+            }
+
+            ResponseCache.getInstance().invalidateGalleries();
+            DataChangeBus.publish(DataChangeBus.TYPE_FAVORITE_ADDED, gid, null, null);
+
+            com.alibaba.fastjson.JSONObject resp = new com.alibaba.fastjson.JSONObject();
+            resp.put("success", true);
+            resp.put("gid", gid);
+            resp.put("isFavorited", true);
+            resp.put("remote", remoteOk);
+            resp.put("message", "Favorite added");
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Throwable t) {
+            TransferLogger.getInstance().e(TAG, "Error adding favorite", t);
+            return ResponseBuilder.internalError(t.getMessage());
+        }
+    }
+
+    /**
+     * §5.26.2 DELETE /api/v1/favorites/{gid} —— 取消收藏（本地，幂等）
+     */
+    private NanoHTTPD.Response handleRemoveFavorite(NanoHTTPD.IHTTPSession session, long gid) {
+        try {
+            boolean existed = EhDB.containLocalFavorites(gid);
+            if (existed) {
+                EhDB.removeLocalFavorites(gid);
+                ResponseCache.getInstance().invalidateGalleries();
+                DataChangeBus.publish(DataChangeBus.TYPE_FAVORITE_REMOVED, gid, null, null);
+            }
+            com.alibaba.fastjson.JSONObject resp = new com.alibaba.fastjson.JSONObject();
+            resp.put("success", true);
+            resp.put("gid", gid);
+            resp.put("isFavorited", false);
+            resp.put("message", existed ? "Favorite removed" : "Favorite not found");
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Throwable t) {
+            TransferLogger.getInstance().e(TAG, "Error removing favorite", t);
+            return ResponseBuilder.internalError(t.getMessage());
+        }
+    }
+
+    /**
+     * §5.26.3 POST /api/v1/favorites/remote —— 源站收藏（带分类）
+     */
+    private NanoHTTPD.Response handleRemoteFavorite(NanoHTTPD.IHTTPSession session) {
+        try {
+            String body = RequestParser.readBody(session);
+            com.alibaba.fastjson.JSONObject json = com.alibaba.fastjson.JSON.parseObject(body);
+            if (json == null) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                        "Invalid JSON body", 400);
+            }
+            long gid = json.getLongValue("gid");
+            String token = json.getString("token");
+            if (gid <= 0 || token == null || token.isEmpty()) {
+                return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST,
+                        "gid and token are required", 400);
+            }
+            int favCat = json.containsKey("favCat") ? json.getIntValue("favCat") : 0;
+            String note = json.getString("favNote");
+            EhEngine.addFavorites(null, EhApplication.getOkHttpClient(context),
+                    gid, token, favCat, note);
+
+            com.alibaba.fastjson.JSONObject resp = new com.alibaba.fastjson.JSONObject();
+            resp.put("success", true);
+            resp.put("gid", gid);
+            resp.put("favCat", favCat);
+            resp.put("message", "Remote favorite added");
+            return ResponseBuilder.jsonSuccess(resp.toJSONString());
+        } catch (Throwable t) {
+            String msg = t.getMessage() != null ? t.getMessage() : "Remote favorite failed";
+            TransferLogger.getInstance().w(TAG, "Error remote favorite: " + msg);
+            return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.UNAUTHORIZED, msg, 401);
+        }
+    }
+
+    /**
+     * 由请求体构造 GalleryInfo；缺省字段从本地下载记录补齐。
+     */
+    private GalleryInfo buildGalleryInfoFromJson(com.alibaba.fastjson.JSONObject json, long gid) {
+        GalleryInfo gi = new GalleryInfo();
+        gi.gid = gid;
+        gi.token = json.getString("token");
+        gi.title = json.getString("title");
+        gi.titleJpn = json.getString("titleJpn");
+        gi.category = json.getIntValue("category");
+        gi.posted = json.getString("posted");
+        gi.uploader = json.getString("uploader");
+        gi.rating = json.getFloatValue("rating");
+        gi.pages = json.getIntValue("pages");
+        gi.thumb = json.getString("thumb");
+
+        DownloadInfo di = downloadManager.getDownloadInfo(gid);
+        if (di != null) {
+            if (gi.token == null || gi.token.isEmpty()) gi.token = di.token;
+            if (gi.title == null || gi.title.isEmpty()) gi.title = di.title;
+            if (gi.titleJpn == null || gi.titleJpn.isEmpty()) gi.titleJpn = di.titleJpn;
+            if (gi.category == 0) gi.category = di.category;
+            if (gi.posted == null) gi.posted = di.posted;
+            if (gi.uploader == null) gi.uploader = di.uploader;
+            if (gi.rating == 0f) gi.rating = di.rating;
+            if (gi.pages == 0) gi.pages = di.pages;
+            if (gi.thumb == null) gi.thumb = di.thumb;
+        }
+        return gi;
+    }
     
     /**
      * 格式化画廊JSON（列表/详情通用）
      */
-    private String formatGalleryJson(DownloadInfo info, boolean includeDetails) {
+    private String formatGalleryJson(DownloadInfo info, boolean includeDetails, boolean includeThumb) {
         StringBuilder sb = new StringBuilder();
         sb.append("{");
         sb.append("\"gid\":").append(info.gid);
@@ -681,13 +896,17 @@ public class GalleryApiHandler extends BaseApiHandler {
             sb.append(",\"titleJpn\":\"").append(escapeJson(info.titleJpn)).append("\"");
         }
 
-        // 缩略图（Base64，按魔数探测真实格式输出正确 MIME）
-        String thumbBase64 = getThumbnailBase64(info.gid);
-        if (thumbBase64 != null) {
-            String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
-            sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
-        } else if (info.thumb != null) {
-            sb.append(",\"thumb\":\"").append(escapeJson(info.thumb)).append("\"");
+        // 缩略图（Base64，按魔数探测真实格式输出正确 MIME）。
+        // 默认不内联：列表一次几十条 × 每条数十 KB 的 base64 是 OOM 主因；
+        // Web 端已改用 /api/v1/galleries/{gid}/thumbnail 懒加载。
+        if (includeThumb) {
+            String thumbBase64 = getThumbnailBase64(info.gid);
+            if (thumbBase64 != null) {
+                String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
+                sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
+            } else if (info.thumb != null) {
+                sb.append(",\"thumb\":\"").append(escapeJson(info.thumb)).append("\"");
+            }
         }
 
         sb.append(",\"category\":\"").append(getCategoryName(info.category)).append("\"");
@@ -1410,7 +1629,7 @@ public class GalleryApiHandler extends BaseApiHandler {
     /**
      * 格式化收藏为画廊JSON（合并下载信息）
      */
-    private String formatFavoriteJson(FavoriteView v) {
+    private String formatFavoriteJson(FavoriteView v, boolean includeThumb) {
         LocalFavoriteInfo fav = v.fav;
         StringBuilder sb = new StringBuilder();
         sb.append("{");
@@ -1422,12 +1641,14 @@ public class GalleryApiHandler extends BaseApiHandler {
             sb.append(",\"titleJpn\":\"").append(escapeJson(fav.titleJpn)).append("\"");
         }
 
-        String thumbBase64 = getThumbnailBase64(fav.gid);
-        if (thumbBase64 != null) {
-            String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
-            sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
-        } else if (fav.thumb != null) {
-            sb.append(",\"thumb\":\"").append(escapeJson(fav.thumb)).append("\"");
+        if (includeThumb) {
+            String thumbBase64 = getThumbnailBase64(fav.gid);
+            if (thumbBase64 != null) {
+                String mime = ImageMimeUtils.detectImageMime(Base64.decode(thumbBase64, Base64.NO_WRAP));
+                sb.append(",\"thumb\":\"data:").append(mime).append(";base64,").append(thumbBase64).append("\"");
+            } else if (fav.thumb != null) {
+                sb.append(",\"thumb\":\"").append(escapeJson(fav.thumb)).append("\"");
+            }
         }
 
         sb.append(",\"category\":\"").append(getCategoryName(fav.category)).append("\"");
@@ -1570,40 +1791,62 @@ public class GalleryApiHandler extends BaseApiHandler {
     }
 
     /**
+     * 一次扫描同时得到「画廊下载目录总大小（字节，未下载 -1）」与「文件数」。
+     * 结果按 gid 短 TTL 缓存；使用 getExistingGalleryDownloadDir 避免在只读接口里创建目录/写库。
+     * 捕获 Throwable（含 OutOfMemoryError），单条画廊异常不再拖垮进程。
+     */
+    private long[] computeSizeAndCount(DownloadInfo info) {
+        long[] result = new long[]{-1L, 0L};
+        if (info == null) return result;
+
+        long now = System.currentTimeMillis();
+        long[] cached = sSizeCountCache.get(info.gid);
+        if (cached != null && now - cached[2] < SIZE_COUNT_CACHE_TTL_MS) {
+            result[0] = cached[0];
+            result[1] = cached[1];
+            if (info.fileSize > 0) result[0] = info.fileSize;
+            return result;
+        }
+
+        long size = info.fileSize > 0 ? info.fileSize : -1L;
+        int count = 0;
+        try {
+            UniFile downloadDir = SpiderDen.getExistingGalleryDownloadDir(info);
+            if (downloadDir != null && downloadDir.isDirectory()) {
+                UniFile[] files = downloadDir.listFiles();
+                if (files != null) {
+                    long total = 0;
+                    for (UniFile f : files) {
+                        if (f != null && f.isFile()) {
+                            total += f.length();
+                            count++;
+                        }
+                    }
+                    if (size < 0) size = total;
+                }
+            }
+        } catch (Throwable t) {
+            TransferLogger.getInstance().w(TAG, "Failed to compute size/count: " + info.gid, t);
+        }
+
+        result[0] = size;
+        result[1] = count;
+        sSizeCountCache.put(info.gid, new long[]{size, count, now});
+        return result;
+    }
+
+    /**
      * 计算画廊下载目录总大小（字节），未下载返回 -1
      */
     private long computeGallerySize(DownloadInfo info) {
-        if (info == null) return -1;
-        if (info.fileSize > 0) return info.fileSize;
-        try {
-            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
-            if (downloadDir == null || !downloadDir.isDirectory()) return -1;
-            UniFile[] files = downloadDir.listFiles();
-            if (files == null) return -1;
-            long total = 0;
-            for (UniFile f : files) {
-                if (f.isFile()) total += f.length();
-            }
-            return total;
-        } catch (Exception e) {
-            TransferLogger.getInstance().w(TAG, "Failed to compute gallery size: " + info.gid, e);
-            return -1;
-        }
+        return computeSizeAndCount(info)[0];
     }
 
     /**
      * 统计画廊下载目录文件数
      */
     private int countGalleryFiles(DownloadInfo info) {
-        if (info == null) return 0;
-        try {
-            UniFile downloadDir = SpiderDen.getGalleryDownloadDir(info);
-            if (downloadDir == null || !downloadDir.isDirectory()) return 0;
-            UniFile[] files = downloadDir.listFiles();
-            return files != null ? files.length : 0;
-        } catch (Exception e) {
-            return 0;
-        }
+        return (int) computeSizeAndCount(info)[1];
     }
 
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT);

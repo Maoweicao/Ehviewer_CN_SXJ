@@ -61,4 +61,10 @@
     </string-array>
 
 
+    <string-array name="lab_sync_direction_entries">
+        <item>双向</item>
+        <item>仅拉取（对端 → 本机）</item>
+        <item>仅推送（本机 → 对端）</item>
+    </string-array>
+
 </resources>

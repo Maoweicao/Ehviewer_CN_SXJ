@@ -63,6 +63,44 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         mCompletedTasks = new ArrayList<>(completedTasks);
         notifyDataSetChanged();
     }
+
+    /**
+     * 结构未变化时原地刷新进度，避免每次进度回调都 notifyDataSetChanged 重建所有行。
+     *
+     * @return true 表示结构一致且已刷新；false 表示需要调用 {@link #updateData} 全量更新
+     */
+    public boolean updateProgressInPlace(@NonNull List<BackgroundTaskInfo> runningTasks,
+                                         @NonNull List<BackgroundTaskInfo> waitingTasks,
+                                         @NonNull List<BackgroundTaskInfo> completedTasks) {
+        if (!sameTaskIds(mRunningTasks, runningTasks)
+                || !sameTaskIds(mWaitingTasks, waitingTasks)
+                || !sameTaskIds(mCompletedTasks, completedTasks)) {
+            return false;
+        }
+        mRunningTasks = new ArrayList<>(runningTasks);
+        mWaitingTasks = new ArrayList<>(waitingTasks);
+        mCompletedTasks = new ArrayList<>(completedTasks);
+        int count = getItemCount();
+        if (count > 0) {
+            notifyItemRangeChanged(0, count);
+        }
+        return true;
+    }
+
+    private static boolean sameTaskIds(@NonNull List<BackgroundTaskInfo> a,
+                                       @NonNull List<BackgroundTaskInfo> b) {
+        if (a.size() != b.size()) {
+            return false;
+        }
+        for (int i = 0; i < a.size(); i++) {
+            String left = a.get(i).getTaskId();
+            String right = b.get(i).getTaskId();
+            if (left == null ? right != null : !left.equals(right)) {
+                return false;
+            }
+        }
+        return true;
+    }
     
     @Override
     public int getItemViewType(int position) {

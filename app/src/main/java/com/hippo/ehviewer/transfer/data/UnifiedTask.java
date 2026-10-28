@@ -33,6 +33,12 @@ public class UnifiedTask {
     public static final String TYPE_PUSH = "push";
     public static final String TYPE_COMPRESS = "compress";
     public static final String TYPE_DELETE = "delete";
+    /**
+     * 后台任务（BackgroundTaskManager 提交的任务，如删除、扫描、校验）。
+     * 仅在 /api/v1/tasks/{taskId} 回落到后台任务表时使用，
+     * 避免把非传输类后台任务误标成 push/compress/delete。
+     */
+    public static final String TYPE_BACKGROUND = "background";
 
     // Push sub-types
     public static final String SUB_TYPE_BOOKMARKS = "bookmarks";

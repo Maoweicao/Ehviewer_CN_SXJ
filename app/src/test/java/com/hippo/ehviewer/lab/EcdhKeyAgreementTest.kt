@@ -21,10 +21,17 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * 单元测试：ECDH 密钥协商 + HMAC
+ *
+ * 被测类内部使用 android.util.Base64，因此必须在 Robolectric 环境下运行。
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class EcdhKeyAgreementTest {
 
     @Test

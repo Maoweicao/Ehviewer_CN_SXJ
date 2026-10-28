@@ -9,6 +9,8 @@ cmake_minimum_required(VERSION 3.18.1)
 project("ehviewer")
 
 add_subdirectory(jni)
+# 实验室功能：语义搜索端侧推理（缺 llama.cpp 时自动构建桩库并降级到远程后端）
+add_subdirectory(semantic)
 
 
 # Creates and names a library, sets it as either STATIC

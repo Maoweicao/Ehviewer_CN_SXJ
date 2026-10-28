@@ -248,6 +248,8 @@ class ResumePlanCalculator private constructor(context: Context) {
         companion object {
             fun fromJson(json: JSONObject?): RemotePlan? {
                 if (json == null) return null
+                // 缺少 gid 的响应无法构成有效计划
+                if (!json.containsKey("gid")) return null
                 return try {
                     val gid = json.getLongValue("gid")
                     val total = json.getIntValue("total")

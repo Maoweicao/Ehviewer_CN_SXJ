@@ -330,17 +330,28 @@ public final class MainActivity extends StageActivity
                 if (type.startsWith("image/")) {
                     Uri uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
                     if (null != uri) {
-                        UniFile file = UniFile.fromUri(this, uri);
-                        File temp = saveImageToTempFile(file);
-                        if (null != temp) {
-                            ListUrlBuilder builder = new ListUrlBuilder();
-                            builder.setMode(ListUrlBuilder.MODE_IMAGE_SEARCH);
-                            builder.setImagePath(temp.getPath());
-                            builder.setUseSimilarityScan(true);
-                            builder.setShowExpunged(true);
-                            startScene(processAnnouncer(GalleryListScene.getStartAnnouncer(builder)));
-                            return true;
-                        }
+                        final UniFile file = UniFile.fromUri(this, uri);
+                        // 解码 + 压缩 + 写临时文件放后台：分享图片进应用时不再让首帧做全尺寸
+                        // 解码和多 MB 写盘（这是 MainActivity 启动卡顿/ANR 的一个来源）。
+                        new Thread(() -> {
+                            final File temp = saveImageToTempFile(file);
+                            runOnUiThread(() -> {
+                                if (isFinishing() || isDestroyed()) {
+                                    return;
+                                }
+                                if (null != temp) {
+                                    ListUrlBuilder builder = new ListUrlBuilder();
+                                    builder.setMode(ListUrlBuilder.MODE_IMAGE_SEARCH);
+                                    builder.setImagePath(temp.getPath());
+                                    builder.setUseSimilarityScan(true);
+                                    builder.setShowExpunged(true);
+                                    startScene(processAnnouncer(GalleryListScene.getStartAnnouncer(builder)));
+                                } else {
+                                    onImageSearchPrepareFailed();
+                                }
+                            });
+                        }, "ImageSearchPrepare").start();
+                        return true;
                     }
                 }
             }
@@ -349,9 +360,20 @@ public final class MainActivity extends StageActivity
         return false;
     }
 
+    /**
+     * 图片搜索临时文件准备失败时的兜底：与原同步实现保持一致，
+     * 仅在没有其他页面时回到默认启动页。
+     */
+    private void onImageSearchPrepareFailed() {
+        if (0 == getSceneCount()) {
+            Bundle args = new Bundle();
+            args.putString(GalleryListScene.KEY_ACTION, Settings.getLaunchPageGalleryListSceneAction());
+            startScene(processAnnouncer(new Announcer(GalleryListScene.class).setArgs(args)));
+        }
+    }
+
     @Override
-    protected void onUnrecognizedIntent(@Nullable Intent intent) {
-        Class<?> clazz = getTopSceneClass();
+    protected void onUnrecognizedIntent(@Nullable Intent intent) {        Class<?> clazz = getTopSceneClass();
         if (clazz != null && SolidScene.class.isAssignableFrom(clazz)) {
             // TODO the intent lost
             return;

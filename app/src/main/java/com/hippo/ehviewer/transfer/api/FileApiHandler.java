@@ -1690,6 +1690,8 @@ public class FileApiHandler extends BaseApiHandler {
         }
         // 从内存列表中移除（即时刷新 UI）
         downloadManager.removeFromMemoryRange(gidList);
+        // 受理瞬间即失效列表缓存，避免客户端在任务跑完前重新拉到仍含已删 gid 的旧快照
+        ResponseCache.getInstance().invalidateGalleries();
         DeleteRangeDownloadTask task = new DeleteRangeDownloadTask(
                 context, downloadManager, infoList, deleteFiles, null);
         BackgroundTaskManager.TaskHandle handle = BackgroundTaskManager.getInstance().submitBackgroundTask(task);

@@ -354,6 +354,11 @@
             android:title="@string/settings_transfer" />
 
         <Preference
+            android:key="rebuild_gallery_index"
+            android:summary="@string/settings_advanced_rebuild_gallery_index_summary"
+            android:title="@string/settings_advanced_rebuild_gallery_index" />
+
+        <Preference
             android:key="network_diagnostic"
             android:summary="@string/settings_advanced_network_diagnostic_summary"
             android:title="@string/settings_advanced_network_diagnostic" />

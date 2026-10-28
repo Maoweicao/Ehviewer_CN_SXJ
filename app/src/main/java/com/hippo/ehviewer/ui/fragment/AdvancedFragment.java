@@ -45,6 +45,8 @@ import com.hippo.ehviewer.service.CaptureService;
 import com.hippo.ehviewer.service.DiagnosticExporter;
 import com.hippo.ehviewer.service.HealthWatchdog;
 import com.hippo.ehviewer.service.PerformanceMonitorService;
+import com.hippo.ehviewer.transfer.core.ResponseCache;
+import com.hippo.ehviewer.transfer.index.GalleryIndexStore;
 import com.hippo.ehviewer.ui.DirPickerActivity;
 import com.hippo.unifile.UniFile;
 import com.hippo.ehviewer.ui.PerformanceLogActivity;
@@ -86,6 +88,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private static final String KEY_BACKGROUND_TASKS = "background_tasks";
     private static final String KEY_SCHEDULED_TASKS = "scheduled_tasks";
     private static final String KEY_TRANSFER_SERVICE = "transfer_service";
+    private static final String KEY_REBUILD_GALLERY_INDEX = "rebuild_gallery_index";
     private static final String KEY_NETWORK_DIAGNOSTIC = "network_diagnostic";
     private static final String KEY_USER_AGENT = "user_agent";
     private static final String KEY_LOCAL_GALLERY = "local_gallery";
@@ -166,6 +169,10 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
             scheduledTasks.setOnPreferenceClickListener(this);
         }
         transferService.setOnPreferenceClickListener(this);
+        Preference rebuildGalleryIndex = findPreference(KEY_REBUILD_GALLERY_INDEX);
+        if (rebuildGalleryIndex != null) {
+            rebuildGalleryIndex.setOnPreferenceClickListener(this);
+        }
         networkDiagnostic.setOnPreferenceClickListener(this);
         userAgent.setOnPreferenceClickListener(this);
         localGallery.setOnPreferenceClickListener(this);
@@ -271,6 +278,8 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                 return gotoScheduledTaskActivity();
             case KEY_TRANSFER_SERVICE:
                 return gotoTransferActivity();
+            case KEY_REBUILD_GALLERY_INDEX:
+                return rebuildGalleryIndex();
             case KEY_NETWORK_DIAGNOSTIC:
                 return gotoNetworkDiagnosticActivity();
             case KEY_USER_AGENT:
@@ -340,6 +349,55 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
         Activity activity = getActivity();
         Intent intent = new Intent(activity, TransferActivity.class);
         activity.startActivity(intent);
+        return true;
+    }
+
+    /**
+     * 重建画廊索引（协议 §5.29）：清空桶版本并更换 epoch，
+     * 让所有已连接客户端重新拉取一次桶数据。
+     */
+    private boolean rebuildGalleryIndex() {
+        if (context == null) {
+            return false;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.settings_advanced_rebuild_gallery_index)
+                .setMessage(R.string.settings_advanced_rebuild_gallery_index_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.settings_advanced_rebuild_gallery_index_action, (dialog, which) -> {
+                    Toast.makeText(context, R.string.settings_advanced_rebuild_gallery_index_running,
+                            Toast.LENGTH_SHORT).show();
+                    new Thread(() -> {
+                        String newEpoch = null;
+                        try {
+                            newEpoch = GalleryIndexStore.get(context).rotateEpoch();
+                            // 系统信息缓存里的 dataEpoch 已过期
+                            ResponseCache.getInstance().invalidateByPrefix("system_");
+                        } catch (Throwable t) {
+                            Log.e(TAG, "Failed to rebuild gallery index", t);
+                        }
+                        final String epoch = newEpoch;
+                        Activity activity = getActivity();
+                        if (activity == null || activity.isFinishing()) {
+                            return;
+                        }
+                        activity.runOnUiThread(() -> {
+                            Context ctx = getContext();
+                            if (ctx == null) {
+                                return;
+                            }
+                            if (epoch != null) {
+                                Toast.makeText(ctx,
+                                        ctx.getString(R.string.settings_advanced_rebuild_gallery_index_done, epoch),
+                                        Toast.LENGTH_LONG).show();
+                            } else {
+                                Toast.makeText(ctx, R.string.settings_advanced_rebuild_gallery_index_failed,
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        });
+                    }, "RebuildGalleryIndex").start();
+                })
+                .show();
         return true;
     }
 

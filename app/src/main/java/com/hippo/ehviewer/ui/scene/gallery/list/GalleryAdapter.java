@@ -42,6 +42,7 @@ import com.hippo.ehviewer.client.EhCacheKeyFactory;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadHistory;
+import com.hippo.ehviewer.util.DownloadHistoryStatusResolver;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.ui.scene.GalleryHolder;
 import com.hippo.ehviewer.ui.scene.TransitionNameFactory;
@@ -266,18 +267,35 @@ abstract class GalleryAdapter extends RecyclerView.Adapter<GalleryHolder> {
      * 读取下载历史：存在历史记录但已不在下载列表中（下载已被删除/移除）时
      * 显示删除标记，提醒用户该画廊曾下载过，避免重复下载。
      * 重复/递进合并的画廊由合并标记表示，不显示删除标记。
+     *
+     * <p>缓存优先，未命中时后台解析后回主线程刷新，绝不在 bind 里同步查库。
      */
     private void bindDeletedStatus(@NonNull GalleryHolder holder, long gid) {
         if (holder.deleted == null) {
             return;
         }
-        DownloadHistory history = EhDB.getDownloadHistory(gid);
-        boolean merged = history != null
-                && (history.getDeletionType() == DownloadHistory.DELETION_DUPLICATE_MERGED
-                || history.getDeletionType() == DownloadHistory.DELETION_PROGRESSIVE_MERGED);
-        boolean deleted = history != null && !merged
+        holder.boundGid = gid;
+        int status = DownloadHistoryStatusResolver.getCached(gid);
+        if (status == DownloadHistoryStatusResolver.UNKNOWN) {
+            holder.deleted.setVisibility(View.GONE);
+            DownloadHistoryStatusResolver.resolve(gid, (resolvedGid, resolvedStatus) -> {
+                if (holder.boundGid == resolvedGid) {
+                    applyDeletedStatus(holder, resolvedGid, resolvedStatus);
+                }
+            });
+            return;
+        }
+        applyDeletedStatus(holder, gid, status);
+    }
+
+    private void applyDeletedStatus(@NonNull GalleryHolder holder, long gid, int status) {
+        if (holder.deleted == null) {
+            return;
+        }
+        boolean merged = status == DownloadHistoryStatusResolver.MERGED;
+        boolean deleted = status == DownloadHistoryStatusResolver.HISTORY_NORMAL
                 && !mDownloadManager.containDownloadInfo(gid);
-        holder.deleted.setVisibility(deleted ? View.VISIBLE : View.GONE);
+        holder.deleted.setVisibility(deleted && !merged ? View.VISIBLE : View.GONE);
     }
 
     /**

@@ -62,6 +62,7 @@ object TaskRegistry {
         registerProgressiveBackupTask()
         registerMergeDuplicateGalleryTask()
         registerScanDownloadHistoryTask()
+        registerLabSyncTask()
     }
     
     fun getAllTasks(): List<TaskMetadata> = registry.values.toList()
@@ -420,6 +421,16 @@ object TaskRegistry {
             displayNameResId = R.string.settings_download_scan_download_history,
             descriptionResId = R.string.settings_download_scan_download_history_summary,
             taskType = BackgroundTask.TaskType.SCAN,
+            requiresParams = false
+        ))
+    }
+
+    private fun registerLabSyncTask() {
+        register(TaskMetadata(
+            taskClassName = "com.hippo.ehviewer.task.LabSyncTask",
+            displayNameResId = R.string.lab_sync_task_name,
+            descriptionResId = R.string.lab_sync_task_summary,
+            taskType = BackgroundTask.TaskType.SYNC,
             requiresParams = false
         ))
     }

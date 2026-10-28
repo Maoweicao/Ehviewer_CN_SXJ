@@ -142,11 +142,23 @@ class BackgroundTaskStatusManagerTest {
     @Test
     fun cancelTask_forActiveTask_removesFromActive() {
         val taskId = uniqueId("r")
+        // 取消在控制线程异步执行，注册监听器等待其完成
+        val latch = CountDownLatch(1)
+        manager.addTaskChangeListener(object : BackgroundTaskStatusManager.TaskChangeListener {
+            override fun onTaskAdded(changedTaskId: String) {}
+            override fun onTaskProgressChanged(changedTaskId: String) {}
+            override fun onTaskStateChanged(changedTaskId: String) {
+                if (changedTaskId == taskId) latch.countDown()
+            }
+            override fun onTaskRemoved(changedTaskId: String) {}
+        })
         val future = FutureTask<Any?> { null }
         manager.addTask(taskId, "running", "d", future,
             BackgroundTask.TaskType.MERGE, true)
         manager.cancelTask(taskId)
-        assertNull("active task should be removed from active", manager.getTaskInfo(taskId))
+        assertTrue("cancel should finish within 2s", latch.await(2, TimeUnit.SECONDS))
+        assertFalse("active task should be removed from active",
+            manager.getActiveTasks().any { it.taskId == taskId })
     }
 
     /** enqueueUniqueWaitingTask 对已存在 taskId 返回 null。 */
@@ -201,6 +213,39 @@ class BackgroundTaskStatusManagerTest {
         manager.markTaskCompleted("new-1")
         assertNull("oldest should have been evicted", manager.getTaskInfo(oldestId))
         assertNotNull("newest should be present", manager.getTaskInfo("new-1"))
+    }
+
+    /** 同名任务重新提交前清掉完成记录：否则排队会被当作重复任务拒绝。 */
+    @Test
+    fun discardCompletedRecord_allowsReenqueue() {
+        val taskId = uniqueId("scan")
+        manager.addTask(taskId, "n", "d", null, BackgroundTask.TaskType.SCAN, true)
+        manager.markTaskCompleted(taskId)
+        assertNull(
+            "duplicate should be rejected while a completed record exists",
+            manager.enqueueUniqueWaitingTask(
+                BackgroundTaskStatusManager.PendingUniqueTask(makeUniqueTask(taskId, "n"))
+            )
+        )
+        manager.discardCompletedRecord(taskId)
+        assertEquals(
+            taskId,
+            manager.enqueueUniqueWaitingTask(
+                BackgroundTaskStatusManager.PendingUniqueTask(makeUniqueTask(taskId, "n"))
+            )
+        )
+    }
+
+    /** 同一 taskId 重新开始时，旧完成记录应被移除，避免同时出现在运行中/已完成。 */
+    @Test
+    fun addTask_removesStaleCompletedRecord() {
+        val taskId = uniqueId("again")
+        manager.addTask(taskId, "n", "d", null, BackgroundTask.TaskType.SCAN, true)
+        manager.markTaskCompleted(taskId)
+        manager.addTask(taskId, "n", "d", FutureTask<Any?> { null },
+            BackgroundTask.TaskType.SCAN, true)
+        assertTrue(manager.getActiveTasks().any { it.taskId == taskId })
+        assertFalse(manager.getCompletedTasks().any { it.taskId == taskId })
     }
 
     /** 简单的 unique 任务实现。execute() 不会被测试直接调用。 */

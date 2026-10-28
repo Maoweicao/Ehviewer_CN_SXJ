@@ -40,6 +40,10 @@ import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.download.filter.ExcludeRule;
+import com.hippo.ehviewer.download.filter.FilterSettingsStore;
+import com.hippo.ehviewer.download.filter.LowRatingConfig;
+import com.hippo.ehviewer.ui.SettingsActivity;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.DownloadInfo;
@@ -83,6 +87,8 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
     public static final int REQUEST_CODE_PICK_IMAGE_DIR = 0;
     public static final int REQUEST_CODE_PICK_IMAGE_DIR_L = 1;
     private static final int REQUEST_CODE_PICK_DOWNLOAD_IMPORT_FILE = 2;
+    private static final int REQUEST_CODE_CREATE_FILTER_CONFIG = 3;
+    private static final int REQUEST_CODE_PICK_FILTER_CONFIG = 4;
 
     // 通知栏相关常量
     private static final String CHANNEL_ID_DOWNLOAD = "download_channel";
@@ -104,6 +110,19 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
     public static final String KEY_VIEW_DOWNLOAD_LOGS = "view_download_logs";
     public static final String KEY_CLEAN_DOWNLOAD_LOGS = "clean_download_logs";
     public static final String KEY_RESET_MEDIA_SCAN = "reset_media_scan";
+    // 筛选与快捷筛选
+    public static final String KEY_FILTER_LOW_RATING = "filter_low_rating";
+    public static final String KEY_FILTER_LOW_RATING_BY_CATEGORY = "filter_low_rating_by_category";
+    public static final String KEY_FILTER_GLOBAL_EXCLUSIONS = "filter_global_exclusions";
+    public static final String KEY_QUICK_FILTER_MANAGER = "quick_filter_manager";
+    public static final String KEY_QUICK_PRESET_MANAGER = "quick_preset_manager";
+    public static final String KEY_EXPORT_FILTER_CONFIG = "export_filter_config";
+    public static final String KEY_IMPORT_FILTER_CONFIG = "import_filter_config";
+    public static final String KEY_RESET_FILTER_CONFIG = "reset_filter_config";
+
+    /** 等待用户选定保存位置时暂存的 JSON 内容。 */
+    @Nullable
+    private String mPendingFilterConfigJson;
 
     @Nullable
     private Preference mDownloadLocation;
@@ -273,6 +292,16 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         if (cleanDownloadLogs != null) {
             cleanDownloadLogs.setOnPreferenceClickListener(this);
         }
+        // 筛选与快捷筛选
+        for (String key : new String[]{KEY_FILTER_LOW_RATING, KEY_FILTER_LOW_RATING_BY_CATEGORY,
+                KEY_FILTER_GLOBAL_EXCLUSIONS, KEY_QUICK_FILTER_MANAGER, KEY_QUICK_PRESET_MANAGER,
+                KEY_EXPORT_FILTER_CONFIG, KEY_IMPORT_FILTER_CONFIG, KEY_RESET_FILTER_CONFIG}) {
+            Preference preference = findPreference(key);
+            if (preference != null) {
+                preference.setOnPreferenceClickListener(this);
+            }
+        }
+        updateFilterConfigSummaries();
 
         // Secondary sort depends on primary sort being non-default
         ListPreference queueOrder = findPreference("download_queue_order");
@@ -512,8 +541,182 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         } else if (KEY_CLEAN_DOWNLOAD_LOGS.equals(key)) {
             showCleanDownloadLogsDialog();
             return true;
+        } else if (KEY_FILTER_LOW_RATING.equals(key)) {
+            FilterSettingsPanel.showLowRatingDialog(requireContext());
+            return true;
+        } else if (KEY_FILTER_LOW_RATING_BY_CATEGORY.equals(key)) {
+            FilterSettingsPanel.showLowRatingPerCategoryDialog(requireContext());
+            return true;
+        } else if (KEY_FILTER_GLOBAL_EXCLUSIONS.equals(key)) {
+            FilterSettingsPanel.showGlobalExcludeDialog(requireContext());
+            return true;
+        } else if (KEY_QUICK_FILTER_MANAGER.equals(key)) {
+            pushSettingsFragment(QuickFilterManagerFragment.newInstance(
+                    R.string.settings_download_quick_filter_manager));
+            return true;
+        } else if (KEY_QUICK_PRESET_MANAGER.equals(key)) {
+            pushSettingsFragment(PanelPresetManagerFragment.newInstance(
+                    R.string.settings_download_quick_preset_manager));
+            return true;
+        } else if (KEY_EXPORT_FILTER_CONFIG.equals(key)) {
+            exportFilterConfig();
+            return true;
+        } else if (KEY_IMPORT_FILTER_CONFIG.equals(key)) {
+            importFilterConfig();
+            return true;
+        } else if (KEY_RESET_FILTER_CONFIG.equals(key)) {
+            new AlertDialog.Builder(requireContext())
+                    .setMessage(R.string.filter_reset_confirm)
+                    .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                        FilterSettingsStore store = FilterSettingsStore.getInstance(requireContext());
+                        store.resetQuickFilters();
+                        store.resetPanelPresets();
+                        store.setLowRatingConfig(new LowRatingConfig());
+                        store.setGlobalExclude(ExcludeRule.EMPTY);
+                        Toast.makeText(requireContext(), R.string.filter_reset_done,
+                                Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            return true;
         }
         return false;
+    }
+
+    /** 把管理面板压入设置界面的返回栈。 */
+    private void pushSettingsFragment(androidx.fragment.app.Fragment fragment) {
+        androidx.fragment.app.FragmentActivity activity = getActivity();
+        if (!(activity instanceof SettingsActivity)) {
+            return;
+        }
+        SettingsActivity settingsActivity = (SettingsActivity) activity;
+        settingsActivity.pushSettingsFragment(fragment);
+    }
+
+    /** 把当前筛选配置导出为 JSON 文件。 */
+    private void exportFilterConfig() {
+        FilterSettingsStore store = FilterSettingsStore.getInstance(requireContext());
+        String json = store.exportJson();
+        String fileName = store.suggestedFileName();
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, fileName);
+        try {
+            startActivityForResult(intent, REQUEST_CODE_CREATE_FILTER_CONFIG);
+        } catch (Throwable e) {
+            ExceptionUtils.throwIfFatal(e);
+            Toast.makeText(getActivity(), R.string.error_cant_find_activity, Toast.LENGTH_SHORT).show();
+        }
+        mPendingFilterConfigJson = json;
+    }
+
+    private void importFilterConfig() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        try {
+            startActivityForResult(intent, REQUEST_CODE_PICK_FILTER_CONFIG);
+        } catch (Throwable e) {
+            ExceptionUtils.throwIfFatal(e);
+            Toast.makeText(getActivity(), R.string.error_cant_find_activity, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void writeFilterConfig(@Nullable Uri uri) {
+        if (uri == null || mPendingFilterConfigJson == null) {
+            Toast.makeText(requireContext(), R.string.filter_export_failed, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try (java.io.OutputStream out = requireContext().getContentResolver().openOutputStream(uri)) {
+            if (out == null) {
+                throw new java.io.IOException("null output stream");
+            }
+            out.write(mPendingFilterConfigJson.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            out.flush();
+            String name = uri.getLastPathSegment();
+            Toast.makeText(requireContext(),
+                    getString(R.string.filter_export_success, name != null ? name : "JSON"),
+                    Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Log.w(TAG, "export filter config failed", e);
+            Toast.makeText(requireContext(), R.string.filter_export_failed, Toast.LENGTH_SHORT).show();
+        } finally {
+            mPendingFilterConfigJson = null;
+        }
+    }
+
+    private void readFilterConfig(@Nullable Uri uri) {
+        if (uri == null) {
+            return;
+        }
+        final String text;
+        try (java.io.InputStream in = requireContext().getContentResolver().openInputStream(uri)) {
+            if (in == null) {
+                throw new java.io.IOException("null input stream");
+            }
+            text = new String(readAllBytes(in), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (Exception e) {
+            Log.w(TAG, "read filter config failed", e);
+            Toast.makeText(requireContext(), getString(R.string.filter_import_failed, e.getMessage()),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.filter_import_mode_title)
+                .setItems(new CharSequence[]{
+                        getString(R.string.filter_import_mode_replace),
+                        getString(R.string.filter_import_mode_merge),
+                }, (dialog, which) -> applyFilterConfig(text, which == 1))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void applyFilterConfig(String text, boolean merge) {
+        FilterSettingsStore store = FilterSettingsStore.getInstance(requireContext());
+        FilterSettingsStore.ImportResult result = store.importJson(text, merge);
+        if (result instanceof FilterSettingsStore.ImportResult.Success) {
+            FilterSettingsStore.ImportResult.Success success =
+                    (FilterSettingsStore.ImportResult.Success) result;
+            Toast.makeText(requireContext(),
+                    getString(R.string.filter_import_success,
+                            success.getQuickFilters(), success.getPanelPresets()),
+                    Toast.LENGTH_SHORT).show();
+            updateFilterConfigSummaries();
+        } else {
+            Toast.makeText(requireContext(),
+                    getString(R.string.filter_import_failed,
+                            ((FilterSettingsStore.ImportResult.Failure) result).getMessage()),
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private static byte[] readAllBytes(java.io.InputStream in) throws java.io.IOException {
+        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = in.read(chunk)) != -1) {
+            buffer.write(chunk, 0, read);
+        }
+        return buffer.toByteArray();
+    }
+
+    /** 刷新筛选相关 preference 的摘要（导入 / 低分修改后调用）。 */
+    private void updateFilterConfigSummaries() {
+        if (!isAdded()) {
+            return;
+        }
+        Preference quickFilterManager = findPreference(KEY_QUICK_FILTER_MANAGER);
+        if (quickFilterManager != null) {
+            quickFilterManager.setSummary(getResources().getString(
+                    R.string.settings_download_quick_filter_manager_summary));
+        }
+        Preference lowRating = findPreference(KEY_FILTER_LOW_RATING);
+        if (lowRating != null) {
+            LowRatingConfig config = FilterSettingsStore.getInstance(requireContext()).lowRatingConfig();
+            lowRating.setSummary(getString(R.string.settings_download_filter_low_rating_summary)
+                    + String.format(java.util.Locale.US, " (%.1f)", config.getGlobalThreshold()));
+        }
     }
 
     private void showDirPickerDialogKK() {
@@ -671,6 +874,20 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
                     com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
                     Toast.makeText(requireActivity(),
                             R.string.settings_download_import_items, Toast.LENGTH_SHORT).show();
+                }
+                break;
+            }
+            case REQUEST_CODE_CREATE_FILTER_CONFIG: {
+                if (resultCode == Activity.RESULT_OK) {
+                    writeFilterConfig(data.getData());
+                } else {
+                    mPendingFilterConfigJson = null;
+                }
+                break;
+            }
+            case REQUEST_CODE_PICK_FILTER_CONFIG: {
+                if (resultCode == Activity.RESULT_OK) {
+                    readFilterConfig(data.getData());
                 }
                 break;
             }

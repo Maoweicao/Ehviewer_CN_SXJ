@@ -21,6 +21,7 @@ class ScanRecycleBinTask(
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
 
+    /** 本阶段扫描到的目录总数；由扫描回调填充，0 表示没有目录。 */
     private var totalProgress = 0
 
     override fun getTaskId(): String = "scan_recycle_bin"
@@ -39,52 +40,22 @@ class ScanRecycleBinTask(
             coroutineContext[Job]?.ensureActive()
 
             val manager = LocalGalleryManager.getInstance(context)
-            val latch = java.util.concurrent.CountDownLatch(1)
-            val recycleResults = java.util.concurrent.atomic.AtomicReference<List<com.hippo.ehviewer.client.data.LocalGalleryInfo>>() 
+            // 与本地画廊扫描同样的修复：直接执行同步扫描并接收逐目录进度回调，
+            // 不再依赖 scanLocalGalleries(true) 里那套永远不执行的监听等待。
+            val results = manager.scanRecycleBinSync(
+                LocalGalleryManager.ScanProgressCallback { current, total, name ->
+                    reportProgress(manager, current, total, name)
+                },
+            )
 
-            val listener = object : LocalGalleryManager.LocalGalleryListener {
-                override fun onScanStart() {
-                    appendTaskLog("扫描开始")
-                }
-
-                override fun onScanProgress(current: String) {
-                    if (isCancelled) return
-                    val progressDetail = context.getString(R.string.recycle_bin_scan_progress_simple, 0, 0)
-                    updateProgress(-1, progressDetail)
-                }
-
-                override fun onScanComplete(localGalleries: List<com.hippo.ehviewer.client.data.LocalGalleryInfo>, recycleBinGalleries: List<com.hippo.ehviewer.client.data.LocalGalleryInfo>) {
-                    recycleResults.set(recycleBinGalleries)
-                    appendTaskLog("扫描完成，发现 ${recycleBinGalleries.size} 个回收站画廊")
-                    latch.countDown()
-                }
-
-                override fun onGalleryDeleted(gallery: com.hippo.ehviewer.client.data.LocalGalleryInfo, success: Boolean) {
-                    // no-op
-                }
-
-                override fun onGalleryRestored(gallery: com.hippo.ehviewer.client.data.LocalGalleryInfo, success: Boolean) {
-                    // no-op
-                }
-            }
-
-            manager.addListener(listener)
-            try {
-                manager.scanLocalGalleries(true)
-                while (!latch.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                    if (isCancelled) {
-                        throw CancellationException("Task cancelled")
-                    }
-                }
-            } finally {
-                manager.removeListener(listener)
-            }
-
-            val results = recycleResults.get() ?: manager.getCachedRecycleBinGalleries()
             if (isCancelled) {
                 throw CancellationException("Task cancelled")
             }
 
+            manager.reportRecycleBinScanComplete(results)
+
+            appendTaskLog(context.getString(R.string.recycle_bin_scan_dirs_log, totalProgress))
+            appendTaskLog(context.getString(R.string.recycle_bin_scan_complete, results.size))
             notifyCompleted()
             Result.success(Unit)
         } catch (e: CancellationException) {
@@ -97,6 +68,46 @@ class ScanRecycleBinTask(
             notifyError(e)
             Result.failure(e)
         }
+    }
+
+    /**
+     * 扫描回调：上报后台任务进度，并同步给界面监听器。
+     * 回调可能来自多个扫描线程，进度写入需要串行化。
+     *
+     * @return false 表示取消扫描
+     */
+    private fun reportProgress(
+        manager: LocalGalleryManager,
+        current: Int,
+        total: Int,
+        name: String,
+    ): Boolean {
+        while (isPaused && !isCancelled) {
+            try {
+                Thread.sleep(100)
+            } catch (_: InterruptedException) {
+                isCancelled = true
+            }
+        }
+        if (isCancelled) return false
+
+        totalProgress = total
+        val detail = if (total > 0 && current > 0) {
+            context.getString(R.string.recycle_bin_scan_progress, current, total, name)
+        } else {
+            name
+        }
+        synchronized(this) {
+            if (total > 0 && current > 0) {
+                updateProgress(current, total, detail)
+            } else {
+                updateProgress(-1, detail)
+            }
+        }
+        manager.reportScanProgress(
+            LocalGalleryManager.ScanProgress(current, total, name, true)
+        )
+        return true
     }
 
     override fun isPausable(): Boolean = true
@@ -119,7 +130,7 @@ class ScanRecycleBinTask(
         notifyCancelled()
     }
 
-    override fun getProgressDetail(): String? {
-        return if (totalProgress > 0) "$currentProgress/$totalProgress" else null
-    }
+    // 故意不覆写 getProgressDetail()：
+    // 基类会返回 updateProgress 传进去的那句「扫描进度 12/57 - 名称」，
+    // 覆写成 "$currentProgress/$totalProgress" 只会把百分比和总数混在一起。
 }

@@ -4,7 +4,7 @@ info:
   description: |
     EhViewer Android 应用远程管理 API。
     支持画廊浏览、文件管理、设备信息查询等功能。
-  version: 1.0.0
+  version: 3.2.0
   contact:
     name: EhViewer
     url: https://github.com/xiaojieonly/Ehviewer_CN_SXJ
@@ -52,6 +52,14 @@ tags:
     description: 设备连接管理
   - name: Relay
     description: 接力下载
+  - name: Online
+    description: 在线画廊（源站在线搜索/详情/取图，§5.25）
+  - name: EhAuth
+    description: E-Hentai 账号（Web 端登录/Cookie 导入，§5.27）
+  - name: Events
+    description: 实时变更（数据版本/事件流，§5.28）
+  - name: Sync
+    description: 画廊索引与分区位图（增量同步，§5.29）
 
 components:
   securitySchemes:
@@ -137,7 +145,9 @@ components:
           example: "[作者] 日文标题"
         thumb:
           type: string
-          format: uri
+          description: |
+            缩略图：详情接口或显式 thumb=1 时返回 data URI（base64）或远端 URL；
+            列表接口默认不再返回（请改用 /api/v1/galleries/{gid}/thumbnail 懒加载）。
         category:
           type: string
           enum: [Doujinshi, Manga, Artist CG, Game CG, Image Set, Cosplay]
@@ -476,6 +486,21 @@ components:
           type: boolean
         syncDownloadEnabled:
           type: boolean
+        capabilities:
+          type: array
+          description: 能力列表；含 gallery-index-v1 表示支持 §5.29，含 lab-sync-v1 表示支持 §5.30 设备间同步
+          items:
+            type: string
+        dataVersion:
+          type: integer
+          format: int64
+          description: 当前全局数据版本，等价于 /api/v1/system/version
+        dataEpoch:
+          type: string
+          description: 当前索引数据集身份；变化时应全量重同步
+        indexBucketSize:
+          type: integer
+          description: 索引桶宽
 
     SystemStats:
       type: object
@@ -736,7 +761,11 @@ components:
           example: "compress-uuid-xxx"
         type:
           type: string
-          enum: [push, compress, relay, delete]
+          enum: [push, compress, relay, delete, background]
+          description: |
+            任务类型。`background` 表示手机端后台任务（BackgroundTaskManager 提交，
+            如删除、扫描、校验）；`GET /api/v1/tasks/{taskId}` 在传输任务表中查不到时
+            会回落到后台任务表并以该类型返回。
         subType:
           type: string
           example: "downloads"
@@ -766,6 +795,22 @@ components:
         error:
           type: string
           nullable: true
+        taskName:
+          type: string
+          description: 后台任务名称（仅 background 类型返回）
+          example: "删除下载记录"
+        taskClassName:
+          type: string
+          description: 后台任务实现类名（仅 background 类型返回）
+          example: "com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask"
+        state:
+          type: string
+          description: 后台任务原始状态（仅 background 类型返回）
+          enum: [PENDING, RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED]
+        progressDetail:
+          type: string
+          description: 后台任务进度描述（仅 background 类型返回）
+          example: "删除数据库记录 40/100"
         createdTime:
           type: integer
           format: int64
@@ -806,6 +851,9 @@ components:
           type: string
         thumb:
           type: string
+          description: |
+            缩略图：详情接口或显式 thumb=1 时返回 data URI（base64）或远端 URL；
+            列表接口默认不再返回（请改用 /api/v1/galleries/{gid}/thumbnail 懒加载）。
         category:
           type: integer
         posted:
@@ -1017,6 +1065,15 @@ paths:
           description: 搜索关键词
           schema:
             type: string
+        - name: thumb
+          in: query
+          description: |
+            是否内联 base64 缩略图。默认 false（列表不再返回 thumb，客户端改用
+            `/api/v1/galleries/{gid}/thumbnail` 懒加载）。传 1/true 才内联；
+            堆内存紧张时即使请求也会被服务端跳过。别名：includeThumb。
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: 画廊列表
@@ -1041,6 +1098,9 @@ paths:
                   type: integer
                 limit:
                   type: integer
+                thumb:
+                  type: boolean
+                  description: 是否内联 base64 缩略图，默认 false。别名 includeThumb。
                 filter:
                   type: object
                   properties:
@@ -2126,6 +2186,11 @@ paths:
     get:
       tags: [Tasks]
       summary: 获取任务详情
+      description: |
+        同时支持传输任务（push/compress）与后台任务（如删除接口返回的
+        `DeleteRangeDownloadTask`）。删除类接口在受理时会立即把目标 gid 移出内存下载表，
+        因此客户端轮询本接口失败时不得对同一批 gid 重复提交删除，
+        否则会得到 `404 Gallery not found`。
       operationId: getTask
       parameters:
         - name: taskId
@@ -2149,7 +2214,9 @@ paths:
     delete:
       tags: [Tasks]
       summary: 取消/删除任务
-      description: 进行中的任务将被取消，已完成的任务将被移除
+      description: |
+        进行中的任务将被取消，已完成的任务将被移除。
+        传输任务表中查不到时回落到后台任务表执行同样的取消/移除语义。
       operationId: deleteTask
       parameters:
         - name: taskId
@@ -2648,6 +2715,51 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GalleryListResponse"
+
+    post:
+      tags: [Favorites]
+      summary: 加入收藏（本地，可选源站）
+      operationId: addFavorite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gid]
+              properties:
+                gid: { type: integer, format: int64 }
+                token: { type: string }
+                title: { type: string }
+                titleJpn: { type: string }
+                category: { type: integer }
+                posted: { type: string }
+                uploader: { type: string }
+                rating: { type: number, format: float }
+                pages: { type: integer }
+                thumb: { type: string }
+                remote: { type: boolean, default: false, description: 是否同时加入源站收藏 }
+                favCat: { type: integer, default: 0, description: remote=true 时的源站收藏夹分类(0-9) }
+                favNote: { type: string, description: remote=true 时的收藏备注 }
+      responses:
+        "200":
+          description: 已加入收藏
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  gid: { type: integer, format: int64 }
+                  isFavorited: { type: boolean }
+                  remote: { type: boolean }
+                  message: { type: string }
+        "409":
+          description: 已收藏
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 
   # ==================== Downloads ====================
   /api/v1/downloads:
@@ -3228,3 +3340,653 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SuccessResponse"
+
+  # ==================== Online (v3.2.0 §5.25) ====================
+  /api/v1/online/search:
+    get:
+      tags: [Online]
+      summary: 在线搜索/列表
+      description: 通过主机在线获取源站画廊列表（需主机已登录 E-Hentai）
+      operationId: onlineSearch
+      parameters:
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          description: 页码，0 基
+          schema: { type: integer, default: 0 }
+        - name: mode
+          in: query
+          description: normal/frontpage/watched/popular/top
+          schema: { type: string, default: normal }
+        - name: category
+          in: query
+          description: 分类位掩码，0=不过滤
+          schema: { type: integer, default: 0 }
+        - name: thumb
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: 在线画廊列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: { type: string }
+                  keyword: { type: string }
+                  mode: { type: string }
+                  page: { type: integer }
+                  hasPrev: { type: boolean }
+                  hasNext: { type: boolean }
+                  galleries:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Gallery"
+        "401":
+          description: 未登录源站
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    query:
+      tags: [Online]
+      summary: QUERY 在线搜索
+      operationId: queryOnlineSearch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                keyword: { type: string }
+                page: { type: integer }
+                mode: { type: string }
+                category: { type: integer }
+                searchName: { type: boolean }
+                searchTags: { type: boolean }
+                searchDesc: { type: boolean }
+                thumb: { type: boolean }
+      responses:
+        "200":
+          description: 在线画廊列表
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/online/galleries/{gid}:
+    get:
+      tags: [Online]
+      summary: 在线画廊详情
+      operationId: onlineGalleryDetail
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 在线画廊详情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GalleryDetail"
+        "401":
+          description: 未登录源站
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/online/galleries/{gid}/pages:
+    get:
+      tags: [Online]
+      summary: 在线页面列表
+      operationId: onlineGalleryPages
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 页面列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gid: { type: integer, format: int64 }
+                  token: { type: string }
+                  pages: { type: integer }
+                  pageList:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        page: { type: integer }
+                        state: { type: string }
+                        pToken: { type: string }
+                        pageUrl: { type: string }
+
+  /api/v1/online/galleries/{gid}/pages/{page}:
+    get:
+      tags: [Online]
+      summary: 在线取图（源站代理）
+      operationId: onlineGalleryPageImage
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: page
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+        - name: mode
+          in: query
+          description: proxy(默认)/local
+          schema: { type: string, default: proxy }
+      responses:
+        "200":
+          description: 图片二进制
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        "401":
+          description: 未登录源站
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ==================== Favorites write (v3.2.0 §5.26) ====================
+  /api/v1/favorites/remote:
+    post:
+      tags: [Favorites]
+      summary: 源站收藏（带分类）
+      operationId: addRemoteFavorite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [gid, token]
+              properties:
+                gid: { type: integer, format: int64 }
+                token: { type: string }
+                favCat: { type: integer, default: 0 }
+                favNote: { type: string }
+      responses:
+        "200":
+          description: 已加入源站收藏
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: 未登录源站
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/favorites/{gid}:
+    delete:
+      tags: [Favorites]
+      summary: 取消收藏（本地，幂等）
+      operationId: removeFavorite
+      parameters:
+        - name: gid
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: 已取消收藏
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  gid: { type: integer, format: int64 }
+                  isFavorited: { type: boolean }
+                  message: { type: string }
+
+  # ==================== E-Hentai account (v3.2.0 §5.27) ====================
+  /api/v1/eh/auth/status:
+    get:
+      tags: [EhAuth]
+      summary: 获取 E-Hentai 登录状态
+      operationId: ehAuthStatus
+      responses:
+        "200":
+          description: 登录状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  signedIn: { type: boolean }
+                  site: { type: string, description: e/ex/none }
+                  username: { type: string }
+
+  /api/v1/eh/auth/signin:
+    post:
+      tags: [EhAuth]
+      summary: E-Hentai 账号密码登录
+      operationId: ehSignIn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: 凭证错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/eh/auth/cookie:
+    post:
+      tags: [EhAuth]
+      summary: E-Hentai Cookie 导入（论坛辅助登录）
+      operationId: ehCookieImport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ipb_member_id, ipb_pass_hash]
+              properties:
+                ipb_member_id: { type: string }
+                ipb_pass_hash: { type: string }
+                igneous: { type: string }
+      responses:
+        "200":
+          description: 导入成功
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/eh/auth/signout:
+    post:
+      tags: [EhAuth]
+      summary: E-Hentai 退出登录
+      operationId: ehSignOut
+      responses:
+        "200":
+          description: 已退出
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  # ==================== Realtime changes (v3.2.0 §5.28) ====================
+  /api/v1/system/version:
+    get:
+      tags: [Events]
+      summary: 获取数据版本号
+      operationId: getDataVersion
+      parameters:
+        - name: since
+          in: query
+          description: 上次版本号；>0 时额外返回 changed
+          schema: { type: integer, format: int64, default: 0 }
+      responses:
+        "200":
+          description: 数据版本
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: integer, format: int64 }
+                  since: { type: integer, format: int64 }
+                  changed: { type: boolean }
+
+  /api/v1/events:
+    get:
+      tags: [Events]
+      summary: 事件流（SSE）
+      description: text/event-stream 长连接，推送 favorite_*/download_*/login_changed/data_changed/heartbeat 事件
+      operationId: streamEvents
+      responses:
+        "200":
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "503":
+          description: SSE 连接数已达上限，请改用版本轮询
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ==================== Gallery Index (§5.29) ====================
+  /api/v1/sync/gallery-index/scopes:
+    get:
+      tags: [Sync]
+      summary: 获取列表级索引（scopes）
+      description: 返回 downloads / favorites / 每个标签的 count、digest、version（协议 §5.29.3）
+      operationId: getGalleryIndexScopes
+      parameters:
+        - name: since
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: state
+          in: query
+          schema: { type: string, example: "3" }
+        - name: digest
+          in: query
+          schema: { type: boolean, default: true }
+        - name: includeEmpty
+          in: query
+          schema: { type: boolean, default: true }
+        - name: label
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 200, maximum: 500 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: 列表级索引
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch: { type: string }
+                  version: { type: integer, format: int64 }
+                  since: { type: integer, format: int64, nullable: true }
+                  bucketSize: { type: integer }
+                  supportsIncremental: { type: boolean }
+                  scopes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        scope: { type: string, enum: [downloads, favorites, label] }
+                        label: { type: string, nullable: true }
+                        count: { type: integer }
+                        digest: { type: string, nullable: true }
+                        version: { type: integer, format: int64 }
+                        changed: { type: boolean }
+                  nextCursor: { type: string, nullable: true }
+
+  /api/v1/sync/gallery-index:
+    get:
+      tags: [Sync]
+      summary: 获取分区位图清单（manifest）
+      description: 返回 presence / changed 位图及可选计数、指纹（协议 §5.29.4）
+      operationId: getGalleryIndexManifest
+      parameters:
+        - name: scope
+          in: query
+          required: true
+          schema: { type: string, enum: [downloads, favorites, label] }
+        - name: label
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string, example: "3" }
+        - name: since
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: bucketSize
+          in: query
+          schema: { type: integer }
+        - name: bitmaps
+          in: query
+          schema: { type: string, default: "presence,changed" }
+        - name: counts
+          in: query
+          schema: { type: string, enum: ["0", "1"], default: "0" }
+        - name: fingerprints
+          in: query
+          schema: { type: string, enum: ["0", changed, all], default: "0" }
+        - name: fp
+          in: query
+          schema: { type: string, default: gid }
+        - name: expand
+          in: query
+          schema: { type: string, enum: [changed] }
+      responses:
+        "200":
+          description: 分区位图清单
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch: { type: string }
+                  version: { type: integer, format: int64 }
+                  since: { type: integer, format: int64, nullable: true }
+                  sinceApplied: { type: boolean }
+                  sinceStale: { type: boolean }
+                  scope: { type: string }
+                  label: { type: string, nullable: true }
+                  state: { type: string }
+                  bucketSize: { type: integer }
+                  baseBucket: { type: integer }
+                  bitCount: { type: integer }
+                  count: { type: integer }
+                  digest: { type: string }
+                  bitmaps:
+                    type: object
+                    nullable: true
+                    properties:
+                      encoding: { type: string, example: base64url }
+                      presence: { type: string, nullable: true }
+                      changed: { type: string, nullable: true }
+                  counts: { type: string, nullable: true }
+                  fingerprints:
+                    type: object
+                    nullable: true
+                    additionalProperties: { type: string }
+                  changedBuckets:
+                    type: array
+                    nullable: true
+                    items: { type: integer }
+                  supportsIncremental: { type: boolean }
+                  snapshotConsistent: { type: boolean }
+        "400":
+          description: INDEX_SCOPE_INVALID / INDEX_LAYOUT_MISMATCH
+        "503":
+          description: 服务端低内存/过载
+
+  /api/v1/sync/gallery-index/buckets/{bucket}:
+    get:
+      tags: [Sync]
+      summary: 获取桶内画廊行
+      description: 按 GID 升序 keyset 拉取单桶行（协议 §5.29.5）
+      operationId: getGalleryIndexBucket
+      parameters:
+        - name: bucket
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: bucketSize
+          in: query
+          schema: { type: integer }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [downloads, favorites, label], default: downloads }
+        - name: label
+          in: query
+          schema: { type: string }
+        - name: state
+          in: query
+          schema: { type: string }
+        - name: cursor
+          in: query
+          description: 上一页最后一条 gid
+          schema: { type: integer, format: int64 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 500 }
+        - name: fields
+          in: query
+          schema: { type: string, enum: [ids, summary, fav, full], default: summary }
+        - name: expectedVersion
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        "200":
+          description: 桶内行
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  epoch: { type: string }
+                  bucket: { type: integer }
+                  from: { type: integer, format: int64 }
+                  to: { type: integer, format: int64 }
+                  count: { type: integer }
+                  version: { type: integer, format: int64 }
+                  versionChanged: { type: boolean }
+                  fields: { type: string }
+                  galleries:
+                    type: array
+                    items:
+                      type: object
+                  gids:
+                    type: array
+                    items: { type: integer, format: int64 }
+                  nextCursor: { type: string, nullable: true }
+                  complete: { type: boolean }
+        "400":
+          description: INDEX_BUCKET_OUT_OF_RANGE / INDEX_LAYOUT_MISMATCH
+
+  # ==================== Device Sync (§5.30) ====================
+  /api/v1/lab/sync/sessions:
+    post:
+      tags: [Sync]
+      summary: 创建设备间同步会话
+      description: 已配对设备之间创建一次同步会话；push/bidirectional 时对端自动反向拉取（协议 §5.30.3）
+      operationId: createLabSyncSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deviceId, direction]
+              properties:
+                deviceId: { type: string }
+                deviceName: { type: string }
+                direction:
+                  type: string
+                  enum: [pull, push, bidirectional]
+                scopes:
+                  type: array
+                  items: { type: string, enum: [downloads, favorites] }
+                sourceHost: { type: string }
+                sourcePort: { type: integer }
+      responses:
+        "200":
+          description: 会话已创建
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  sessionId: { type: string }
+                  state: { type: string }
+                  direction: { type: string }
+                  role: { type: string, enum: [serve, pull, bidirectional] }
+                  scopes:
+                    type: array
+                    items: { type: string }
+                  applied: { type: integer }
+                  detail: { type: string, nullable: true }
+                  createdAt: { type: integer, format: int64 }
+                  expiresAt: { type: integer, format: int64 }
+        "403":
+          description: 设备未配对或实验室同步未启用
+
+  /api/v1/lab/sync/sessions/{id}:
+    get:
+      tags: [Sync]
+      summary: 查询设备同步会话
+      operationId: getLabSyncSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 会话状态
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessionId: { type: string }
+                  state: { type: string, enum: [running, completed, failed, closed, expired, superseded] }
+                  role: { type: string }
+                  applied: { type: integer }
+                  detail: { type: string, nullable: true }
+        "404":
+          description: 会话不存在或已过期
+
+  /api/v1/lab/sync/sessions/{id}/close:
+    post:
+      tags: [Sync]
+      summary: 关闭设备同步会话
+      operationId: closeLabSyncSession
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 会话已关闭

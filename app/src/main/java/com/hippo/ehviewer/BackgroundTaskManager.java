@@ -289,6 +289,90 @@ public class BackgroundTaskManager {
         return activeTasks.get(index % activeTasks.size());
     }
 
+    /**
+     * 通知栏展示的主任务：优先开始时间最早的已运行（非排队）任务。
+     * 旧实现每次刷新都轮询切换任务，通知栏内容每 300ms 跳一次；这里固定主任务，
+     * 保证通知内容稳定可读。
+     */
+    @Nullable
+    private BackgroundTaskInfo getPrimaryActiveTaskInfo() {
+        List<BackgroundTaskInfo> activeTasks = mTaskStatusManager.getActiveTasks();
+        BackgroundTaskInfo firstQueued = null;
+        BackgroundTaskInfo earliest = null;
+        long earliestStart = Long.MAX_VALUE;
+        for (BackgroundTaskInfo info : activeTasks) {
+            if (info.isCompleted() || info.isCancelled()) {
+                continue;
+            }
+            if (info.isQueued()) {
+                if (firstQueued == null) {
+                    firstQueued = info;
+                }
+                continue;
+            }
+            long start = info.getStartTime();
+            if (earliest == null || start < earliestStart) {
+                earliest = info;
+                earliestStart = start;
+            }
+        }
+        return earliest != null ? earliest : firstQueued;
+    }
+
+    /**
+     * 构建当前后台任务通知（唯一来源）。
+     *
+     * BackgroundTaskService 的 startForeground() 与本类的进度刷新共用同一份
+     * 构建逻辑，避免两个 Builder 在同一 NOTIFICATION_ID 上互相覆盖，导致
+     * 通知栏进度时有时无。
+     */
+    @NonNull
+    public Notification buildActiveTaskNotification() {
+        int activeTasks = Math.max(mTaskStatusManager.getActiveTaskCount(), mActiveTaskCount.get());
+        BackgroundTaskInfo activeInfo = getPrimaryActiveTaskInfo();
+
+        String title = getRunningTasksTitle(activeTasks);
+        String line = activeInfo != null ? activeInfo.getTaskName()
+                : mContext.getString(R.string.background_task_running);
+        String detail = activeInfo != null ? activeInfo.getProgressDetail() : null;
+        String text = detail != null && !detail.isEmpty() ? line + " - " + detail : line;
+
+        Intent intent = new Intent(mContext, com.hippo.ehviewer.ui.task.BackgroundTaskActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                mContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+        );
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(mContext, CHANNEL_ID)
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(activeTasks > 0)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(pendingIntent);
+
+        if (activeInfo != null) {
+            int current = activeInfo.getCurrentProgress();
+            int total = activeInfo.getTotalProgress();
+            if (current >= 0 && total > 0) {
+                builder.setProgress(total, current, false);
+                String progressText = mContext.getString(R.string.task_progress_format,
+                        current, total, (current * 100) / total);
+                builder.setContentText(text + " - " + progressText);
+            } else {
+                builder.setProgress(0, 0, true);
+            }
+        }
+        return builder.build();
+    }
+
+    private void postActiveTaskNotification() {
+        if (mNotificationManager != null) {
+            mNotificationManager.notify(NOTIFICATION_ID, buildActiveTaskNotification());
+        }
+    }
+
     @NonNull
     private String getRunningTasksTitle(int count) {
         if (count <= 0) {
@@ -440,6 +524,10 @@ public class BackgroundTaskManager {
         final String taskDescription = task.getTaskDescription();
         final BackgroundTask.TaskType taskType = task.getTaskType();
         final boolean cpuBound = isCpuBoundTask(taskType);
+
+        // 同名任务重新提交（再次扫描等）：先清掉上次的完成记录，
+        // 否则会重复显示，且互斥排队时会被当成重复任务直接拒绝。
+        mTaskStatusManager.discardCompletedRecord(taskId);
 
         if (cpuBound) {
             if (!canAcceptCpuTask()) {
@@ -641,123 +729,21 @@ public class BackgroundTaskManager {
     }
     
     /**
-     * 显示前台通知
+     * 显示前台通知（内容统一由 [buildActiveTaskNotification] 生成）
      */
     private void showForegroundNotification(@Nullable String taskName, @Nullable String taskDescription) {
-        showForegroundNotification(taskName, taskDescription, -1, -1);
+        postActiveTaskNotification();
     }
-    
-    /**
-     * 显示前台通知（带进度）
-     */
-    private void showForegroundNotification(@Nullable String taskName, @Nullable String taskDescription, 
-                                          int currentProgress, int totalProgress) {
-        int activeTasks = Math.max(mTaskStatusManager.getActiveTaskCount(), mActiveTaskCount.get());
-        BackgroundTaskInfo activeInfo = getNextActiveTaskInfo();
 
-        String title = getRunningTasksTitle(activeTasks);
-        String line = activeInfo != null ? activeInfo.getTaskName()
-            : (taskName != null ? taskName : mContext.getString(R.string.background_task_running));
-        String detail = activeInfo != null ? activeInfo.getProgressDetail() : taskDescription;
-        int displayCurrent = activeInfo != null ? activeInfo.getCurrentProgress() : currentProgress;
-        int displayTotal = activeInfo != null ? activeInfo.getTotalProgress() : totalProgress;
-
-        String text = detail != null ? line + " - " + detail : line;
-        
-        Intent intent = new Intent(mContext, com.hippo.ehviewer.ui.task.BackgroundTaskActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                mContext, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
-        
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(mContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setContentIntent(pendingIntent);
-        
-        // 添加进度显示
-        if (displayCurrent >= 0 && displayTotal > 0) {
-            builder.setProgress(displayTotal, displayCurrent, false);
-            // 更新文本显示进度
-            String progressText = mContext.getString(R.string.task_progress_format, 
-                    displayCurrent, displayTotal, (displayCurrent * 100) / displayTotal);
-            builder.setContentText(text + " - " + progressText);
-        } else {
-            builder.setProgress(0, 0, true); // 不确定进度
-        }
-        
-        Notification notification = builder.build();
-        
-        if (mNotificationManager != null) {
-            mNotificationManager.notify(NOTIFICATION_ID, notification);
-        }
-    }
-    
     /**
-     * 更新前台通知
+     * 更新前台通知（内容统一由 [buildActiveTaskNotification] 生成）
      */
     private void updateForegroundNotification(@Nullable String taskName, @Nullable String taskDescription) {
-        updateForegroundNotification(taskName, taskDescription, -1, -1);
-    }
-    
-    /**
-     * 更新前台通知（带进度）
-     */
-    private void updateForegroundNotification(@Nullable String taskName, @Nullable String taskDescription,
-                                            int currentProgress, int totalProgress) {
-        int activeTasks = mActiveTaskCount.get();
-        if (activeTasks <= 0) {
+        if (mActiveTaskCount.get() <= 0) {
             showIdleNotification();
             return;
         }
-
-        int runningCount = Math.max(mTaskStatusManager.getActiveTaskCount(), activeTasks);
-        BackgroundTaskInfo activeInfo = getNextActiveTaskInfo();
-
-        String title = getRunningTasksTitle(runningCount);
-        String line = activeInfo != null ? activeInfo.getTaskName()
-            : (taskName != null ? taskName : mContext.getString(R.string.background_task_running));
-        String detail = activeInfo != null ? activeInfo.getProgressDetail() : taskDescription;
-        int displayCurrent = activeInfo != null ? activeInfo.getCurrentProgress() : currentProgress;
-        int displayTotal = activeInfo != null ? activeInfo.getTotalProgress() : totalProgress;
-
-        String text = detail != null ? line + " - " + detail : line;
-        
-        Intent intent = new Intent(mContext, com.hippo.ehviewer.ui.task.BackgroundTaskActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        PendingIntent pendingIntent = PendingIntent.getActivity(
-                mContext, 1, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-        );
-        
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(mContext, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setContentIntent(pendingIntent);
-        
-        // 添加进度显示
-        if (displayCurrent >= 0 && displayTotal > 0) {
-            builder.setProgress(displayTotal, displayCurrent, false);
-            // 更新文本显示进度
-            String progressText = mContext.getString(R.string.task_progress_format, 
-                    displayCurrent, displayTotal, (displayCurrent * 100) / displayTotal);
-            builder.setContentText(text + " - " + progressText);
-        } else {
-            builder.setProgress(0, 0, true); // 不确定进度
-        }
-        
-        Notification notification = builder.build();
-        
-        if (mNotificationManager != null) {
-            mNotificationManager.notify(NOTIFICATION_ID, notification);
-        }
+        postActiveTaskNotification();
     }
     
     /**
@@ -799,7 +785,8 @@ public class BackgroundTaskManager {
     public void updateTaskProgress(@Nullable String taskName, @Nullable String taskDescription,
                                   int currentProgress, int totalProgress) {
         if (mActiveTaskCount.get() > 0) {
-            updateForegroundNotification(taskName, taskDescription, currentProgress, totalProgress);
+            // 进度已写入 BackgroundTaskInfo，通知统一从那里构建，避免两处参数不一致
+            updateForegroundNotification(null, null);
         }
     }
     

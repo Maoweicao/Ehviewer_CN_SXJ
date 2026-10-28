@@ -5,6 +5,7 @@ import {
   AppOutline,
   UnorderedListOutline,
   SetOutline,
+  SearchOutline,
 } from 'antd-mobile-icons'
 import api from './api/client'
 import Login from './pages/Login'
@@ -15,9 +16,14 @@ import FileBrowser from './pages/FileBrowser'
 import Settings from './pages/Settings'
 import DataTransfer from './pages/DataTransfer'
 import TaskCenter from './pages/TaskCenter'
+import EhAccount from './pages/EhAccount'
+import OnlineSearch from './pages/OnlineSearch'
+import OnlineDetail from './pages/OnlineDetail'
+import OnlineViewer from './pages/OnlineViewer'
 import DebugPanel from './components/DebugPanel'
 import FullScreenLoading from './components/FullScreenLoading'
 import { startAutoThemeWatcher, stopAutoThemeWatcher } from './utils/theme'
+import { ensureDataEvents } from './utils/dataEvents'
 
 function MainLayout() {
   const navigate = useNavigate()
@@ -25,6 +31,7 @@ function MainLayout() {
 
   const tabs = [
     { key: '/', title: '画廊', icon: <AppOutline /> },
+    { key: '/online', title: '在线', icon: <SearchOutline /> },
     { key: '/files', title: '文件', icon: <UnorderedListOutline /> },
     { key: '/settings', title: '设置', icon: <SetOutline /> },
   ]
@@ -33,7 +40,9 @@ function MainLayout() {
     ? '/files'
     : location.pathname.startsWith('/settings')
       ? '/settings'
-      : '/'
+      : location.pathname.startsWith('/online')
+        ? '/online'
+        : '/'
 
   const handleTabChange = (key: string) => {
     navigate(key)
@@ -43,12 +52,16 @@ function MainLayout() {
     <div className="page-container">
       <Routes>
         <Route path="/" element={<GalleryList />} />
+        <Route path="/online" element={<OnlineSearch />} />
+        <Route path="/online/:gid/view" element={<OnlineViewer />} />
+        <Route path="/online/:gid" element={<OnlineDetail />} />
         <Route path="/gallery/:gid" element={<GalleryDetail />} />
         <Route path="/gallery/:gid/view" element={<GalleryViewer />} />
         <Route path="/files" element={<FileBrowser />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/settings/data-transfer" element={<DataTransfer />} />
         <Route path="/settings/tasks" element={<TaskCenter />} />
+        <Route path="/settings/eh-account" element={<EhAccount />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <DebugPanel />
@@ -94,6 +107,7 @@ export default function App() {
 
   useEffect(() => {
     startAutoThemeWatcher()
+    ensureDataEvents()
     return () => stopAutoThemeWatcher()
   }, [])
 

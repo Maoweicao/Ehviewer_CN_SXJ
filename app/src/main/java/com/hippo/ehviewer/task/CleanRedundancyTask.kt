@@ -32,7 +32,6 @@ class CleanRedundancyTask(
 
     @Volatile private var isPaused = false
     @Volatile private var isCancelled = false
-    private var statusListener: StatusListener? = null
 
     private var totalProgress = 0
     private var scannedCount = 0
@@ -40,9 +39,6 @@ class CleanRedundancyTask(
     private var keptCount = 0
     private var ignoredCount = 0
 
-    private fun notifyStatus() {
-        statusListener?.onStatus(scannedCount, totalProgress, cleanedCount, keptCount, ignoredCount)
-    }
 
     override fun getTaskId(): String = "clean_redundancy"
 
@@ -75,7 +71,6 @@ class CleanRedundancyTask(
             cleanedCount = 0
             keptCount = 0
             ignoredCount = 0
-            notifyStatus()
 
             // 复用共享的孤儿清理逻辑（永久删除不在下载记录中的本地画廊文件）
             val summary = RedundancyCleaner.cleanOrphanedGalleries(
@@ -87,7 +82,6 @@ class CleanRedundancyTask(
                     keptCount = kept
                     ignoredCount = ignored
                     updateProgress(scanned, total, "$scanned/$total")
-                    notifyStatus()
                 },
                 onLog = { msg ->
                     Log.d(TAG, msg)
@@ -112,7 +106,6 @@ class CleanRedundancyTask(
             appendTaskLog(summaryText)
             logBackgroundComplete(elapsed, true, summaryText)
             notifyCompleted()
-            notifyStatus()
 
             // 完成 Toast（沿用旧版本行为）
             val resultMessage = if (cleanedCount == 0) {
@@ -186,13 +179,7 @@ class CleanRedundancyTask(
         }
     }
 
-    fun setStatusListener(listener: StatusListener?) {
-        statusListener = listener
-    }
 
-    interface StatusListener {
-        fun onStatus(current: Int, total: Int, cleaned: Int, kept: Int, ignored: Int)
-    }
 
     /**
      * 同步执行任务（用于Java调用）

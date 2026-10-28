@@ -184,21 +184,39 @@ public class DataSelectorActivity extends ToolbarActivity {
     }
 
     private void loadData() {
+        if (TYPE_DOWNLOADS.equals(type)) {
+            // 全表读取放到后台，避免打开选择页时主线程加载整个下载列表
+            new Thread(() -> {
+                final List<DownloadInfo> downloads = com.hippo.ehviewer.EhDB.getAllDownloadInfo();
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed()) {
+                        return;
+                    }
+                    allItems = new ArrayList<>(downloads);
+                    finishLoading();
+                });
+            }, "DataSelectorLoad").start();
+            return;
+        }
+
         switch (type) {
             case TYPE_BOOKMARKS:
                 // TODO: Implement bookmarks loading
                 allItems = new ArrayList<>();
                 break;
-            case TYPE_DOWNLOADS:
-                List<DownloadInfo> downloads = com.hippo.ehviewer.EhDB.getAllDownloadInfo();
-                allItems = new ArrayList<>(downloads);
-                break;
             case TYPE_FAVORITES:
                 // TODO: Implement favorites loading
                 allItems = new ArrayList<>();
                 break;
+            default:
+                allItems = new ArrayList<>();
+                break;
         }
 
+        finishLoading();
+    }
+
+    private void finishLoading() {
         totalItems = allItems.size();
         totalPages = Math.max(1, (totalItems + pageSize - 1) / pageSize);
         currentPage = 1;

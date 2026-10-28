@@ -9,7 +9,10 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import androidx.annotation.WorkerThread;
+
 import com.hippo.ehviewer.DownloadedFileManager;
+import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.callBack.DownloadSearchCallback;
@@ -18,9 +21,22 @@ import com.hippo.ehviewer.client.EhTagDatabase;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
+import com.hippo.ehviewer.dao.GalleryAiInfo;
 import com.hippo.ehviewer.dao.GalleryTags;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.download.DownloadGalleryMetaHelper;
+import com.hippo.ehviewer.download.filter.ExcludeRule;
+import com.hippo.ehviewer.download.filter.FilterCondition;
+import com.hippo.ehviewer.download.filter.FilterMatcher;
+import com.hippo.ehviewer.download.filter.FilterPresets;
+import com.hippo.ehviewer.download.filter.FilterSettingsStore;
+import com.hippo.ehviewer.download.filter.LowRatingConfig;
+import com.hippo.ehviewer.download.filter.PostedTime;
+import com.hippo.ehviewer.download.filter.QuickFilterDefinition;
+import com.hippo.ehviewer.download.filter.QuickFilterKind;
+import com.hippo.ehviewer.download.filter.SortKey;
+import com.hippo.ehviewer.lab.semantic.SemanticSearchManager;
+import com.hippo.ehviewer.lab.semantic.search.SemanticRanker;
 import com.hippo.ehviewer.local.LocalRatingManager;
 import com.hippo.ehviewer.widget.AdvanceSearchTable;
 import com.hippo.ehviewer.spider.SpiderDen;
@@ -33,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -436,6 +453,8 @@ public class DownloadListInfosExecutor {
             filteredList = filterByPageRange(filteredList, pageFrom, pageTo);
             filteredList = filterByRating(filteredList, ratingFrom, ratingTo);
             filteredList = filterDuplicateNamedGalleries(filteredList, duplicateOnly);
+            // 设置里配置的全局排除规则对所有筛选入口生效
+            filteredList = applyExclusions(filteredList, ExcludeRule.EMPTY, true);
 
             List<DownloadInfo> resultList;
             if (sortId != R.id.sort_by_default) {
@@ -458,121 +477,75 @@ public class DownloadListInfosExecutor {
         });
     }
 
-    // 快捷筛选类型（与菜单 R.id 对应）
-    public static final int QUICK_FILTER_BIG_LOW_RATING = R.id.quick_filter_big_low_rating;
-    public static final int QUICK_FILTER_DUPLICATES = R.id.quick_filter_duplicates;
-    public static final int QUICK_FILTER_LOW_SPACE_EFFICIENCY = R.id.quick_filter_low_space_efficiency;
-    public static final int QUICK_FILTER_LOW_RATING = R.id.quick_filter_low_rating;
-    public static final int QUICK_FILTER_HUGE_FILE = R.id.quick_filter_huge_file;
-    public static final int QUICK_FILTER_OLD_UNFAVORITED = R.id.quick_filter_old_unfavorited;
-    public static final int QUICK_FILTER_AI_GENERATED = R.id.quick_filter_ai_generated;
+    @Nullable
+    private FilterSettingsStore getFilterStore() {
+        try {
+            EhApplication app = EhApplication.getInstance();
+            return app != null ? FilterSettingsStore.getInstance(app) : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
 
-    // 快捷筛选体积阈值
-    private static final long SIZE_100MB = 100L * 1024 * 1024;
-    private static final long SIZE_200MB = 200L * 1024 * 1024;
-    private static final double SIZE_PER_PAGE_4MB = 4.0 * 1024 * 1024;
+    @NonNull
+    private LowRatingConfig getLowRatingConfig() {
+        FilterSettingsStore store = getFilterStore();
+        return store != null ? store.lowRatingConfig() : new LowRatingConfig();
+    }
+
+    /** 旧签名入口：按内置预设 id 反查配置后走统一实现。 */
+    public void executeQuickFilter(@Nullable String presetId) {
+        QuickFilterDefinition definition = null;
+        if (presetId != null) {
+            FilterSettingsStore store = getFilterStore();
+            if (store != null) {
+                definition = store.findQuickFilter(presetId);
+            }
+            if (definition == null) {
+                // 配置被删掉时回退到出厂预设，保证旧入口仍可用
+                for (QuickFilterDefinition preset : FilterPresets.defaultQuickFilters()) {
+                    if (presetId.equals(preset.getId())) {
+                        definition = preset;
+                        break;
+                    }
+                }
+            }
+        }
+        if (definition == null) {
+            executeFilterAndSort(FilterCondition.EMPTY);
+            return;
+        }
+        executeQuickFilter(definition);
+    }
 
     /**
-     * 执行快捷筛选预设。所有预设均要求“已下载完成”（STATE_FINISH）。
-     * 在后台线程中一次遍历完成，体积类预设复用同一张尺寸表，避免重复 I/O。
+     * 执行一条快捷筛选。
+     *
+     * 内置类型走各自的预设逻辑（阈值全部来自配置），
+     * [QuickFilterKind.CUSTOM] 直接复用高级筛选的完整条件。
+     * 无论哪种类型，最后都会叠加「全局排除 + 本条筛选自带的排除」。
      */
-    @SuppressLint("NonConstantResourceId")
-    public void executeQuickFilter(int quickFilterId) {
+    public void executeQuickFilter(@NonNull QuickFilterDefinition definition) {
         mCancelled = false;
         service.execute(() -> {
             if (mCancelled) return;
             List<DownloadInfo> source = mList != null ? mList : new ArrayList<>();
-            // 统一先过滤已完成下载，这是所有快捷筛选的前提
-            List<DownloadInfo> finished = filterDownloadState(source, DownloadInfo.STATE_FINISH);
-            List<DownloadInfo> result = new ArrayList<>();
             long start = System.currentTimeMillis();
+            List<DownloadInfo> result;
             try {
-                switch (quickFilterId) {
-                    case QUICK_FILTER_BIG_LOW_RATING: {
-                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
-                        for (DownloadInfo info : finished) {
-                            long size = sizeMap.getOrDefault(info.gid, 0L);
-                            info.fileSize = size;
-                            if (size >= SIZE_100MB && getEffectiveRating(info) > 0f && getEffectiveRating(info) < 3.5f) {
-                                result.add(info);
-                            }
-                        }
-                        result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
-                        break;
-                    }
-                    case QUICK_FILTER_DUPLICATES: {
-                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
-                        for (DownloadInfo info : finished) {
-                            info.fileSize = sizeMap.getOrDefault(info.gid, 0L);
-                        }
-                        result = filterDuplicatesExceptBest(finished);
-                        break;
-                    }
-                    case QUICK_FILTER_LOW_SPACE_EFFICIENCY: {
-                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
-                        Map<DownloadInfo, Double> perPageMap = new HashMap<>();
-                        for (DownloadInfo info : finished) {
-                            long size = sizeMap.getOrDefault(info.gid, 0L);
-                            info.fileSize = size;
-                            long pages = getPageCount(info);
-                            if (pages > 0 && size >= SIZE_PER_PAGE_4MB * pages) {
-                                perPageMap.put(info, size / (double) pages);
-                                result.add(info);
-                            }
-                        }
-                        result.sort((a, b) -> Double.compare(perPageMap.getOrDefault(b, 0d), perPageMap.getOrDefault(a, 0d)));
-                        break;
-                    }
-                    case QUICK_FILTER_LOW_RATING: {
-                        for (DownloadInfo info : finished) {
-                            float effectiveRating = getEffectiveRating(info);
-                            if (effectiveRating > 0f && effectiveRating < 3f) {
-                                result.add(info);
-                            }
-                        }
-                        result.sort((a, b) -> Float.compare(getEffectiveRating(a), getEffectiveRating(b)));
-                        break;
-                    }
-                    case QUICK_FILTER_HUGE_FILE: {
-                        Map<Long, Long> sizeMap = loadGallerySizeMap(finished);
-                        for (DownloadInfo info : finished) {
-                            long size = sizeMap.getOrDefault(info.gid, 0L);
-                            info.fileSize = size;
-                            if (size >= SIZE_200MB) {
-                                result.add(info);
-                            }
-                        }
-                        result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
-                        break;
-                    }
-                    case QUICK_FILTER_OLD_UNFAVORITED: {
-                        Set<Long> favoritedGids = loadLocalFavoritedGids();
-                        for (DownloadInfo info : finished) {
-                            if (!favoritedGids.contains(info.gid) && getPostedYear(info) < 2024) {
-                                result.add(info);
-                            }
-                        }
-                        result.sort((a, b) -> Integer.compare(getPostedYear(a), getPostedYear(b)));
-                        break;
-                    }
-                    case QUICK_FILTER_AI_GENERATED: {
-                        // 筛选标签或标题中含有“AI 生成”标记的画廊（不限于已完成）
-                        for (DownloadInfo info : source) {
-                            if (isAiGenerated(info)) {
-                                result.add(info);
-                            }
-                        }
-                        break;
-                    }
-                    default:
-                        result = finished;
-                        break;
+                if (definition.getKind() == QuickFilterKind.CUSTOM) {
+                    result = applyFilterCondition(source, definition.getCondition(), definition.getExclude());
+                } else {
+                    result = runBuiltinQuickFilter(source, definition);
+                    result = applyExclusions(result, definition.getExclude(), true);
                 }
             } catch (Exception e) {
-                Log.w("DownloadListInfos", "executeQuickFilter failed, quickFilterId=" + quickFilterId, e);
+                Log.w("DownloadListInfos", "executeQuickFilter failed, id=" + definition.getId(), e);
                 result = new ArrayList<>();
             }
-            Log.d("DownloadListInfos", "executeQuickFilter 完成, id=" + quickFilterId + ", 结果=" + result.size() + ", 耗时=" + (System.currentTimeMillis() - start) + "ms");
+            Log.d("DownloadListInfos", "executeQuickFilter 完成, id=" + definition.getId()
+                    + ", kind=" + definition.getKind() + ", 结果=" + result.size()
+                    + ", 耗时=" + (System.currentTimeMillis() - start) + "ms");
             List<DownloadInfo> finalResult = result;
             handler.post(() -> {
                 if (mCancelled || mDownloadSearchCallback == null) {
@@ -581,6 +554,221 @@ public class DownloadListInfosExecutor {
                 mDownloadSearchCallback.onDownloadSearchSuccess(finalResult);
             });
         });
+    }
+
+    /** 统一筛选条件入口（高级筛选面板 / 面板搜索 / 自定义快捷筛选共用）。 */
+    public void executeFilterAndSort(@NonNull FilterCondition condition) {
+        mCancelled = false;
+        service.execute(() -> {
+            if (mCancelled) return;
+            List<DownloadInfo> source = mList != null ? mList : new ArrayList<>();
+            long start = System.currentTimeMillis();
+            List<DownloadInfo> result;
+            try {
+                result = applyFilterCondition(source, condition, null);
+            } catch (Exception e) {
+                Log.w("DownloadListInfos", "executeFilterAndSort(condition) failed", e);
+                result = new ArrayList<>();
+            }
+            Log.d("DownloadListInfos", "executeFilterAndSort(condition) 完成, 结果=" + result.size()
+                    + ", 耗时=" + (System.currentTimeMillis() - start) + "ms");
+            List<DownloadInfo> finalResult = result;
+            handler.post(() -> {
+                if (mCancelled || mDownloadSearchCallback == null) {
+                    return;
+                }
+                mDownloadSearchCallback.onDownloadSearchSuccess(finalResult);
+            });
+        });
+    }
+
+    /**
+     * 筛选条件的公共实现：分类 -> 状态 -> 各区间 -> 排除 -> 关键词 -> 排序。
+     *
+     * @param extraExclude 额外叠加的排除规则（快捷筛选自带），可为 null
+     */
+    @WorkerThread
+    @NonNull
+    private List<DownloadInfo> applyFilterCondition(@NonNull List<DownloadInfo> source,
+                                                    @NonNull FilterCondition condition,
+                                                    @Nullable ExcludeRule extraExclude) {
+        List<DownloadInfo> filtered = new ArrayList<>(source);
+
+        Set<Integer> categories = condition.getCategories();
+        if (categories != null && !categories.isEmpty() && !categories.contains(EhUtils.ALL_CATEGORY)) {
+            filtered = filterByCategories(categories, filtered);
+        }
+
+        Set<Integer> statuses = condition.getStatuses();
+        if (statuses != null && !statuses.isEmpty()) {
+            filtered = filterByStates(statuses, filtered);
+        }
+
+        if (condition.getRequireFinished()) {
+            filtered = filterDownloadState(filtered, DownloadInfo.STATE_FINISH);
+        }
+
+        filtered = filterByTimeRange(filtered, condition.getTimeFrom(), condition.getTimeTo());
+        filtered = filterBySizeRange(filtered, condition.getSizeFrom(), condition.getSizeTo());
+        filtered = filterByPageRange(filtered, condition.getPageFrom(), condition.getPageTo());
+        filtered = filterByPostedRange(filtered, condition.getPostedFrom(), condition.effectivePostedTo());
+        filtered = filterByLowRating(filtered, condition.getLowRatingOnly(),
+                condition.getRatingFrom(), condition.getRatingTo());
+        filtered = filterDuplicateNamedGalleries(filtered, condition.getDuplicateOnly());
+        filtered = filterUnfavorited(filtered, condition.getUnfavoritedOnly());
+        filtered = filterAiGenerated(filtered, condition.getAiGeneratedOnly());
+        filtered = filterByTagsMissing(filtered, condition.getTagsMissingOnly());
+        filtered = filterByPerPageSize(filtered, condition.getPerPageFromBytes());
+
+        // 全局排除（设置里配置）+ 单次筛选自带排除
+        ExcludeRule combined = condition.getExclude();
+        if (extraExclude != null && !extraExclude.isEmpty()) {
+            combined = combined.plus(extraExclude);
+        }
+        filtered = applyExclusions(filtered, combined, true);
+
+        String keyword = condition.getSearchKeyword();
+        if (keyword != null && !keyword.trim().isEmpty()) {
+            // 一个搜索字段都没勾选时，默认全字段匹配（名字 / 标签 / 作者 / AI 描述）
+            int option = condition.getSearchOption() != 0
+                    ? condition.getSearchOption()
+                    : (AdvanceSearchTable.SNAME | AdvanceSearchTable.STAGS
+                    | AdvanceSearchTable.STORR | AdvanceSearchTable.SDESC);
+            filtered = searchByKeyword(keyword, option, filtered);
+        }
+
+        if (condition.getSort() != SortKey.DEFAULT) {
+            filtered = sortByType(filtered, com.hippo.ehviewer.download.filter.FilterIdMapping
+                    .menuIdOf(condition.getSort()));
+        }
+        return filtered;
+    }
+
+    /** 内置预设类型的实现，阈值全部来自 [QuickFilterDefinition]。 */
+    @WorkerThread
+    @NonNull
+    private List<DownloadInfo> runBuiltinQuickFilter(@NonNull List<DownloadInfo> source,
+                                                     @NonNull QuickFilterDefinition definition) {
+        QuickFilterKind kind = definition.getKind();
+        boolean requireFinished = definition.getRequireFinished()
+                || kind != QuickFilterKind.AI_GENERATED;
+        List<DownloadInfo> base = requireFinished
+                ? filterDownloadState(source, DownloadInfo.STATE_FINISH)
+                : new ArrayList<>(source);
+        LowRatingConfig lowRating = getLowRatingConfig();
+        List<DownloadInfo> result = new ArrayList<>();
+
+        switch (kind) {
+            case BIG_LOW_RATING: {
+                Map<Long, Long> sizeMap = loadGallerySizeMap(base);
+                long minSize = definition.getSizeMinMb() * FilterPresets.mb();
+                for (DownloadInfo info : base) {
+                    long size = sizeMap.getOrDefault(info.gid, 0L);
+                    info.fileSize = size;
+                    if (size >= minSize
+                            && FilterMatcher.isLowRating(getEffectiveRating(info), ratingThreshold(definition, info, lowRating))) {
+                        result.add(info);
+                    }
+                }
+                result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
+                break;
+            }
+            case DUPLICATES: {
+                Map<Long, Long> sizeMap = loadGallerySizeMap(base);
+                for (DownloadInfo info : base) {
+                    info.fileSize = sizeMap.getOrDefault(info.gid, 0L);
+                }
+                result = filterDuplicatesExceptBest(base);
+                break;
+            }
+            case LOW_SPACE_EFFICIENCY: {
+                Map<Long, Long> sizeMap = loadGallerySizeMap(base);
+                double perPageMin = definition.getPerPageMinKb() * 1024.0;
+                Map<DownloadInfo, Double> perPageMap = new HashMap<>();
+                for (DownloadInfo info : base) {
+                    long size = sizeMap.getOrDefault(info.gid, 0L);
+                    info.fileSize = size;
+                    long pages = getPageCount(info);
+                    if (pages > 0 && size >= (long) (perPageMin * pages)) {
+                        perPageMap.put(info, size / (double) pages);
+                        result.add(info);
+                    }
+                }
+                result.sort((a, b) -> Double.compare(
+                        perPageMap.getOrDefault(b, 0d), perPageMap.getOrDefault(a, 0d)));
+                break;
+            }
+            case LOW_RATING: {
+                for (DownloadInfo info : base) {
+                    if (FilterMatcher.isLowRating(getEffectiveRating(info), ratingThreshold(definition, info, lowRating))) {
+                        result.add(info);
+                    }
+                }
+                result.sort((a, b) -> Float.compare(getEffectiveRating(a), getEffectiveRating(b)));
+                break;
+            }
+            case HUGE_FILE: {
+                Map<Long, Long> sizeMap = loadGallerySizeMap(base);
+                long minSize = definition.getSizeMinMb() * FilterPresets.mb();
+                for (DownloadInfo info : base) {
+                    long size = sizeMap.getOrDefault(info.gid, 0L);
+                    info.fileSize = size;
+                    if (size >= minSize) {
+                        result.add(info);
+                    }
+                }
+                result.sort((a, b) -> Long.compare(sizeOf(b), sizeOf(a)));
+                break;
+            }
+            case OLD_UNFAVORITED: {
+                Set<Long> favoritedGids = loadLocalFavoritedGids();
+                long cutoff = PostedTime.monthsAgo(definition.getAgoMonths());
+                for (DownloadInfo info : base) {
+                    Long posted = postedMillis(info);
+                    if (!favoritedGids.contains(info.gid) && posted != null && posted <= cutoff) {
+                        result.add(info);
+                    }
+                }
+                result.sort((a, b) -> {
+                    Long pa = postedMillis(a);
+                    Long pb = postedMillis(b);
+                    if (pa == null || pb == null) {
+                        return 0;
+                    }
+                    return Long.compare(pa, pb);
+                });
+                break;
+            }
+            case AI_GENERATED: {
+                for (DownloadInfo info : base) {
+                    if (isAiGenerated(info)) {
+                        result.add(info);
+                    }
+                }
+                break;
+            }
+            default:
+                result = base;
+                break;
+        }
+        return result;
+    }
+
+    /** 快捷筛选的低分阈值：显式配置优先，否则用该 catalog 各自的低分定义。 */
+    private static float ratingThreshold(@NonNull QuickFilterDefinition definition,
+                                         @NonNull DownloadInfo info,
+                                         @NonNull LowRatingConfig lowRating) {
+        float configured = definition.getRatingMax();
+        if (configured > 0f) {
+            return configured;
+        }
+        return lowRating.thresholdFor(info.category);
+    }
+
+    @Nullable
+    private static Long postedMillis(@NonNull DownloadInfo info) {
+        return PostedTime.parse(info.posted) != null ? PostedTime.parse(info.posted)
+                : PostedTime.parseYearOnly(info.posted);
     }
 
     private long sizeOf(DownloadInfo info) {
@@ -655,27 +843,6 @@ public class DownloadListInfosExecutor {
         } catch (Exception ignored) {
         }
         return 0;
-    }
-
-    /**
-     * 从 posted（yyyy-MM-dd HH:mm）解析发布年份；解析失败返回 0。
-     */
-    private int getPostedYear(DownloadInfo info) {
-        String posted = info.posted;
-        if (posted == null || posted.isEmpty()) {
-            return 0;
-        }
-        try {
-            String yearStr = posted.substring(0, Math.min(4, posted.length())).trim();
-            int dash = yearStr.indexOf('-');
-            if (dash > 0) {
-                yearStr = yearStr.substring(0, dash);
-            }
-            int year = Integer.parseInt(yearStr);
-            return year > 0 ? year : 0;
-        } catch (Exception e) {
-            return 0;
-        }
     }
 
     /**
@@ -784,6 +951,283 @@ public class DownloadListInfosExecutor {
         normalized = Normalizer.normalize(normalized, Normalizer.Form.NFKC);
         normalized = normalized.replaceAll("\\s+", " ").trim();
         return normalized.isEmpty() ? String.valueOf(info.gid) : normalized;
+    }
+
+    /**
+     * 发布时间区间过滤（“N 个月前的低分内容”用这个维度）。
+     *
+     * posted 解析失败的条目在设置了区间时会被剔除，避免脏数据混进来。
+     */
+    private List<DownloadInfo> filterByPostedRange(@Nullable List<DownloadInfo> sourceList,
+                                                  @Nullable Long postedFrom,
+                                                  @Nullable Long postedTo) {
+        if (sourceList == null || sourceList.isEmpty()) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        if (postedFrom == null && postedTo == null) {
+            return sourceList;
+        }
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            Long posted = postedMillis(info);
+            if (posted == null) {
+                continue;
+            }
+            if (postedFrom != null && posted < postedFrom) {
+                continue;
+            }
+            if (postedTo != null && posted > postedTo) {
+                continue;
+            }
+            result.add(info);
+        }
+        Log.d("DownloadListInfos", "filterByPostedRange: " + postedFrom + "~" + postedTo
+                + ", 过滤后列表大小=" + result.size());
+        return result;
+    }
+
+    /**
+     * 低分过滤。
+     *
+     * [lowRatingOnly] 为 true 时按 catalog 各自的低分阈值动态判定（见设置里的低分范围配置），
+     * 否则退化为普通的评分区间。
+     */
+    private List<DownloadInfo> filterByLowRating(@Nullable List<DownloadInfo> sourceList,
+                                                 boolean lowRatingOnly,
+                                                 float ratingFrom,
+                                                 float ratingTo) {
+        if (sourceList == null) {
+            return new ArrayList<>();
+        }
+        if (lowRatingOnly) {
+            LowRatingConfig lowRating = getLowRatingConfig();
+            List<DownloadInfo> list = new ArrayList<>();
+            for (DownloadInfo info : sourceList) {
+                if (FilterMatcher.isLowRating(getEffectiveRating(info), lowRating.thresholdFor(info.category))) {
+                    list.add(info);
+                }
+            }
+            return list;
+        }
+        return filterByRating(sourceList, ratingFrom, ratingTo);
+    }
+
+    /** 只保留未收藏（或只保留已收藏，由 [unfavoritedOnly] 决定）。 */
+    private List<DownloadInfo> filterUnfavorited(@Nullable List<DownloadInfo> sourceList,
+                                                 boolean unfavoritedOnly) {
+        if (!unfavoritedOnly || sourceList == null || sourceList.isEmpty()) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        Set<Long> favoritedGids = loadLocalFavoritedGids();
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            if (!favoritedGids.contains(info.gid)) {
+                result.add(info);
+            }
+        }
+        return result;
+    }
+
+    /** AI 生成标记过滤。 */
+    private List<DownloadInfo> filterAiGenerated(@Nullable List<DownloadInfo> sourceList,
+                                                 boolean aiGeneratedOnly) {
+        if (!aiGeneratedOnly || sourceList == null) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            if (isAiGenerated(info)) {
+                result.add(info);
+            }
+        }
+        return result;
+    }
+
+    /** 完全没有标签的条目。 */
+    private List<DownloadInfo> filterByTagsMissing(@Nullable List<DownloadInfo> sourceList,
+                                                   boolean tagsMissingOnly) {
+        if (!tagsMissingOnly || sourceList == null || sourceList.isEmpty()) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            boolean hasSimpleTags = info.simpleTags != null && info.simpleTags.length > 0;
+            if (hasSimpleTags) {
+                continue;
+            }
+            if (info.tgList != null && !info.tgList.isEmpty()) {
+                continue;
+            }
+            ArrayList<String> tags = searchTagList(info.gid);
+            if (tags == null || tags.isEmpty()) {
+                result.add(info);
+            } else {
+                info.tgList = tags;
+            }
+        }
+        return result;
+    }
+
+    /** 每页平均体积下限（低性价比检测）。 */
+    private List<DownloadInfo> filterByPerPageSize(@Nullable List<DownloadInfo> sourceList,
+                                                   @Nullable Long perPageFromBytes) {
+        if (sourceList == null || sourceList.isEmpty()) {
+            return sourceList != null ? sourceList : new ArrayList<>();
+        }
+        if (perPageFromBytes == null || perPageFromBytes <= 0) {
+            return sourceList;
+        }
+        Map<Long, Long> sizeMap = loadGallerySizeMap(sourceList);
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : sourceList) {
+            long size = sizeMap.getOrDefault(info.gid, 0L);
+            if (size > 0) {
+                info.fileSize = size;
+            }
+            long pages = getPageCount(info);
+            if (pages > 0 && sizeOf(info) >= perPageFromBytes * pages) {
+                result.add(info);
+            }
+        }
+        Log.d("DownloadListInfos", "filterByPerPageSize: min=" + perPageFromBytes
+                + ", 过滤后列表大小=" + result.size());
+        return result;
+    }
+
+    /**
+     * 排除规则过滤。
+     *
+     * 命中排除的条目被剔除：分类排除 / Tag 排除 / 关键词排除（名字、作者、Tag、AI 描述）。
+     * 关键词与 Tag 会尝试用标签库解析中英别名，未初始化时退化为原始字符串匹配。
+     */
+    private List<DownloadInfo> applyExclusions(@Nullable List<DownloadInfo> sourceList,
+                                              @Nullable ExcludeRule rule,
+                                              boolean includeGlobal) {
+        List<DownloadInfo> source = sourceList != null ? sourceList : new ArrayList<>();
+        ExcludeRule effective = rule != null ? rule : ExcludeRule.EMPTY;
+        if (includeGlobal) {
+            FilterSettingsStore store = getFilterStore();
+            if (store != null) {
+                ExcludeRule global = store.globalExclude();
+                if (!global.isEmpty()) {
+                    effective = global.plus(effective);
+                }
+            }
+        }
+        if (effective.isEmpty() || source.isEmpty()) {
+            return source;
+        }
+
+        java.util.function.Function<String, List<String>> aliasResolver =
+                buildExcludeAliasResolver(effective);
+        List<DownloadInfo> result = new ArrayList<>(source.size());
+        int excluded = 0;
+        for (DownloadInfo info : source) {
+            FilterMatcher.Fields fields = buildExcludeFields(info);
+            if (FilterMatcher.isExcluded(effective, fields, aliasResolver::apply)) {
+                excluded++;
+            } else {
+                result.add(info);
+            }
+        }
+        Log.d("DownloadListInfos", "applyExclusions: 排除规则=" + effective.getKeywords().size()
+                + " 个关键词 / " + effective.getExcludedTags().size() + " 个 tag / "
+                + effective.getExcludedCategories().size() + " 个分类, 剔除 " + excluded + " 项, 剩余="
+                + result.size());
+        return result;
+    }
+
+    /** 把条目拼成排除匹配需要的字段集合（Tag 与 AI 描述按需懒加载）。 */
+    @NonNull
+    private FilterMatcher.Fields buildExcludeFields(@NonNull DownloadInfo info) {
+        return new FilterMatcher.Fields(
+                info.category, info.title, info.titleJpn, info.uploader,
+                () -> resolveTagTokens(info),
+                () -> aiDescriptionOf(info));
+    }
+
+    /** 汇总条目可见的全部 Tag token（simpleTags + 标签库），带缓存。 */
+    @NonNull
+    private List<String> resolveTagTokens(@NonNull DownloadInfo info) {
+        List<String> tags = new ArrayList<>();
+        String[] simpleTags = info.simpleTags;
+        if (simpleTags != null) {
+            tags.addAll(Arrays.asList(simpleTags));
+        }
+        ArrayList<String> resolved = info.tgList;
+        if (resolved == null || resolved.isEmpty()) {
+            resolved = searchTagList(info.gid);
+            if (resolved != null && !resolved.isEmpty()) {
+                info.tgList = resolved;
+            }
+        }
+        if (resolved != null) {
+            tags.addAll(resolved);
+        }
+        return tags;
+    }
+
+    @Nullable
+    private static String aiDescriptionOf(@NonNull DownloadInfo info) {
+        try {
+            GalleryAiInfo aiInfo = EhDB.queryGalleryAiInfo(info.gid);
+            if (aiInfo == null) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            appendIfPresent(sb, aiInfo.getSummary());
+            appendIfPresent(sb, aiInfo.getTags());
+            appendIfPresent(sb, aiInfo.getDescriptions());
+            return sb.length() == 0 ? null : sb.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static void appendIfPresent(@NonNull StringBuilder sb, @Nullable String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            sb.append(value).append('\n');
+        }
+    }
+
+    /** 为排除规则里的关键词 / Tag 预解析中英别名，只解析一次。 */
+    @NonNull
+    private java.util.function.Function<String, List<String>> buildExcludeAliasResolver(
+            @NonNull ExcludeRule rule) {
+        final Set<String> terms = new LinkedHashSet<>();
+        for (com.hippo.ehviewer.download.filter.ScopedKeyword keyword : rule.getKeywords()) {
+            if (keyword.getScope() == com.hippo.ehviewer.download.filter.KeywordScope.ANY
+                    || keyword.getScope() == com.hippo.ehviewer.download.filter.KeywordScope.TAG) {
+                terms.add(keyword.getText());
+            }
+        }
+        terms.addAll(rule.getExcludedTags());
+        if (terms.isEmpty()) {
+            return term -> new ArrayList<>();
+        }
+        EhTagDatabase db = null;
+        try {
+            Context context = mContext;
+            if (context == null) {
+                EhApplication app = EhApplication.getInstance();
+                context = app != null ? app.getApplicationContext() : null;
+            }
+            if (context != null) {
+                db = EhTagDatabase.getInstance(context);
+            }
+        } catch (Exception ignored) {
+        }
+        final EhTagDatabase tagDb = db;
+        final Map<String, List<String>> cache = new HashMap<>();
+        return term -> {
+            List<String> cached = cache.get(term);
+            if (cached != null) {
+                return cached;
+            }
+            List<String> aliases = computeAliases(term, tagDb);
+            cache.put(term, aliases);
+            return aliases;
+        };
     }
 
     private List<DownloadInfo> filterByRating(List<DownloadInfo> sourceList, float ratingFrom, float ratingTo) {
@@ -1382,6 +1826,9 @@ public class DownloadListInfosExecutor {
                 filteredList = searchByKeyword(keyword, searchOption, filteredList);
                 Log.d("DownloadListInfos", "executeAdvancedSearch: 关键词搜索完成，列表大小=" + filteredList.size());
             }
+
+            // 全局排除规则对搜索同样生效
+            filteredList = applyExclusions(filteredList, ExcludeRule.EMPTY, true);
             
             // 最后应用排序
             if (sortId != R.id.sort_by_default) {
@@ -1446,6 +1893,9 @@ public class DownloadListInfosExecutor {
             SearchDebugLog.d("DownloadSearch", "  " + (matched ? "MATCH  " : "NO-MATCH") + info.gid
                     + " title=" + info.title);
         }
+
+        // 工具栏文本搜索同样受全局排除规则约束
+        cache = applyExclusions(cache, ExcludeRule.EMPTY, true);
 
         return cache;
     }
@@ -1872,8 +2322,12 @@ public class DownloadListInfosExecutor {
         return list;
     }
 
+    /** 语义通道的候选集上限：超过后收益递减且耗时上升，直接走纯关键词匹配。 */
+    private static final int MAX_SEMANTIC_CANDIDATES = 5000;
+
     // 新增方法：根据关键词和搜索选项进行搜索
     private List<DownloadInfo> searchByKeyword(String keyword, int searchOption, List<DownloadInfo> sourceList) {
+        // 语义通道的候选集上限：超过后收益递减且耗时上升，直接走纯关键词匹配
         List<DownloadInfo> list = new ArrayList<>();
         if (sourceList == null || keyword == null || keyword.isEmpty()) {
             return sourceList != null ? sourceList : new ArrayList<>();
@@ -1916,7 +2370,56 @@ public class DownloadListInfosExecutor {
                 list.add(info);
             }
         }
-        return list;
+        return appendSemanticMatches(list, keyword, sourceList);
+    }
+
+    /**
+     * 语义搜索补充召回（实验室功能「语义搜索」）。
+     *
+     * <p>关键词通道只能命中字面包含关键词的条目；启用语义搜索后，这里补上
+     * 「语义相近但字面不匹配」的下载条目，并按混合权重重新排序。
+     * 功能关闭、索引为空或推理失败时返回原列表，行为与之前完全一致。
+     *
+     * <p>调用方均为后台线程（service executor），因此这里的模型推理不会阻塞 UI。
+     */
+    private List<DownloadInfo> appendSemanticMatches(List<DownloadInfo> matched,
+                                                      String keyword,
+                                                      List<DownloadInfo> candidates) {
+        try {
+            if (!SemanticSearchManager.isEnabled()) {
+                return matched;
+            }
+            // 候选集过大时语义通道收益下降且耗时上升，超过阈值直接跳过
+            if (candidates == null || candidates.size() > MAX_SEMANTIC_CANDIDATES) {
+                return matched;
+            }
+            List<SemanticRanker.Result> ranked =
+                    SemanticRanker.search(candidates, keyword, Math.max(matched.size() * 4, 50));
+            if (ranked.isEmpty()) {
+                return matched;
+            }
+
+            Map<Long, DownloadInfo> byGid = new HashMap<>();
+            for (DownloadInfo info : matched) {
+                byGid.put(info.gid, info);
+            }
+            for (SemanticRanker.Result result : ranked) {
+                if (byGid.containsKey(result.gid)) {
+                    continue;
+                }
+                for (DownloadInfo info : candidates) {
+                    if (info.gid == result.gid) {
+                        matched.add(info);
+                        byGid.put(info.gid, info);
+                        break;
+                    }
+                }
+            }
+            return matched;
+        } catch (Throwable t) {
+            Log.w("DownloadListInfos", "appendSemanticMatches failed: " + t);
+            return matched;
+        }
     }
 
     /**

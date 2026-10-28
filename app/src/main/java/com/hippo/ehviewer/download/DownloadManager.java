@@ -44,6 +44,7 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadHistory;
 import com.hippo.ehviewer.dao.DownloadLabel;
+import com.hippo.ehviewer.sync.GalleryTagsWriter;
 import com.hippo.ehviewer.lab.analyze.AiAnalyzeManager;
 import com.hippo.ehviewer.lab.analyze.model.AiGalleryAnalysis;
 import com.hippo.ehviewer.local.LocalRatingManager;
@@ -51,6 +52,7 @@ import com.hippo.ehviewer.spider.SpiderDen;
 import com.hippo.ehviewer.spider.SpiderInfo;
 import com.hippo.ehviewer.spider.SpiderQueen;
 import com.hippo.ehviewer.task.BackgroundTask;
+import com.hippo.ehviewer.task.DownloadingRecheckTask;
 import com.hippo.ehviewer.task.PreDownloadMergeTask;
 import com.hippo.ehviewer.task.PreDownloadMergeTask.Outcome;
 import com.hippo.ehviewer.task.PtokenIndexUpdater;
@@ -68,6 +70,8 @@ import com.hippo.lib.yorozuya.SimpleHandler;
 import com.hippo.lib.yorozuya.collect.LongList;
 import com.hippo.lib.yorozuya.collect.SparseIJArray;
 import com.hippo.lib.yorozuya.collect.SparseJLArray;
+
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -140,6 +144,11 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     // 等待列表预碰撞检测任务 gid -> taskId，用于停止按钮取消检测。
     // 与 mPreMergeTaskIds 共享并发控制（mPreMergeSemaphore / mPendingPreMerge）。
     private final Map<Long, String> mWaitListCheckTaskIds = new HashMap<>();
+
+    // 下载中重预检任务 id（同一时刻只允许一个）与被停止任务的原始状态，用于完成后恢复。
+    @Nullable
+    private String mRecheckDownloadingTaskId;
+    private final Map<Long, Integer> mRecheckOriginalStates = new HashMap<>();
 
     // 预下载简单重复画廊扫描并发限制：同时最多运行 MAX_CONCURRENT_PRE_MERGE 个扫描任务，
     // 其余进入 mPendingPreMerge 等待队列，槽位释放后自动接力，避免依次添加大量画廊时拖垮手机性能。
@@ -296,6 +305,18 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
         }
     }
 
+    /**
+     * 设备间同步（§5.30）应用完一批远端元数据后，通知所有列表刷新。
+     *
+     * <p>同步器运行在后台线程，批量写入数据库后调用一次，避免逐条触发 UI 重绘。
+     * 必须在主线程调用。
+     */
+    public void notifySyncedExternal() {
+        for (DownloadInfoListener l : mDownloadInfoListeners) {
+            l.onUpdateAll();
+        }
+    }
+
     @Nullable
     private LinkedList<DownloadInfo> getInfoListForLabel(String label) {
         if (label == null) {
@@ -379,6 +400,47 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     public List<GalleryInfo> getDownloadInfoList() {
         return new ArrayList<>(mAllInfoList);
+    }
+
+    /**
+     * 传输/后台线程安全读取：返回全部下载信息的快照副本。
+     *
+     * <p>底层 {@code mAllInfoList} 是 {@link LinkedList}，且会在主线程被并发增删。
+     * 传输 API 在多下载同时运行时逐个画廊格式化，若直接迭代这个活列表，
+     * 迭代器会在并发修改时抛 {@link java.util.ConcurrentModificationException}
+     * 或数组越界。这里拷贝失败时重试一次，尽量给出稳定快照。
+     */
+    @NonNull
+    public List<DownloadInfo> getAllDownloadInfoSnapshot() {
+        return copyDownloadListSafely(mAllInfoList);
+    }
+
+    /** 传输/后台线程安全读取：默认标签下载信息的快照副本。 */
+    @NonNull
+    public List<DownloadInfo> getDefaultDownloadInfoSnapshot() {
+        return copyDownloadListSafely(mDefaultInfoList);
+    }
+
+    /** 传输/后台线程安全读取：指定标签下载信息的快照副本；标签不存在返回 null。 */
+    @Nullable
+    public List<DownloadInfo> getLabelDownloadInfoSnapshot(String label) {
+        List<DownloadInfo> list = mMap.get(label);
+        return list == null ? null : copyDownloadListSafely(list);
+    }
+
+    private static List<DownloadInfo> copyDownloadListSafely(List<DownloadInfo> src) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                return new ArrayList<>(src);
+            } catch (RuntimeException e) {
+                if (attempt == 0) {
+                    // 并发修改，稍后重试
+                    continue;
+                }
+                Log.w(TAG, "copyDownloadListSafely failed, returning empty snapshot", e);
+            }
+        }
+        return new ArrayList<>();
     }
 
     @NonNull
@@ -526,6 +588,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 info.pages = pages;
                 info.total = pages;
                 EhDB.putDownloadInfo(info);
+                // pages 就绪后补跑一次此前因 pages=0 被跳过的预检
+                dedupeProgressiveWaitTasks(info);
             }
         }
 
@@ -535,6 +599,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             mWaitList.addFirst(info);
             fetchPagesAndReroute(info);
             return -1;
+        }
+
+        // 3. 所有页已在磁盘（预合并进来/先前已下）→ 直接完成，无需委托系统 DM
+        if (allPagesOnDisk(info, pages)) {
+            Log.i(TAG, "SystemDM: 所有页已在磁盘，直接完成 gid=" + info.gid + " pages=" + pages);
+            mCurrentTask = info;
+            onSystemDMGalleryFinished(info.gid);
+            return 1;
         }
 
         mCurrentTask = info;
@@ -595,8 +667,14 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             } catch (Throwable t) {
                 Log.w(TAG, "fetchPagesAndReroute failed for gid=" + gid, t);
             }
-            // 回到主线程触发 ensureDownload
+            // 回到主线程：pages 已就绪，补跑一次此前因 pages=0 被跳过的预检，再 ensureDownload
             SimpleHandler.getInstance().post(() -> {
+                if (mAllInfoMap.get(gid) == null) {
+                    return;
+                }
+                // 加入下载时 info.pages 还是 0，dedupeProgressiveWaitTasks 会直接跳过；
+                // 这里 pages 已知，重新触发预碰撞检测，否则预检永远不会执行。
+                dedupeProgressiveWaitTasks(info);
                 // 如果 info 已经被 stop / delete 了，跳过
                 if (!mWaitList.contains(info) && mCurrentTask != null && mCurrentTask.gid != gid) {
                     return;
@@ -667,12 +745,53 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      * 用于 FinalizeWorker 完成单张图后判断是否需要调用 onSystemDMGalleryFinished。
      */
     public boolean isSystemDMAllDone(long gid) {
+        DownloadInfo info = mAllInfoMap.get(gid);
+        if (info == null) {
+            return false;
+        }
+        int pages = info.pages;
+        if (pages <= 0) {
+            return false;
+        }
+
+        // 已入队任务必须全部 SUCCESS
         java.util.List<com.hippo.ehviewer.dao.SystemDownloadTask> tasks =
                 EhDB.getSystemDownloadTasksForGid(gid);
-        if (tasks == null || tasks.isEmpty()) return false;
-        for (com.hippo.ehviewer.dao.SystemDownloadTask t : tasks) {
-            String s = t.getStatus();
-            if (!com.hippo.ehviewer.dao.SystemDownloadTask.STATUS_SUCCESS.equals(s)) {
+        if (tasks != null) {
+            for (com.hippo.ehviewer.dao.SystemDownloadTask t : tasks) {
+                String s = t.getStatus();
+                if (!com.hippo.ehviewer.dao.SystemDownloadTask.STATUS_SUCCESS.equals(s)) {
+                    return false;
+                }
+            }
+        }
+
+        // 且每一页都在磁盘存在（含预合并进来的、被跳过入队的页）
+        UniFile dir = SpiderDen.getExistingGalleryDownloadDir(info);
+        if (dir == null) {
+            return false;
+        }
+        for (int i = 0; i < pages; i++) {
+            if (SpiderDen.findImageFile(dir, i) == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 画廊所有页是否都已在磁盘存在（用于系统 DM 判断是否还有缺失页需要下载）。
+     */
+    private boolean allPagesOnDisk(DownloadInfo info, int pages) {
+        if (info == null || pages <= 0) {
+            return false;
+        }
+        UniFile dir = SpiderDen.getExistingGalleryDownloadDir(info);
+        if (dir == null) {
+            return false;
+        }
+        for (int i = 0; i < pages; i++) {
+            if (SpiderDen.findImageFile(dir, i) == null) {
                 return false;
             }
         }
@@ -1058,6 +1177,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                     Log.e(TAG, "repairGalleryInfo: failed to save cache for gid=" + gid, cacheErr);
                 }
                 Log.i(TAG, "repairGalleryInfo: success for gid=" + gid);
+                // 修复顺手补齐 Gallery_Tags：让「修复全部已下载画廊」同时成为老库的标签回填手段
+                GalleryTagsWriter.saveFromGalleryInfo(galleryDetail);
                 return true;
             }
         } catch (Throwable e) {
@@ -1095,6 +1216,8 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 if (cachedDetail.uploader != null) info.uploader = cachedDetail.uploader;
                 // 更新数据库
                 EhDB.putDownloadInfo(info);
+                // 缓存里带着标签时一并补齐 Gallery_Tags（与 repairGalleryInfo 一致）
+                GalleryTagsWriter.saveFromGalleryInfo(cachedDetail);
                 Log.i(TAG, "repairFromCache: success for gid=" + gid);
                 return true;
             } else {
@@ -1156,6 +1279,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
             // Save to
             EhDB.putDownloadInfo(info);
+
+            // 标签入库（恢复/导入的 DownloadInfo 可能带着内存里的标签）
+            GalleryTagsWriter.saveFromGalleryInfo(info);
         }
 
         // Sort all download list
@@ -1225,6 +1351,10 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
             }
         }
 
+        // 标签入库：排除规则 / 标签搜索 / 无标签筛选 / 标签联想只认 Gallery_Tags，
+        // 而它历史上只在打开详情页时写入。列表/收藏/历史等来源的标签在这里补齐。
+        GalleryTagsWriter.saveFromGalleryInfo(galleryInfo);
+
         // Add to wait list if state is WAIT
         if (state == DownloadInfo.STATE_WAIT) {
             // 手动发起下载（列表/详情批量添加）：清空「停止全部 → 开始全部」自动循环的重试计数
@@ -1268,16 +1398,20 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
 
     /**
      * 是否需要预下载合并：开关开启且非导入压缩包。
+     *
+     * 系统下载管理器同样允许预合并：预合并产物使用标准 %08d.ext 命名并写入 .ehviewer，
+     * 与 SystemDownloadFinalizeWorker 的落盘规则一致，随后 SystemDMBackend.start 只对磁盘缺失的页入队。
      */
     private boolean shouldPreMergeDownload(DownloadInfo info) {
         if (!Settings.getMergeOnDownload()) {
+            Log.i(TAG, "预下载合并跳过：'下载时合并相同画廊' 未开启 gid=" + info.gid);
             return false;
         }
-        if (Settings.getUseSystemDownloadManager()) {
-            // 系统下载服务写入的文件命名/路径不同，预合并会与之冲突，跳过
+        if (info.archiveUri != null) {
+            Log.i(TAG, "预下载合并跳过：本地压缩包导入 gid=" + info.gid);
             return false;
         }
-        return info.archiveUri == null;
+        return true;
     }
 
     /**
@@ -1630,17 +1764,33 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
      */
     private void dedupeProgressiveWaitTasks(@Nullable DownloadInfo trigger) {
         if (!Settings.getMergeOnDownload()) {
-            return;
-        }
-        if (mWaitList.size() < 2) {
+            Log.i(TAG, "预检跳过：'下载时合并相同画廊' 未开启");
             return;
         }
         if (trigger == null) {
             return;
         }
         if (trigger.pages <= 0) {
+            Log.i(TAG, "预检跳过：gid=" + trigger.gid + " 页数未知(pages=" + trigger.pages + ")");
             return;
         }
+        // 是否存在同名（同作者）的其他画廊（等待/未开始/失败/已完成）作为候选。
+        // 不再要求 mWaitList.size() >= 2：单个等待项也可能与已下载完成的画廊构成递进关系。
+        boolean hasCandidate = false;
+        for (DownloadInfo info : mAllInfoList) {
+            if (info.gid == trigger.gid) continue;
+            if (info.state == DownloadInfo.STATE_DOWNLOAD
+                    || info.state == DownloadInfo.STATE_RELAY_DOWNLOAD) continue;
+            if (SpiderTokenUtils.isSameCoreTitleAndAuthor(trigger, info)) {
+                hasCandidate = true;
+                break;
+            }
+        }
+        if (!hasCandidate) {
+            Log.i(TAG, "预检跳过：未发现同名(同作者)的其他画廊 gid=" + trigger.gid);
+            return;
+        }
+        Log.i(TAG, "预检调度：发现同名候选，启动预碰撞检测 gid=" + trigger.gid);
         scheduleWaitListCollisionCheck(trigger);
     }
 
@@ -1827,6 +1977,123 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
     }
 
     /**
+     * 下载中重预检：先停止正在下载的任务，再重跑同名/递进检查并合并，只保留最完整的一个
+     * （图片最多或同名最新）。结果由 {@link DownloadingRecheckTask} 回主线程后重新排队。
+     */
+    public void recheckDownloadingTasks() {
+        if (mRecheckDownloadingTaskId != null) {
+            Log.i(TAG, "重预检已在运行，忽略重复触发");
+            return;
+        }
+        // 收集可重预检的任务：闲置/排队/下载中/失败/更新/接力等「非已完成」状态
+        // （排除已完成 FINISH 与无效 INVALID；本地压缩包无 .ehviewer 目录，跳过）
+        final List<Long> gids = new ArrayList<>();
+        for (DownloadInfo info : mAllInfoList) {
+            if (info.archiveUri != null) continue;
+            int state = info.state;
+            if (state == DownloadInfo.STATE_FINISH || state == DownloadInfo.STATE_INVALID) continue;
+            gids.add(info.gid);
+        }
+        if (gids.isEmpty()) {
+            Toast.makeText(mContext, R.string.recheck_downloading_none, Toast.LENGTH_SHORT).show();
+            Log.i(TAG, "重预检跳过：没有可重预检的任务");
+            return;
+        }
+
+        // 记录原始状态并停止，避免合并时与正在写入的目录冲突
+        mRecheckOriginalStates.clear();
+        for (long gid : gids) {
+            DownloadInfo info = mAllInfoMap.get(gid);
+            if (info == null) continue;
+            mRecheckOriginalStates.put(gid, info.state);
+            if (info.state == DownloadInfo.STATE_RELAY_DOWNLOAD) {
+                cancelRelayDownload(gid);
+            } else {
+                stopDownloadInternal(gid);
+            }
+        }
+
+        DownloadingRecheckTask task = new DownloadingRecheckTask(mContext, gids,
+                new DownloadingRecheckTask.Callback() {
+                    @Override
+                    public void onProgress(int percent, String detail) {
+                        // 进度在后台任务列表查看，这里无需额外处理
+                    }
+
+                    @Override
+                    public void onFinished(DownloadingRecheckTask.RecheckResult result) {
+                        finishRecheckDownloading(result);
+                    }
+                });
+        mRecheckDownloadingTaskId = task.getTaskId();
+        com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+    }
+
+    /**
+     * 下载中重预检完成后的收尾：移除被判定为旧版本/重复的任务，并把保留下来的任务重新入队。
+     */
+    private void finishRecheckDownloading(@Nullable DownloadingRecheckTask.RecheckResult result) {
+        mRecheckDownloadingTaskId = null;
+        if (result == null) {
+            for (DownloadInfoListener l : mDownloadInfoListeners) {
+                l.onUpdateAll();
+            }
+            ensureDownload();
+            mRecheckOriginalStates.clear();
+            return;
+        }
+
+        // 移除被合并/淘汰的任务（任务侧已删除目录并记录合并历史）
+        for (long removed : result.getRemovedGids()) {
+            removePendingAfterPreMerge(removed);
+        }
+
+        // 保留者按原始状态恢复：原本在下载/排队 → 重新排队继续；接力仍为接力；
+        // 闲置/失败/更新 → 恢复原状态，不自动排队
+        for (long kept : result.getKeptGids()) {
+            DownloadInfo info = mAllInfoMap.get(kept);
+            if (info == null) continue;
+            Integer original = mRecheckOriginalStates.get(kept);
+            int originalState = original != null ? original : DownloadInfo.STATE_NONE;
+            info.phase = DownloadInfo.PHASE_IDLE;
+            info.mergeDetail = null;
+            if (originalState == DownloadInfo.STATE_RELAY_DOWNLOAD) {
+                info.state = DownloadInfo.STATE_RELAY_DOWNLOAD;
+                info.speed = 0;
+                info.remaining = 0;
+                EhDB.putDownloadInfo(info);
+                continue;
+            }
+            if (originalState == DownloadInfo.STATE_DOWNLOAD
+                    || originalState == DownloadInfo.STATE_WAIT) {
+                info.speed = 0;
+                info.finished = 0;
+                info.downloaded = 0;
+                info.total = 0;
+                info.state = DownloadInfo.STATE_WAIT;
+                if (!mWaitList.contains(info)) {
+                    mWaitList.add(info);
+                }
+            } else {
+                info.speed = 0;
+                info.state = originalState;
+            }
+            EhDB.putDownloadInfo(info);
+        }
+        mRecheckOriginalStates.clear();
+
+        for (DownloadInfoListener l : mDownloadInfoListeners) {
+            l.onUpdateAll();
+        }
+        ensureDownload();
+        Toast.makeText(
+                mContext,
+                mContext.getString(R.string.recheck_downloading_done,
+                        result.getGroupsChecked(), result.getRemovedGids().size(), result.getMergedCount()),
+                Toast.LENGTH_SHORT).show();
+    }
+
+    /**
      * 移除旧的递进关系下载任务，并在下载历史中标记为重复画廊。
      */
     private void removeOldProgressiveTask(DownloadInfo info, long keptGid) {
@@ -1911,6 +2178,9 @@ public class DownloadManager implements SpiderQueen.OnSpiderListener {
                 Log.e(TAG, "addDownloadInfo: failed to save cache for gid=" + galleryInfo.gid, cacheErr);
             }
         }
+
+        // 标签入库（同 addDownload）：让标签规则对这次新加的条目立刻可见
+        GalleryTagsWriter.saveFromGalleryInfo(galleryInfo);
     }
 
 

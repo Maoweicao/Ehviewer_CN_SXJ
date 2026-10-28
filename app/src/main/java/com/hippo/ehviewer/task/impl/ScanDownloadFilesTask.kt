@@ -7,6 +7,7 @@ import com.hippo.ehviewer.DownloadedFileManagerScanListener
 import com.hippo.ehviewer.task.BackgroundTask
 import com.hippo.ehviewer.task.TaskState
 import com.hippo.ehviewer.task.BackgroundTask.TaskType
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 
@@ -17,6 +18,9 @@ class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
     
     @Volatile
     private var isPausedFlag = false
+
+    /** cancel() 置位，扫描循环据此抛出 CancellationException 自行收尾。 */
+    @Volatile private var isCancelledFlag = false
     
     override fun getTaskId(): String = "scan_download_files"
     
@@ -91,7 +95,10 @@ class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
             updateProgress(100, context.getString(R.string.scan_download_files_completed))
             notifyCompleted()
             Result.success(Unit)
-            
+
+        } catch (e: CancellationException) {
+            // cancel() 里已经 notifyCancelled() 过了，别再报成错误
+            Result.failure(e)
         } catch (e: Exception) {
             notifyError(e)
             Result.failure(e)
@@ -115,14 +122,31 @@ class ScanDownloadFilesTask(context: Context) : BaseBackgroundTask(context) {
         updateState(TaskState.RUNNING)
         appendTaskLog("任务已恢复")
     }
-    
+
+    /**
+     * 优雅取消：置标志让扫描循环自己停下来。
+     *
+     * 之前这个任务宣称 isPausable()=true 却没有实现 cancel()，
+     * BackgroundTaskController 会吞掉 UnsupportedOperationException 返回 false，
+     * 用户点「取消」就毫无反应，只能靠 Future.cancel(true) 硬中断。
+     */
+    override suspend fun cancel() {
+        isCancelledFlag = true
+        isPausedFlag = false
+        appendTaskLog("任务已取消")
+        notifyCancelled()
+    }
+
     /**
      * 检查暂停状态，如果暂停则等待
      * 注意：由于扫描是异步的，暂停效果会在下次进度回调时生效
      */
     private suspend fun checkPauseState() {
-        while (isPausedFlag) {
+        while (isPausedFlag && !isCancelledFlag) {
             delay(200)
+        }
+        if (isCancelledFlag) {
+            throw CancellationException("任务已取消")
         }
     }
 }

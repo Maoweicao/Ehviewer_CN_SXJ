@@ -1,6 +1,7 @@
 package com.hippo.ehviewer.download;
 
 import android.content.Context;
+import android.widget.Toast;
 
 import com.hippo.app.CheckBoxDialogBuilder;
 import com.hippo.ehviewer.BackgroundTaskManager;
@@ -11,6 +12,7 @@ import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.task.impl.DeleteRangeDownloadTask;
 import com.hippo.lib.yorozuya.collect.LongList;
+import kotlin.Pair;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,6 +34,7 @@ public final class DownloadDeleteHelper {
 
     /** 单个画廊删除对话框，含"删除本地文件"复选框。 */
     public static void showDeleteDialog(Context context, GalleryInfo info) {
+        DeleteProtectHelper.warmUpAsync();
         CheckBoxDialogBuilder builder = new CheckBoxDialogBuilder(context,
                 context.getString(R.string.download_remove_dialog_message, info.title),
                 context.getString(R.string.download_remove_dialog_check_text),
@@ -40,26 +43,98 @@ public final class DownloadDeleteHelper {
         builder.setPositiveButton(android.R.string.ok, (d, w) -> {
             boolean deleteFiles = builder.isChecked();
             Settings.putRemoveImageFiles(deleteFiles);
-            performDelete(context, info, deleteFiles);
+            // 删除保护：不阻止，只在原有确认之后再问一次。用户再确认就无视规则照删。
+            DeleteProtectHelper.Protection protection = DeleteProtectHelper.isProtected(info);
+            if (protection != null) {
+                confirmProtectedDelete(context, protection, () -> performDelete(context, info, deleteFiles));
+            } else {
+                performDelete(context, info, deleteFiles);
+            }
         });
         builder.setNegativeButton(android.R.string.cancel, null);
         builder.show();
     }
 
+    /**
+     * 受保护画廊的二次删除确认。
+     *
+     * 列出让它受保护的原因（「已加入收藏」/「吸收过 N 个画廊」），
+     * 再点一次「仍要删除」就执行 onConfirm —— 无视所有保护规则。
+     */
+    public static void confirmProtectedDelete(Context context,
+                                              DeleteProtectHelper.Protection protection,
+                                              final Runnable onConfirm) {
+        if (protection == null || onConfirm == null) {
+            return;
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(context)
+                .setTitle(R.string.delete_protect_dialog_title)
+                .setMessage(context.getString(R.string.delete_protect_dialog_message,
+                        protection.describe(context)))
+                .setPositiveButton(R.string.delete_protect_dialog_confirm, (d, w) -> onConfirm.run())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
     /** 批量删除对话框，含"删除本地文件"复选框。 */
     public static void showDeleteRangeDialog(Context context, List<? extends GalleryInfo> list) {
+        DeleteProtectHelper.warmUpAsync();
+        final DeleteProtectHelper.SplitResult split = splitProtected(list);
+        List<? extends GalleryInfo> deletable = split.deletable;
+        int protectedCount = split.getProtectedCount();
+        if (deletable.isEmpty()) {
+            // 全被保护住了，没什么可删的
+            Toast.makeText(context,
+                    context.getString(R.string.delete_protect_batch_skipped, protectedCount),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         CheckBoxDialogBuilder builder = new CheckBoxDialogBuilder(context,
-                context.getString(R.string.download_remove_dialog_message_2, list.size()),
+                buildRangeMessage(context, deletable.size(), protectedCount),
                 context.getString(R.string.download_remove_dialog_check_text),
                 Settings.getRemoveImageFiles());
         builder.setTitle(R.string.download_remove_dialog_title);
         builder.setPositiveButton(android.R.string.ok, (d, w) -> {
             boolean deleteFiles = builder.isChecked();
             Settings.putRemoveImageFiles(deleteFiles);
-            performDeleteRange(context, list, deleteFiles);
+            performDeleteRange(context, deletable, deleteFiles);
+            notifySkipped(context, protectedCount);
         });
         builder.setNegativeButton(android.R.string.cancel, null);
         builder.show();
+    }
+
+    /**
+     * 批量删除的确认文案。有受保护条目时额外说明会跳过几个。
+     */
+    public static String buildRangeMessage(Context context, int deletableCount, int protectedCount) {
+        String base = context.getString(R.string.download_remove_dialog_message_2, deletableCount);
+        if (protectedCount <= 0) {
+            return base;
+        }
+        return base + "\n"
+                + context.getString(R.string.delete_protect_batch_confirm, protectedCount);
+    }
+
+    /** 拆分选中项为「可删」与「受保护」。规则全关时原样返回，不做无谓计算。 */
+    public static DeleteProtectHelper.SplitResult splitProtected(
+            List<? extends GalleryInfo> list) {
+        if (list == null || list.isEmpty()) {
+            return new DeleteProtectHelper.SplitResult(
+                    new ArrayList<GalleryInfo>(),
+                    new ArrayList<Pair<GalleryInfo, DeleteProtectHelper.Protection>>());
+        }
+        return DeleteProtectHelper.splitProtected(new ArrayList<GalleryInfo>(list));
+    }
+
+    /** 删除完成后告诉用户跳过了几个受保护画廊。 */
+    public static void notifySkipped(Context context, int protectedCount) {
+        if (protectedCount <= 0) {
+            return;
+        }
+        Toast.makeText(context,
+                context.getString(R.string.delete_protect_batch_skipped, protectedCount),
+                Toast.LENGTH_SHORT).show();
     }
 
     /** 执行单个画廊删除（提交后台任务）。 */

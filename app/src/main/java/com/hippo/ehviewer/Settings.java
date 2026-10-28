@@ -644,6 +644,72 @@ public class Settings {
         return getBoolean(KEY_SHOW_TAG_TRANSLATIONS, DEFAULT_SHOW_TAG_TRANSLATIONS);
     }
 
+    /**
+     * 标签智能输入：是否把「本地已下载画廊的标签」作为建议来源。
+     */
+    public static final String KEY_TAG_SUGGEST_LOCAL_ENABLED = "tag_suggest_local_enabled";
+    private static final boolean DEFAULT_TAG_SUGGEST_LOCAL_ENABLED = true;
+
+    public static boolean getTagSuggestLocalEnabled() {
+        return getBoolean(KEY_TAG_SUGGEST_LOCAL_ENABLED, DEFAULT_TAG_SUGGEST_LOCAL_ENABLED);
+    }
+
+    /**
+     * 标签智能输入：是否把「在线标签词库」作为建议来源。
+     */
+    public static final String KEY_TAG_SUGGEST_DICT_ENABLED = "tag_suggest_dict_enabled";
+    private static final boolean DEFAULT_TAG_SUGGEST_DICT_ENABLED = true;
+
+    public static boolean getTagSuggestDictEnabled() {
+        return getBoolean(KEY_TAG_SUGGEST_DICT_ENABLED, DEFAULT_TAG_SUGGEST_DICT_ENABLED);
+    }
+
+    // ==================== 递进关系 ====================
+
+    /**
+     * 是否在画廊列表卡片 / 详情页显示「被递进传递的次数」。
+     */
+    public static final String KEY_SHOW_PROGRESSIVE_COUNT = "show_progressive_count";
+    private static final boolean DEFAULT_SHOW_PROGRESSIVE_COUNT = false;
+
+    public static boolean getShowProgressiveCount() {
+        return getBoolean(KEY_SHOW_PROGRESSIVE_COUNT, DEFAULT_SHOW_PROGRESSIVE_COUNT);
+    }
+
+    // ==================== 删除保护 ====================
+
+    /**
+     * 删除保护：批量删除时自动排除「已加入收藏」的画廊。
+     */
+    public static final String KEY_DELETE_PROTECT_FAVORITED = "delete_protect_favorited";
+    private static final boolean DEFAULT_DELETE_PROTECT_FAVORITED = true;
+
+    public static boolean getDeleteProtectFavorited() {
+        return getBoolean(KEY_DELETE_PROTECT_FAVORITED, DEFAULT_DELETE_PROTECT_FAVORITED);
+    }
+
+    /**
+     * 删除保护：批量删除时自动排除「递进传递次数达标」的画廊。
+     */
+    public static final String KEY_DELETE_PROTECT_PROGRESSIVE = "delete_protect_progressive";
+    private static final boolean DEFAULT_DELETE_PROTECT_PROGRESSIVE = false;
+
+    public static boolean getDeleteProtectProgressive() {
+        return getBoolean(KEY_DELETE_PROTECT_PROGRESSIVE, DEFAULT_DELETE_PROTECT_PROGRESSIVE);
+    }
+
+    /**
+     * 递进传递次数达到该值的画廊受删除保护。
+     */
+    public static final String KEY_DELETE_PROTECT_PROGRESSIVE_THRESHOLD =
+            "delete_protect_progressive_threshold";
+    private static final int DEFAULT_DELETE_PROTECT_PROGRESSIVE_THRESHOLD = 3;
+
+    public static int getDeleteProtectProgressiveThreshold() {
+        return getInt(KEY_DELETE_PROTECT_PROGRESSIVE_THRESHOLD,
+                DEFAULT_DELETE_PROTECT_PROGRESSIVE_THRESHOLD);
+    }
+
     public static final String KEY_DEFAULT_CATEGORIES = "default_categories";
     public static final int DEFAULT_DEFAULT_CATEGORIES = EhUtils.ALL_CATEGORY;
 
@@ -1438,8 +1504,9 @@ public class Settings {
         putInt(KEY_WATCHDOG_LOG_RETENTION_MINUTES, Math.max(1, value));
     }
 
-    // ANR 弹窗自动清除：主线程阻塞期间由看门狗定时触发无障碍服务点击"等待"，
-    // 仅在存在活跃后台任务时生效。需要用户在系统设置中开启无障碍服务。
+    // ANR 弹窗自动清除：主线程阻塞期间及恢复后的余震窗口内，由看门狗定时触发
+    // 无障碍服务点击"等待"；存在活跃后台任务或最近刚阻塞过时生效。
+    // 需要用户在系统设置中开启无障碍服务。
     private static final String KEY_ANR_AUTO_DISMISS_ENABLED = "anr_auto_dismiss_enabled";
     private static final boolean DEFAULT_ANR_AUTO_DISMISS_ENABLED = true;
 
@@ -2804,6 +2871,139 @@ public class Settings {
         putBoolean(KEY_AI_ANALYZE_AUTO_ON_FINISH, value);
     }
 
+    // ========== AI语义搜索（实验室） ==========
+
+    public static final String KEY_SEMANTIC_ENABLED = "semantic_enabled";
+    private static final boolean DEFAULT_SEMANTIC_ENABLED = false;
+
+    public static boolean getSemanticEnabled() {
+        return getBoolean(KEY_SEMANTIC_ENABLED, DEFAULT_SEMANTIC_ENABLED);
+    }
+
+    public static void putSemanticEnabled(boolean value) {
+        putBoolean(KEY_SEMANTIC_ENABLED, value);
+    }
+
+    /** 后端模式：auto / native_cpu / native_gpu / remote / off。 */
+    public static final String KEY_SEMANTIC_BACKEND = "semantic_backend";
+    private static final String DEFAULT_SEMANTIC_BACKEND = "auto";
+
+    public static String getSemanticBackend() {
+        return getString(KEY_SEMANTIC_BACKEND, DEFAULT_SEMANTIC_BACKEND);
+    }
+
+    public static void putSemanticBackend(String value) {
+        putString(KEY_SEMANTIC_BACKEND, value);
+    }
+
+    /** 向量维度：768 / 512 / 256 / 128（Matrioshka 截断）。 */
+    public static final String KEY_SEMANTIC_DIM = "semantic_dim";
+    private static final int DEFAULT_SEMANTIC_DIM = 256;
+
+    public static int getSemanticDim() {
+        int value = getIntFromStr(KEY_SEMANTIC_DIM, DEFAULT_SEMANTIC_DIM);
+        return value > 0 ? value : DEFAULT_SEMANTIC_DIM;
+    }
+
+    public static void putSemanticDim(int value) {
+        putIntToStr(KEY_SEMANTIC_DIM, value);
+    }
+
+    /** 端侧模型 id，见 ModelCatalog。 */
+    public static final String KEY_SEMANTIC_MODEL_ID = "semantic_model_id";
+    private static final String DEFAULT_SEMANTIC_MODEL_ID = "";
+
+    public static String getSemanticModelId() {
+        return getString(KEY_SEMANTIC_MODEL_ID, DEFAULT_SEMANTIC_MODEL_ID);
+    }
+
+    public static void putSemanticModelId(String value) {
+        putString(KEY_SEMANTIC_MODEL_ID, value);
+    }
+
+    /** 远程后端地址（OpenAI 兼容 / Ollama / TEI 均可）。 */
+    public static final String KEY_SEMANTIC_REMOTE_URL = "semantic_remote_url";
+    private static final String DEFAULT_SEMANTIC_REMOTE_URL = "";
+
+    public static String getSemanticRemoteUrl() {
+        return getString(KEY_SEMANTIC_REMOTE_URL, DEFAULT_SEMANTIC_REMOTE_URL);
+    }
+
+    public static void putSemanticRemoteUrl(String value) {
+        putString(KEY_SEMANTIC_REMOTE_URL, value);
+    }
+
+    public static final String KEY_SEMANTIC_REMOTE_KEY = "semantic_remote_key";
+    private static final String DEFAULT_SEMANTIC_REMOTE_KEY = "";
+
+    public static String getSemanticRemoteKey() {
+        return getString(KEY_SEMANTIC_REMOTE_KEY, DEFAULT_SEMANTIC_REMOTE_KEY);
+    }
+
+    public static void putSemanticRemoteKey(String value) {
+        putString(KEY_SEMANTIC_REMOTE_KEY, value);
+    }
+
+    public static final String KEY_SEMANTIC_REMOTE_MODEL = "semantic_remote_model";
+    private static final String DEFAULT_SEMANTIC_REMOTE_MODEL = "embeddinggemma-2";
+
+    public static String getSemanticRemoteModel() {
+        return getString(KEY_SEMANTIC_REMOTE_MODEL, DEFAULT_SEMANTIC_REMOTE_MODEL);
+    }
+
+    public static void putSemanticRemoteModel(String value) {
+        putString(KEY_SEMANTIC_REMOTE_MODEL, value);
+    }
+
+    /** 远程协议：openai / ollama / tei。 */
+    public static final String KEY_SEMANTIC_REMOTE_PROTOCOL = "semantic_remote_protocol";
+    private static final String DEFAULT_SEMANTIC_REMOTE_PROTOCOL = "openai";
+
+    public static String getSemanticRemoteProtocol() {
+        return getString(KEY_SEMANTIC_REMOTE_PROTOCOL, DEFAULT_SEMANTIC_REMOTE_PROTOCOL);
+    }
+
+    public static void putSemanticRemoteProtocol(String value) {
+        putString(KEY_SEMANTIC_REMOTE_PROTOCOL, value);
+    }
+
+    /** 索引策略：仅充电时索引。 */
+    public static final String KEY_SEMANTIC_INDEX_ON_CHARGE = "semantic_index_on_charge";
+    private static final boolean DEFAULT_SEMANTIC_INDEX_ON_CHARGE = true;
+
+    public static boolean getSemanticIndexOnCharge() {
+        return getBoolean(KEY_SEMANTIC_INDEX_ON_CHARGE, DEFAULT_SEMANTIC_INDEX_ON_CHARGE);
+    }
+
+    public static void putSemanticIndexOnCharge(boolean value) {
+        putBoolean(KEY_SEMANTIC_INDEX_ON_CHARGE, value);
+    }
+
+    /** GPU 加速批量索引（仅 Adreno 等 Vulkan 良好设备自动启用）。 */
+    public static final String KEY_SEMANTIC_GPU_INDEX = "semantic_gpu_index";
+    private static final boolean DEFAULT_SEMANTIC_GPU_INDEX = true;
+
+    public static boolean getSemanticGpuIndex() {
+        return getBoolean(KEY_SEMANTIC_GPU_INDEX, DEFAULT_SEMANTIC_GPU_INDEX);
+    }
+
+    public static void putSemanticGpuIndex(boolean value) {
+        putBoolean(KEY_SEMANTIC_GPU_INDEX, value);
+    }
+
+    /** 关键词与语义的融合权重（0~1，值越大越偏语义）。 */
+    public static final String KEY_SEMANTIC_BLEND = "semantic_blend";
+    private static final float DEFAULT_SEMANTIC_BLEND = 0.65f;
+
+    public static float getSemanticBlend() {
+        float value = getFloat(KEY_SEMANTIC_BLEND, DEFAULT_SEMANTIC_BLEND);
+        return value < 0f ? 0f : (value > 1f ? 1f : value);
+    }
+
+    public static void putSemanticBlend(float value) {
+        putFloat(KEY_SEMANTIC_BLEND, value);
+    }
+
     // ========== 高级设置 ==========
 
     public static final String KEY_AI_TRANSLATE_SKIP_ANIMATED = "ai_translate_skip_animated";
@@ -2896,6 +3096,40 @@ public class Settings {
         putString(KEY_REMOTE_TOKEN, value);
     }
 
+    // ==================== 设备间快速同步（§5.30） ====================
+
+    public static final String LAB_SYNC_DIRECTION_BIDIRECTIONAL = "bidirectional";
+    public static final String LAB_SYNC_DIRECTION_PULL = "pull";
+    public static final String LAB_SYNC_DIRECTION_PUSH = "push";
+
+    public static final String KEY_LAB_SYNC_DIRECTION = "lab_sync_direction";
+    private static final String DEFAULT_LAB_SYNC_DIRECTION = LAB_SYNC_DIRECTION_BIDIRECTIONAL;
+
+    /**
+     * 手动/自动化同步的默认方向。
+     *
+     * <ul>
+     *   <li>{@code bidirectional}：双方互拉；</li>
+     *   <li>{@code pull}：本机拉取对端；对端在会话中自动成为提供方；</li>
+     *   <li>{@code push}：本机推给对端；对端在会话中自动反向拉取本机。</li>
+     * </ul>
+     */
+    public static String getLabSyncDirection() {
+        String value = getString(KEY_LAB_SYNC_DIRECTION, DEFAULT_LAB_SYNC_DIRECTION);
+        if (LAB_SYNC_DIRECTION_PULL.equals(value) || LAB_SYNC_DIRECTION_PUSH.equals(value)
+                || LAB_SYNC_DIRECTION_BIDIRECTIONAL.equals(value)) {
+            return value;
+        }
+        return DEFAULT_LAB_SYNC_DIRECTION;
+    }
+
+    public static void putLabSyncDirection(String value) {
+        if (LAB_SYNC_DIRECTION_PULL.equals(value) || LAB_SYNC_DIRECTION_PUSH.equals(value)
+                || LAB_SYNC_DIRECTION_BIDIRECTIONAL.equals(value)) {
+            putString(KEY_LAB_SYNC_DIRECTION, value);
+        }
+    }
+
     // 分页大小
     public static final String KEY_SELECTOR_PAGE_SIZE = "selector_page_size";
     private static final int DEFAULT_SELECTOR_PAGE_SIZE = 20;
@@ -2942,6 +3176,30 @@ public class Settings {
 
     public static void putRemotePageUploadEnabled(boolean value) {
         putBoolean(KEY_REMOTE_PAGE_UPLOAD_ENABLED, value);
+    }
+
+    // 辅助下载开关（§5.24 全部端点总开关，默认关闭）
+    public static final String KEY_AUX_DOWNLOAD_ENABLED = "aux_download_enabled";
+    private static final boolean DEFAULT_AUX_DOWNLOAD_ENABLED = false;
+
+    public static boolean isAuxDownloadEnabled() {
+        return getBoolean(KEY_AUX_DOWNLOAD_ENABLED, DEFAULT_AUX_DOWNLOAD_ENABLED);
+    }
+
+    public static void putAuxDownloadEnabled(boolean value) {
+        putBoolean(KEY_AUX_DOWNLOAD_ENABLED, value);
+    }
+
+    // 辅助下载局域网免认证（lab.config.auxDownload.trustLan）
+    public static final String KEY_AUX_DOWNLOAD_TRUST_LAN = "aux_download_trust_lan";
+    private static final boolean DEFAULT_AUX_DOWNLOAD_TRUST_LAN = false;
+
+    public static boolean isAuxDownloadTrustLan() {
+        return getBoolean(KEY_AUX_DOWNLOAD_TRUST_LAN, DEFAULT_AUX_DOWNLOAD_TRUST_LAN);
+    }
+
+    public static void putAuxDownloadTrustLan(boolean value) {
+        putBoolean(KEY_AUX_DOWNLOAD_TRUST_LAN, value);
     }
 
     // 自动接收书签

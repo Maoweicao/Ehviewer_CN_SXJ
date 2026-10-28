@@ -1,7 +1,6 @@
 package com.hippo.ehviewer.task
 
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.util.Log
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
@@ -11,14 +10,12 @@ import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.spider.SpiderInfo
 import com.hippo.ehviewer.spider.SpiderQueen
+import com.hippo.ehviewer.task.TaskState
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import com.hippo.lib.yorozuya.SimpleHandler
 import com.hippo.unifile.UniFile
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import java.io.BufferedInputStream
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 
@@ -58,7 +55,13 @@ class PreDownloadMergeTask(
     @Volatile
     private var finishPosted = false
 
-    override fun getTaskId(): String = "pre_download_merge_${gid}_${System.currentTimeMillis()}"
+    @Volatile private var isPaused = false
+    @Volatile private var isCancelled = false
+
+    // 任务 id 必须稳定：注册与 appendTaskLog 都调用 getTaskId()，不能每次返回新时间戳。
+    private val taskId = "pre_download_merge_${gid}_${System.currentTimeMillis()}"
+
+    override fun getTaskId(): String = taskId
 
     override fun getTaskName(): String = context.getString(R.string.pre_download_merge_task_name)
 
@@ -316,49 +319,28 @@ class PreDownloadMergeTask(
             return
         }
         val candidateDir = SpiderDen.getExistingGalleryDownloadDir(candidate) ?: return
-        val candidateSpi = readCandidateSpiderInfo(candidateDir) ?: return
+        val candidateSpi = PreDownloadMergeEngine.readSpiderInfo(candidateDir) ?: return
         val target = getOrCreateTargetDir(newInfo, newSpi) ?: return
         logAndProgress(
             base,
             "合并候选画廊 ${candidate.gid}（${candidateSpi.pTokenMap.size()} 页），剪切重复文件..."
         )
 
-        val totalFiles = maxOf(candidateSpi.pTokenMap.size(), 1)
-        var moved = 0
-        var invalid = 0
-        var processed = 0
-        for (i in 0 until candidateSpi.pTokenMap.size()) {
-            ensureNotCancelled()
-            val srcIndex = candidateSpi.pTokenMap.keyAt(i)
-            val hash = candidateSpi.pTokenMap.valueAt(i)
-            if (hash.isNullOrEmpty() || hash == SpiderInfo.TOKEN_FAILED) continue
-            val newIndex = hashToNewIndex[hash] ?: continue
-            val srcFile = SpiderDen.findImageFile(candidateDir, srcIndex) ?: continue
-            val ext = extensionOf(srcFile.name)
-            val targetName = String.format(Locale.US, "%08d%s", newIndex + 1, ext)
-            if (target.findFile(targetName) != null) {
-                continue
-            }
-            val targetFile = target.createFile(targetName) ?: continue
-            if (copyFile(srcFile, targetFile)) {
-                if (isValidImage(targetFile)) {
-                    srcFile.delete()
-                    moved++
-                } else {
-                    targetFile.delete()
-                    invalid++
-                }
-            } else {
-                targetFile.delete()
-            }
-            processed++
-            postProgress(
-                base + span * processed / totalFiles,
-                "合并候选画廊 ${candidate.gid}：已剪切 $moved 个文件"
-            )
-        }
+        val stats = PreDownloadMergeEngine.copyMatchingFiles(
+            candidateDir = candidateDir,
+            candidateSpi = candidateSpi,
+            target = target,
+            hashToNewIndex = hashToNewIndex,
+            onProgress = { processed, total, moved ->
+                postProgress(
+                    base + span * processed / total,
+                    "合并候选画廊 ${candidate.gid}：已剪切 $moved 个文件"
+                )
+            },
+            checkCancelled = { ensureNotCancelled() }
+        )
 
-        if (deleteRecursively(candidateDir)) {
+        if (PreDownloadMergeEngine.deleteRecursively(candidateDir)) {
             EhDB.recordDownloadAsDuplicate(
                 candidate, DownloadHistory.DELETION_PROGRESSIVE_MERGED, newInfo.gid
             )
@@ -370,107 +352,55 @@ class PreDownloadMergeTask(
         }
         Log.i(
             TAG,
-            "预下载合并: gid=${candidate.gid} -> ${newInfo.gid}，剪切 $moved 个文件，删除 $invalid 个损坏文件"
+            "预下载合并: gid=${candidate.gid} -> ${newInfo.gid}，剪切 ${stats.moved} 个文件，删除 ${stats.invalid} 个损坏文件"
         )
         logAndProgress(
             base + span,
-            "候选画廊 ${candidate.gid} 合并完成：剪切 $moved 个，删除损坏 $invalid 个"
+            "候选画廊 ${candidate.gid} 合并完成：剪切 ${stats.moved} 个，删除损坏 ${stats.invalid} 个"
         )
-    }
-
-    private fun readCandidateSpiderInfo(dir: UniFile): SpiderInfo? {
-        val f = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null
-        return SpiderInfo.read(f)
     }
 
     private fun getOrCreateTargetDir(info: DownloadInfo, newSpi: SpiderInfo): UniFile? {
         targetDir?.let { return it }
-        val dir = SpiderDen.getGalleryDownloadDir(info) ?: return null
-        if (!dir.ensureDir()) return null
-        // 预写 .ehviewer，下载时 SpiderQueen 复用并按此跳过已存在文件
-        writeSpiderInfo(dir, newSpi)
+        val dir = PreDownloadMergeEngine.ensureTargetDir(info, newSpi, writeInfo = true) ?: return null
         targetDir = dir
         return dir
     }
 
-    private fun writeSpiderInfo(dir: UniFile, spi: SpiderInfo) {
-        try {
-            val f = dir.createFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return
-            f.openOutputStream().use { os -> spi.write(os) }
-        } catch (_: Throwable) {
-        }
-    }
-
-    private fun copyFile(source: UniFile, target: UniFile): Boolean {
-        var inputStream: InputStream? = null
-        var outputStream: OutputStream? = null
-        return try {
-            inputStream = BufferedInputStream(source.openInputStream())
-            outputStream = target.openOutputStream()
-            val buffer = ByteArray(8192)
-            while (true) {
-                val count = inputStream.read(buffer)
-                if (count == -1) break
-                outputStream?.write(buffer, 0, count)
-            }
-            outputStream?.flush()
-            true
-        } catch (_: Throwable) {
-            false
-        } finally {
-            closeQuietly(inputStream)
-            closeQuietly(outputStream)
-        }
-    }
-
-    /** 校验图片完整性：解码头部 + 非空。 */
-    private fun isValidImage(file: UniFile): Boolean {
-        var inputStream: InputStream? = null
-        return try {
-            inputStream = file.openInputStream()
-            val opts = BitmapFactory.Options()
-            opts.inJustDecodeBounds = true
-            BitmapFactory.decodeStream(inputStream, null, opts)
-            opts.outWidth > 0 && opts.outHeight > 0 && opts.outMimeType != null
-        } catch (_: Throwable) {
-            false
-        } finally {
-            closeQuietly(inputStream)
-        }
-    }
-
-    private fun deleteRecursively(file: UniFile?): Boolean {
-        if (file == null || !file.exists()) return true
-        if (file.isDirectory) {
-            val children = file.listFiles()
-            if (children != null) {
-                for (child in children) {
-                    if (!deleteRecursively(child)) return false
-                }
-            }
-        }
-        return file.delete()
-    }
-
-    private fun extensionOf(name: String?): String {
-        if (name.isNullOrEmpty()) return ".jpg"
-        val dot = name.lastIndexOf('.')
-        return if (dot >= 0) name.substring(dot) else ".jpg"
-    }
-
-    private fun closeQuietly(closeable: AutoCloseable?) {
-        if (closeable == null) return
-        try {
-            closeable.close()
-        } catch (_: Exception) {
-        }
-    }
-
     private suspend fun ensureNotCancelled() {
+        // 暂停：在这里等，恢复后继续
+        while (isPaused && !isCancelled) {
+            delay(200)
+        }
+        if (isCancelled) {
+            throw kotlinx.coroutines.CancellationException("预下载合并已取消")
+        }
         coroutineContext.ensureActive()
         if (Thread.currentThread().isInterrupted) {
             throw kotlinx.coroutines.CancellationException("预下载合并已取消")
         }
+    }
+
+    // 之前这个任务宣称 isPausable()=true 却没实现 pause/resume/cancel，
+    // BackgroundTaskController 会吞掉 UnsupportedOperationException 返回 false，
+    // 用户在任务列表点暂停/取消都毫无反应。
+    override suspend fun pause() {
+        isPaused = true
+        updateState(TaskState.PAUSED)
+        appendTaskLog("任务已暂停")
+    }
+
+    override suspend fun resume() {
+        isPaused = false
+        updateState(TaskState.RUNNING)
+        appendTaskLog("任务已恢复")
+    }
+
+    override suspend fun cancel() {
+        isCancelled = true
+        isPaused = false
+        appendTaskLog("任务已取消")
+        notifyCancelled()
     }
 
     private fun postProgress(percent: Int, detail: String?) {
