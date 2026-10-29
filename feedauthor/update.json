@@ -1,11 +1,15 @@
 {
-  "version": "2.0.2.5",
+  "version": "2.0.2.6",
   "versionCode": 111,
   "mustUpdate": false,
   "updateContent": {
     "fileDownloadUrl": "",
-    "title": "新版发布2.0.2.5 国庆节快乐~",
+    "title": "新版发布2.0.2.6",
     "content": [
+      "表站图床host过期，紧急修复",
+      "新增下载列表的本地导入筛选功能",
+      "增强画廊信息下载：支持从 CBOR 格式读取 gid/token，并回退到 ComicInfo.xml",
+      "恢复下载改为分批容错获取，单批失败不再丢失整份列表",
       "为 Gallery_Tags 增加 LOCATION 标签分类，并同步更新相关数据库处理",
       "改进 SpiderInfo 解析并增强 RestoreDownloadPreference 功能",
       "添加阅读刷新率设置功能",

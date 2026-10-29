@@ -8,6 +8,8 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.data.GalleryInfo
+import com.hippo.ehviewer.client.parser.ComicInfoParser
+import com.hippo.ehviewer.client.parser.GalleryDetailUrlParser
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.spider.SpiderInfo
 import com.hippo.ehviewer.spider.SpiderQueen
@@ -15,12 +17,12 @@ import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import com.hippo.ehviewer.Settings
 import com.hippo.lib.yorozuya.IOUtils
 import com.hippo.unifile.UniFile
+import com.hippo.util.ExceptionUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import okhttp3.OkHttpClient
 import java.io.IOException
-import java.io.InputStream
 import kotlin.coroutines.coroutineContext
 
 class RestoreDownloadTask(
@@ -103,7 +105,8 @@ class RestoreDownloadTask(
             galleryInfoList.addAll(restoreItemList)
 
             try {
-                EhEngine.fillGalleryListByApi(
+                // 分批容错：单批失败只记日志，不丢掉已经补上的信息
+                EhEngine.fillGalleryListByApiBestEffort(
                     null,
                     httpClient,
                     ArrayList(galleryInfoList),
@@ -125,18 +128,18 @@ class RestoreDownloadTask(
                     throw CancellationException("任务已取消")
                 }
 
-                if (item.title != null) {
-                    try {
-                        downloadManager.addDownload(item, null)
-                        EhDB.putDownloadDirname(item.gid, item.dirname)
-                        successCount++
-                    } catch (e: Exception) {
-                        failCount++
-                        appendTaskLog("添加下载失败: ${item.title} (GID: ${item.gid}): ${e.message}")
-                    }
-                } else {
+                if (item.title.isNullOrEmpty()) {
+                    // 画廊已下架或接口没返回标题时，用目录名兜底，避免整个项目被丢弃
+                    item.title = item.dirname?.takeIf { it.isNotEmpty() }
+                        ?: item.gid.toString()
+                }
+                try {
+                    downloadManager.addDownload(item, null)
+                    EhDB.putDownloadDirname(item.gid, item.dirname)
+                    successCount++
+                } catch (e: Exception) {
                     failCount++
-                    appendTaskLog("跳过无标题画廊 (GID: ${item.gid})")
+                    appendTaskLog("添加下载失败: ${item.title} (GID: ${item.gid}): ${e.message}")
                 }
                 updateProgress(index + 1, resultTotal, "已处理 ${index + 1}/$resultTotal")
             }
@@ -164,29 +167,55 @@ class RestoreDownloadTask(
         notifyCancelled()
     }
 
+    /**
+     * 从下载子目录取出 gid 和 token。
+     * 先读文本 .ehviewer，失败再读同一文件的 CBOR，仍失败则读 ComicInfo.xml。
+     * 目录无效、三种来源都没有 gid/token，或该画廊已在下载列表中时返回 null。
+     */
     private fun getRestoreItem(file: UniFile): RestoreItem? {
         if (!file.isDirectory) return null
-        val siFile = file.findFile(SpiderQueen.SPIDER_INFO_FILENAME) ?: return null
 
-        var inputStream: InputStream? = null
-        try {
-            inputStream = siFile.openInputStream()
-            val spiderInfo = SpiderInfo.read(inputStream) ?: return null
-            val gid = spiderInfo.gid
-            if (downloadManager.containDownloadInfo(gid)) {
-                return null
+        var gid = -1L
+        var token: String? = null
+        val siFile = file.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
+        if (siFile != null) {
+            val spiderInfo = SpiderInfo.readHeader(siFile) ?: SpiderInfo.readCborHeader(siFile)
+            if (spiderInfo != null && spiderInfo.gid >= 0 && !spiderInfo.token.isNullOrEmpty()) {
+                gid = spiderInfo.gid
+                token = spiderInfo.token
             }
-            val token = spiderInfo.token
-            return RestoreItem().apply {
-                this.gid = gid
-                this.token = token
-                this.dirname = file.name
+        }
+        if (gid < 0L || token.isNullOrEmpty()) {
+            val comicInfo = readComicInfo(file)
+            if (comicInfo != null && comicInfo.gid >= 0 && !comicInfo.token.isNullOrEmpty()) {
+                gid = comicInfo.gid
+                token = comicInfo.token
             }
-        } catch (e: IOException) {
-            Log.e(TAG, "Failed to read SpiderInfo from ${file.name}", e)
+        }
+        if (gid < 0L || token.isNullOrEmpty()) {
             return null
-        } finally {
-            IOUtils.closeQuietly(inputStream)
+        }
+        if (downloadManager.containDownloadInfo(gid)) {
+            return null
+        }
+        return RestoreItem().apply {
+            this.gid = gid
+            this.token = token
+            this.dirname = file.name
+        }
+    }
+
+    /**
+     * 读取目录中的 ComicInfo.xml，并从 Web 地址解析 gid 和 token。
+     * 文件不存在、超过大小上限或地址无法解析时返回 null。
+     */
+    private fun readComicInfo(dir: UniFile): GalleryDetailUrlParser.Result? {
+        val comicFile = dir.findFile(ComicInfoParser.FILENAME) ?: return null
+        return try {
+            comicFile.openInputStream().use { ComicInfoParser.parse(it) }
+        } catch (e: Throwable) {
+            ExceptionUtils.throwIfFatal(e)
+            null
         }
     }
 
