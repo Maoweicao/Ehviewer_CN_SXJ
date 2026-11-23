@@ -1,10 +1,10 @@
 {
-  "version": "2.0.2.6",
+  "version": "2.0.2.7",
   "versionCode": 111,
   "mustUpdate": false,
   "updateContent": {
     "fileDownloadUrl": "",
-    "title": "新版发布2.0.2.6",
+    "title": "新版发布2.0.2.7",
     "content": [
       "表站图床host过期，紧急修复",
       "新增下载列表的本地导入筛选功能",
@@ -24,7 +24,9 @@
       "重构SelectItemWithIconAdapter为Kotlin并删除旧Java实现",
       "更新归档下载功能，重构下载管理器为Kotlin，添加新服务和进度通知，添加暂停继续下载功能",
       "在更新对话框中增加支持链接与赞助按钮",
-      "猫尾草: 抽离下载信息监听器接口"
+      "猫尾草: 抽离下载信息监听器接口",
+      "修复导入本地画廊信息时可能崩溃的问题",
+      "汞齐 ：avoid leaking the buffer global ref in create stream helpers (#2878)"
     ]
   }
 }

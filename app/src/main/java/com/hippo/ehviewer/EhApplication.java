@@ -184,6 +184,7 @@ public class EhApplication extends RecordingApplication {
         GetText.initialize(this);
         StatusCodeException.initialize(this);
         Settings.initialize(this);
+        AppConfig.initialize(this);
         // 常驻看门狗：预判主线程阻塞并保留现场，同时在阻塞/恢复后驱动 ANR 弹窗清除。
         // 之前只有设置页手动切换开关才会启动，进程重启后完全不生效。
         if (Settings.getPreAnrDetectionEnabled()) {
@@ -195,7 +196,6 @@ public class EhApplication extends RecordingApplication {
         ArchiverDownloadCompleter.resumePendingDownloads(this);
         ReadableTime.initialize(this);
         Html.initialize(this);
-        AppConfig.initialize(this);
         SpiderDen.initialize(this);
         EhDB.initialize(this);
         DownloadedFileManager.initialize(this);
