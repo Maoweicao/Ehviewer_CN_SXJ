@@ -12,6 +12,7 @@ import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.data.GalleryInfo
+import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
 import com.hippo.lib.yorozuya.IOUtils
@@ -71,8 +72,10 @@ class ScanDownloadHistoryTask(
     private var phase2Processed = AtomicInteger(0)
     private var phase3Processed = AtomicInteger(0)
 
-    private var phase1Added = 0
+    private val phase1Added = AtomicInteger(0)
     private var phase2Updated = 0
+    private var phase2Unchanged = 0
+    private var phase2SkippedMerged = 0
     private var phase2IncrementalDetected = 0
     private var phase3Updated = 0
     private var phase3Failed = 0
@@ -80,6 +83,9 @@ class ScanDownloadHistoryTask(
     // 待处理队列
     private val needEhviewerFiles = ConcurrentLinkedQueue<ScanResult>()
     private val needApiGids = ConcurrentLinkedQueue<ScanResult>()
+
+    // 已存在的下载历史（本轮开始时读一次，避免逐目录查库）
+    private var existingHistory: Map<Long, DownloadHistory> = emptyMap()
 
     // 下载目录路径
     private var downloadDirPath: String? = null
@@ -124,6 +130,14 @@ class ScanDownloadHistoryTask(
                 appendTaskLog("无法访问下载目录")
                 notifyError(Exception("无法访问下载目录"))
                 return Result.failure(Exception("无法访问下载目录"))
+            }
+
+            // 本轮只读一次历史，后续阶段都用内存里的副本
+            existingHistory = try {
+                EhDB.getAllDownloadHistory()?.associateBy { it.gid } ?: emptyMap()
+            } catch (e: Exception) {
+                Log.w(TAG, "读取已有下载历史失败", e)
+                emptyMap()
             }
 
             // 收集所有画廊目录
@@ -171,8 +185,9 @@ class ScanDownloadHistoryTask(
             Settings.putDownloadHistoryLastScanTime(System.currentTimeMillis())
 
             // 完成
-            val summary = "补建完成：阶段一新增 $phase1Added 条，" +
-                    "阶段二更新 $phase2Updated 条（增量检测 $phase2IncrementalDetected 个），" +
+            val summary = "补建完成：新增 ${phase1Added.get()} 条（无 .ehviewer，待 API 补 token），" +
+                    "更新 $phase2Updated 条（未变化 $phase2Unchanged，已合并/已删除跳过 $phase2SkippedMerged，" +
+                    "增量 $phase2IncrementalDetected），" +
                     "阶段三更新 $phase3Updated 条，失败 $phase3Failed 条"
             Log.d(TAG, summary)
             appendTaskLog(summary)
@@ -196,6 +211,10 @@ class ScanDownloadHistoryTask(
 
     /**
      * 阶段一：扫描目录，解析 GID
+     *
+     * <p>没有 `.ehviewer` 的目录没有 token，走 [EhDB.recordDownloadHistoryFromScan]
+     * 先落库（允许空 token），再排进阶段三的 API 补登队列；不能因为
+     * `recordDownloadHistoryWithToken` 拒绝空 token 就把这些目录整批丢掉。
      */
     private suspend fun phase1() {
         val path = downloadDirPath ?: return
@@ -239,7 +258,7 @@ class ScanDownloadHistoryTask(
 
             // 更新进度
             phase1Processed.addAndGet(batch.size)
-            val detail = "阶段一: ${phase1Processed.get()}/$totalGalleries (新增 $phase1Added)"
+            val detail = "阶段一: ${phase1Processed.get()}/$totalGalleries (新增 ${phase1Added.get()})"
             updateProgress(phase1Processed.get(), totalGalleries, detail)
         }
 
@@ -249,7 +268,9 @@ class ScanDownloadHistoryTask(
     /**
      * 处理单个目录 - 阶段一
      */
-    private fun processDirectoryPhase1(dir: File): ScanResult? {
+    private fun processDirectoryPhase1(
+        dir: File
+    ): ScanResult? {
         val gid = parseGidFromDirName(dir.name) ?: return null
 
         // 从目录名提取标题
@@ -268,19 +289,23 @@ class ScanDownloadHistoryTask(
             needReadEhviewer = needReadEhviewer
         )
 
-        // 如果不需要读取 .ehviewer，直接写入（阶段一只能写入 GID 和 dirname）
-        if (!needReadEhviewer) {
-            val inserted = EhDB.recordDownloadHistoryWithToken(gid, "", title, dir.name)
-            if (inserted) {
-                phase1Added++
-                // 记录需要 API 补登
-                needApiGids.offer(result)
-            }
-        } else {
-            // 需要读取 .ehviewer 文件
+        if (needReadEhviewer) {
+            // 需要读取 .ehviewer 文件拿 token
             needEhviewerFiles.offer(result)
+            return result
         }
 
+        // 没有 .ehviewer：先按“空 token”落库（只新建，不覆盖已有记录含合并标记）
+        val fileCount = countImageFiles(dir)
+        val recorded = EhDB.recordDownloadHistoryFromScan(gid, null, title, dir.name, fileCount, fileCount)
+        if (recorded) {
+            phase1Added.incrementAndGet()
+        }
+        // 已有记录里也没有 token 的，才需要联网补登
+        val known = existingHistory[gid]
+        if (known == null || known.token.isNullOrEmpty()) {
+            needApiGids.offer(result)
+        }
         return result
     }
 
@@ -316,32 +341,44 @@ class ScanDownloadHistoryTask(
                 val content = IOUtils.readString(ehviewerFile.inputStream(), "UTF-8")
                 val lines = content.split("\n")
 
-                // 增量检测：读取 .ehviewer.extra.json 获取预期页数
-                val expectedPages = detectIncrementalPages(dir, result.gid)
+                val actualFiles = countImageFiles(dir)
+
+                // 增量检测：优先用已有历史里的文件数，其次读 .ehviewer.extra.json
+                val expectedPages = detectIncrementalPages(dir, result.gid, existingHistory)
 
                 val parsed = parseEhviewerFile(lines)
                 if (parsed != null && !parsed.token.isNullOrEmpty()) {
-                    // 成功解析到 TOKEN，插入记录
-                    val inserted = EhDB.recordDownloadHistoryWithToken(
-                        result.gid,
-                        parsed.token!!,
-                        parsed.title ?: result.title,
-                        result.dirname
-                    )
-                    if (inserted) {
-                        phase1Added++
-                        phase2Updated++
+                    val known = existingHistory[result.gid]
+                    if (known != null && known.deletionType != DownloadHistory.DELETION_NONE) {
+                        // 已合并/已删除的记录：保留标记，不重新激活
+                        phase2SkippedMerged++
+                    } else {
+                        val unchanged = known != null &&
+                            known.token == parsed.token &&
+                            known.filePath == result.dirname &&
+                            known.totalFiles == actualFiles
+                        if (unchanged) {
+                            phase2Unchanged++
+                        } else {
+                            EhDB.recordDownloadHistoryWithToken(
+                                result.gid,
+                                parsed.token!!,
+                                parsed.title ?: result.title,
+                                result.dirname,
+                                actualFiles,
+                                actualFiles
+                            )
+                            phase2Updated++
+                        }
                     }
 
                     // 如果检测到增量，更新历史记录
-                    if (expectedPages > 0) {
-                        val actualFiles = countImageFiles(dir)
-                        if (actualFiles > expectedPages) {
-                            // 有增量文件，更新 DownloadHistory 中的文件信息
-                            updateHistoryForIncremental(result.gid, expectedPages, actualFiles)
-                            phase2IncrementalDetected++
-                            Log.d(TAG, "检测到增量下载: GID=${result.gid}, 原有=$expectedPages, 现有=$actualFiles")
-                        }
+                    if (known != null && expectedPages > 0 && actualFiles > expectedPages) {
+                        EhDB.updateDownloadHistoryFileTokens(
+                            result.gid, actualFiles, actualFiles, known.fileTokens
+                        )
+                        phase2IncrementalDetected++
+                        Log.d(TAG, "检测到增量下载: GID=${result.gid}, 原有=$expectedPages, 现有=$actualFiles")
                     }
                 } else {
                     // 无法解析 TOKEN，标记需要 API 补登
@@ -360,14 +397,16 @@ class ScanDownloadHistoryTask(
 
     /**
      * 检测增量下载：读取 .ehviewer.extra.json 获取预期页数
+     *
      * @param dir 画廊目录
      * @param gid 画廊GID
+     * @param known 本轮开始时读取的历史记录，避免逐目录查库
      * @return 预期页数，0 表示无法确定
      */
-    private fun detectIncrementalPages(dir: File, gid: Long): Int {
+    private fun detectIncrementalPages(dir: File, gid: Long, known: Map<Long, DownloadHistory>): Int {
         try {
-            // 优先从 DownloadHistory 获取记录的文件数
-            val history = EhDB.getDownloadHistory(gid)
+            // 优先用已有历史记录的文件数
+            val history = known[gid]
             if (history != null && history.totalFiles > 0) {
                 return history.totalFiles
             }
@@ -410,27 +449,6 @@ class ScanDownloadHistoryTask(
         return lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
                 lower.endsWith(".png") || lower.endsWith(".gif") ||
                 lower.endsWith(".webp") || lower.endsWith(".bmp")
-    }
-
-    /**
-     * 更新历史记录以反映增量下载
-     */
-    private fun updateHistoryForIncremental(gid: Long, expectedPages: Int, actualFiles: Int) {
-        try {
-            val history = EhDB.getDownloadHistory(gid)
-            if (history != null) {
-                // 计算新增的文件数
-                val newFiles = actualFiles - expectedPages
-                // 更新历史记录，标记有增量
-                val currentDownloaded = history.downloadedFiles
-                if (currentDownloaded >= 0) {
-                    // 更新已下载文件数和总文件数
-                    EhDB.updateDownloadHistoryFileTokens(gid, actualFiles, currentDownloaded + newFiles, history.fileTokens)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "更新增量历史失败: GID=$gid", e)
-        }
     }
 
     /**

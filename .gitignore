@@ -28,3 +28,12 @@ open_source_licenses.html
 /build_apk.txt
 /build_new.txt
 /build_test.txt
+
+# 本地构建日志与临时产物
+*.log
+/backup.ab
+/tmp/
+
+# mihomo 内核预编译库体积过大（61MB + 65MB），不入库
+/app/src/main/jniLibs/
+/app/src/debug/jniLibs/

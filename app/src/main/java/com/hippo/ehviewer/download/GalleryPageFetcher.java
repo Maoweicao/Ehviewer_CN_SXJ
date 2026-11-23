@@ -25,8 +25,13 @@ import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhEngine;
 import com.hippo.ehviewer.client.EhUrl;
 import com.hippo.ehviewer.client.data.GalleryDetail;
+import com.hippo.ehviewer.client.exception.GalleryUnavailableException;
+import com.hippo.ehviewer.client.exception.PiningException;
 import com.hippo.ehviewer.dao.DownloadInfo;
+import com.hippo.ehviewer.lab.source.LanImageFetcher;
+import com.hippo.ehviewer.limit.RemoteLimitGuard;
 import com.hippo.ehviewer.network.NetworkStateManager;
+import com.hippo.network.StatusCodeException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -80,6 +85,26 @@ public class GalleryPageFetcher {
     }
 
     private static int fetchPagesInternal(Context context, DownloadInfo info, int retriesLeft) {
+        // 局域网优先：先问已配对设备，避免为未知页数访问 e-hentai。
+        if (Settings.getLabDownloadFromLanFirst() || Settings.getLanOnlyMode()) {
+            try {
+                int lanPages = LanImageFetcher.getInstance(context).fetchGalleryPages(info.gid);
+                if (lanPages > 0) {
+                    Log.d(TAG, "Fetched " + lanPages + " pages for GID=" + info.gid + " from LAN");
+                    return lanPages;
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "LAN page count failed for GID=" + info.gid + ": " + t.getMessage());
+            }
+            if (Settings.getLanOnlyMode()) {
+                Log.i(TAG, "LAN-only mode: skip remote page count for GID=" + info.gid);
+                return -1;
+            }
+        }
+        if (RemoteLimitGuard.getInstance(context).isBlocked()) {
+            Log.i(TAG, "Rate-limit cooldown: skip remote page count for GID=" + info.gid);
+            return -1;
+        }
         try {
             String url = EhUrl.getGalleryDetailUrl(info.gid, info.token);
             OkHttpClient okHttpClient = getBatchClient(context);
@@ -90,6 +115,7 @@ public class GalleryPageFetcher {
                 return detail.pages;
             }
         } catch (Throwable e) {
+            RemoteLimitGuard.getInstance(context).inspectThrowable(e, "page_fetch");
             if (isGalleryGone(e)) {
                 Log.i(TAG, "Gallery GID=" + info.gid + " has been removed (404/Gone)");
                 return -2;
@@ -116,12 +142,25 @@ public class GalleryPageFetcher {
      */
     private static boolean isGalleryGone(Throwable e) {
         if (e == null) return false;
+        // 优先按异常类型判断，避免把限流/网络错误信息里恰好出现的 "404" 误判为画廊被删。
+        Throwable t = e;
+        while (t != null) {
+            if (t instanceof PiningException || t instanceof GalleryUnavailableException) {
+                return true;
+            }
+            if (t instanceof StatusCodeException) {
+                int code = ((StatusCodeException) t).getResponseCode();
+                if (code == 404 || code == 410) {
+                    return true;
+                }
+            }
+            t = t.getCause();
+        }
         String msg = e.getMessage();
         if (msg == null) return false;
         return msg.contains("Gallery Not Found")
-                || msg.contains("Pining")
-                || msg.contains("404")
-                || msg.contains("GalleryUnavailable");
+                || msg.contains("pining for the fjords")
+                || msg.contains("This gallery is unavailable");
     }
 
     /**
@@ -196,6 +235,7 @@ public class GalleryPageFetcher {
                         successCount.incrementAndGet();
                         Log.d(TAG, "Updated total=" + pages + " for GID=" + info.gid);
                     } else if (pages == -2) {
+                        info.removedFromSource = true;
                         info.state = DownloadInfo.STATE_FINISH;
                         info.total = 0;
                         info.pages = 0;

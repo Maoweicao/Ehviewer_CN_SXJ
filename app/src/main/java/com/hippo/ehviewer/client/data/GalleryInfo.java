@@ -135,7 +135,7 @@ public class GalleryInfo implements Parcelable {
     @Ignore
     @Nullable
     public String[] simpleTags;
-    @Ignore
+    @ColumnInfo(name = "PAGES")
     public int pages;
 
     @Ignore

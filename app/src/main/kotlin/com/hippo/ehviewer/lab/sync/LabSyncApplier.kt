@@ -22,10 +22,12 @@ import android.os.Looper
 import com.alibaba.fastjson.JSONObject
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.lab.log.SnapshotLogger
+import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.transfer.core.DataChangeBus
 import com.hippo.ehviewer.transfer.core.ResponseCache
 import java.util.Collections
@@ -49,29 +51,39 @@ object LabSyncApplier {
 
     private const val TAG = "LabSyncApplier"
 
-    /** @return 实际新增或发生变化的行数 */
-    fun apply(context: Context, scope: String, rows: List<JSONObject>): Int {
-        if (rows.isEmpty()) return 0
+    /**
+     * 同步应用结果：实际变化的行数 + 本次涉及的 gid（用于可选的图片补齐）。
+     */
+    class ApplyResult(
+        val applied: Int,
+        val gids: List<Long>,
+    )
+
+    /** @return 实际新增或发生变化的行数，以及涉及的 gid */
+    fun apply(context: Context, scope: String, rows: List<JSONObject>): ApplyResult {
+        if (rows.isEmpty()) return ApplyResult(0, emptyList())
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return applyOnMain(context, scope, rows)
         }
         val latch = CountDownLatch(1)
-        var applied = 0
+        var result = ApplyResult(0, emptyList())
         Handler(Looper.getMainLooper()).post {
             try {
-                applied = applyOnMain(context, scope, rows)
+                result = applyOnMain(context, scope, rows)
             } catch (t: Throwable) {
                 SnapshotLogger.w(TAG, "应用同步行失败: ${t.message}", t)
             } finally {
                 latch.countDown()
             }
         }
-        return if (latch.await(60, TimeUnit.SECONDS)) applied else 0
+        return if (latch.await(60, TimeUnit.SECONDS)) result else ApplyResult(0, emptyList())
     }
 
-    private fun applyOnMain(context: Context, scope: String, rows: List<JSONObject>): Int {
+    private fun applyOnMain(context: Context, scope: String, rows: List<JSONObject>): ApplyResult {
         val downloadManager = EhApplication.getDownloadManager(context)
         var applied = 0
+        val touchedGids = LinkedHashSet<Long>()
+        val pageMap = HashMap<Long, Int>()
         // 整批合并包进一次数据库事务：逐条 put 各自提交会做大量磁盘同步，
         // 500 行一批在主线程上足以触发 ANR。
         EhDB.runInTransaction {
@@ -81,16 +93,25 @@ object LabSyncApplier {
                 }
             } else {
                 for (row in rows) {
-                    if (applyDownload(downloadManager, row)) applied++
+                    val gid = row.getLongValue("gid")
+                    val pages = row.getIntValue("pages")
+                    if (gid > 0 && pages > 0) pageMap[gid] = pages
+                    if (gid > 0 && applyDownload(downloadManager, row)) {
+                        applied++
+                        touchedGids.add(gid)
+                    }
                 }
             }
+        }
+        if (pageMap.isNotEmpty()) {
+            LabPageStore.putAll(context, pageMap)
         }
         if (applied > 0) {
             downloadManager.notifySyncedExternal()
             ResponseCache.getInstance().invalidateGalleries()
             DataChangeBus.publish(DataChangeBus.TYPE_DATA_CHANGED, 0L, null, null)
         }
-        return applied
+        return ApplyResult(applied, touchedGids.toList())
     }
 
     // ==================== 下载列表 ====================
@@ -110,14 +131,15 @@ object LabSyncApplier {
         downloadManager.addDownloadInfo(info, label)
         val created = downloadManager.getDownloadInfo(gid) ?: return false
         val pages = json.getIntValue("pages")
-        val finished = json.getIntValue("finished")
-        created.finished = finished
-        created.downloaded = json.getIntValue("downloaded")
-        created.total = json.getIntValue("total")
+        // 同步只带来索引，不带来图片文件：本地进度必须从 0 开始，
+        // 不能把对端的 finished/downloaded 当成自己的，否则会显示已完成却没有图。
+        created.finished = 0
+        created.downloaded = 0
+        created.total = if (pages > 0) pages else 0
         created.pages = if (pages > 0) pages else created.pages
-        created.fileSize = json.getLongValue("fileSize")
+        created.fileSize = 0
         created.time = json.getLongValue("time").takeIf { it > 0 } ?: System.currentTimeMillis()
-        created.state = resolveLocalState(json, pages, finished)
+        created.state = DownloadInfo.STATE_NONE
         EhDB.putDownloadInfo(created)
         return true
     }
@@ -125,29 +147,26 @@ object LabSyncApplier {
     private fun mergeDownload(local: DownloadInfo, json: JSONObject): Boolean {
         var changed = false
         val pages = json.getIntValue("pages")
-        val finished = json.getIntValue("finished")
-        val downloaded = json.getIntValue("downloaded")
-        val total = json.getIntValue("total")
-        val fileSize = json.getLongValue("fileSize")
 
         if (pages > local.pages) {
             local.pages = pages
+            // 对端有更多页：本地已完成的记录需要重新补齐新增页
+            if (local.state == DownloadInfo.STATE_FINISH) {
+                local.state = DownloadInfo.STATE_NONE
+            }
             changed = true
         }
-        if (finished > local.finished) {
-            local.finished = finished
+        if (local.total <= 0 && local.pages > 0) {
+            local.total = local.pages
             changed = true
         }
-        if (downloaded > local.downloaded) {
-            local.downloaded = downloaded
-            changed = true
-        }
-        if (total > local.total) {
-            local.total = total
-            changed = true
-        }
-        if (fileSize > local.fileSize) {
-            local.fileSize = fileSize
+        // 旧版本同步会把对端进度直接写成“已完成”，但本地没有文件。
+        // 这里检测下载目录不存在/为空的情况并修正，避免列表显示完成却没有图。
+        if (local.state == DownloadInfo.STATE_FINISH && local.pages > 0 && !hasLocalImage(local)) {
+            local.finished = 0
+            local.downloaded = 0
+            local.fileSize = 0
+            local.state = DownloadInfo.STATE_NONE
             changed = true
         }
         if (local.title.isNullOrEmpty()) {
@@ -168,24 +187,85 @@ object LabSyncApplier {
         if (local.uploader.isNullOrEmpty()) {
             json.getString("uploader")?.takeIf { it.isNotEmpty() }?.let { local.uploader = it; changed = true }
         }
-        if (local.state != DownloadInfo.STATE_FINISH && pages > 0 && finished >= pages) {
-            local.state = DownloadInfo.STATE_FINISH
-            changed = true
-        }
         if (changed) {
             EhDB.putDownloadInfo(local)
         }
         return changed
     }
 
-    /** 远端状态映射：只有完成的才落为完成，其余落为未下载，避免误创建下载任务。 */
-    private fun resolveLocalState(json: JSONObject, pages: Int, finished: Int): Int {
-        val remoteState = json.getIntValue("state")
-        return if (remoteState == DownloadInfo.STATE_FINISH && pages > 0 && finished >= pages) {
-            DownloadInfo.STATE_FINISH
-        } else {
-            DownloadInfo.STATE_NONE
+    private fun hasLocalImage(info: DownloadInfo): Boolean {
+        return try {
+            val dirname = EhDB.getDownloadDirname(info.gid) ?: return false
+            val dir = Settings.getDownloadLocation()?.subFile(dirname) ?: return false
+            dir.isDirectory && SpiderDen.findImageFile(dir, 0) != null
+        } catch (t: Throwable) {
+            false
         }
+    }
+
+    /**
+     * 修复旧版本同步留下的「已完成但没有本地图片」记录。
+     * 可在后台线程调用；返回被重置的 gid，供可选的图片补齐使用。
+     */
+    fun repairMissingFiles(context: Context): List<Long> {
+        val downloadManager = EhApplication.getDownloadManager(context) ?: return emptyList()
+        // 在主线程取一份快照，避免后台遍历时与下载队列并发修改冲突。
+        val latch = CountDownLatch(1)
+        var snapshot: List<DownloadInfo> = emptyList()
+        Handler(Looper.getMainLooper()).post {
+            try {
+                snapshot = ArrayList(downloadManager.getAllDownloadInfoList())
+            } finally {
+                latch.countDown()
+            }
+        }
+        if (!latch.await(10, TimeUnit.SECONDS)) return emptyList()
+
+        val candidates = ArrayList<Long>()
+        for (info in snapshot) {
+            if (info.state == DownloadInfo.STATE_FINISH && info.pages > 0 && !hasLocalImage(info)) {
+                candidates.add(info.gid)
+            }
+        }
+        if (candidates.isEmpty()) return emptyList()
+
+        val applyLatch = CountDownLatch(1)
+        var changed: List<Long> = emptyList()
+        Handler(Looper.getMainLooper()).post {
+            try {
+                changed = applyRepair(downloadManager, candidates)
+            } catch (t: Throwable) {
+                SnapshotLogger.w(TAG, "修复同步记录失败: ${t.message}", t)
+            } finally {
+                applyLatch.countDown()
+            }
+        }
+        return if (applyLatch.await(60, TimeUnit.SECONDS)) changed else emptyList()
+    }
+
+    private fun applyRepair(
+        downloadManager: DownloadManager,
+        gids: List<Long>,
+    ): List<Long> {
+        val changed = ArrayList<Long>()
+        EhDB.runInTransaction {
+            for (gid in gids) {
+                val info = downloadManager.getDownloadInfo(gid) ?: continue
+                if (info.state != DownloadInfo.STATE_FINISH) continue
+                info.finished = 0
+                info.downloaded = 0
+                info.fileSize = 0
+                info.state = DownloadInfo.STATE_NONE
+                EhDB.putDownloadInfo(info)
+                changed.add(gid)
+            }
+        }
+        if (changed.isNotEmpty()) {
+            downloadManager.notifySyncedExternal()
+            ResponseCache.getInstance().invalidateGalleries()
+            DataChangeBus.publish(DataChangeBus.TYPE_DATA_CHANGED, 0L, null, null)
+        }
+        return changed
     }
 
     private fun ensureLabel(downloadManager: DownloadManager, label: String?) {

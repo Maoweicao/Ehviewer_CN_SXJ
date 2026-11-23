@@ -8,10 +8,15 @@ import org.yaml.snakeyaml.Yaml;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 public class ClashParser {
     private static final String TAG = "ClashParser";
+    private static final Pattern VIRTUAL_NAME = Pattern.compile(
+            "(?i)(剩余流量|距离下次重置|套餐到期|到期时间|过期时间|导航页|剩余|流量|重置|到期|" +
+                    "官网|群组|客服|订阅|expire|traffic|website|remaining|reset)");
 
     public static List<IpInfo> parse(String content) throws Exception {
         List<IpInfo> ips = new ArrayList<>();
@@ -55,6 +60,13 @@ public class ClashParser {
         String name = (String) proxy.get("name");
 
         if (server == null || server.isEmpty()) return null;
+        if (name != null && VIRTUAL_NAME.matcher(name).find()) return null;
+        String serverLower = server.trim().toLowerCase(Locale.US);
+        if (serverLower.equals("127.0.0.1") || serverLower.equals("0.0.0.0")
+                || serverLower.equals("localhost") || serverLower.equals("::1")
+                || serverLower.startsWith("127.")) {
+            return null;
+        }
 
         int port = 1080;
         if (portObj instanceof Integer) {

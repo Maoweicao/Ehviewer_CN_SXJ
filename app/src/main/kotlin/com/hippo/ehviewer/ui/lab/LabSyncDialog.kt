@@ -19,8 +19,11 @@ package com.hippo.ehviewer.ui.lab
 import android.app.Activity
 import android.util.TypedValue
 import android.view.ViewGroup
+import android.widget.CheckBox
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -29,13 +32,15 @@ import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.lab.TrustedPeer
 import com.hippo.ehviewer.lab.TrustedPeerStore
 import com.hippo.ehviewer.lab.sync.LabSyncDirection
-import com.hippo.ehviewer.lab.sync.LabSyncEngine
+import com.hippo.ehviewer.lab.sync.LabTasks
+import com.hippo.ehviewer.task.LabMetadataSyncTask
 
 /**
  * 手动设备间快速同步（协议 §5.30）。
  *
- * <p>只列已配对（有 presharedKey）且有地址的设备；方向按次选择，
- * 默认值来自实验室设置。图片不复制，按需从对端读取。
+ * <p>只列出已配对（有 presharedKey）且有地址的设备；方向按次选择，
+ * 默认值来自实验室设置。图片不随元数据自动复制，勾选「同时同步图片文件」后
+ * 才会在同步完成后从对端逐页补齐本次涉及的画廊。
  */
 object LabSyncDialog {
 
@@ -61,25 +66,76 @@ object LabSyncDialog {
         val labels = peers.map { "${it.deviceName}\n${it.host}:${it.port}" }.toTypedArray()
         AlertDialog.Builder(activity)
             .setTitle(R.string.lab_sync_select_peer)
-            .setItems(labels) { _, which -> showDirection(activity, peers[which]) }
+            .setItems(labels) { _, which -> showOptions(activity, peers[which]) }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
-    private fun showDirection(activity: Activity, peer: TrustedPeer) {
+    /**
+     * 方向 + 「同时同步图片文件」复选框。
+     */
+    private fun showOptions(activity: Activity, peer: TrustedPeer) {
+        val container = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            val padding = dp(activity, 20)
+            setPadding(padding, dp(activity, 8), padding, 0)
+        }
+        val group = RadioGroup(activity)
+        val entries = activity.resources.getStringArray(R.array.lab_sync_direction_entries)
         val default = DIRECTIONS.indexOfFirst { it.wire == Settings.getLabSyncDirection() }
             .coerceAtLeast(0)
+        entries.forEachIndexed { index, label ->
+            val button = RadioButton(activity).apply {
+                id = 10_000 + index
+                text = label
+                isChecked = index == default
+            }
+            group.addView(button)
+        }
+        container.addView(group)
+
+        val syncFiles = CheckBox(activity).apply {
+            text = activity.getString(R.string.lab_sync_sync_files)
+            isChecked = false
+        }
+        container.addView(syncFiles)
+
+        val desc = TextView(activity).apply {
+            text = activity.getString(R.string.lab_sync_sync_files_desc)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            setPadding(dp(activity, 4), 0, 0, 0)
+        }
+        container.addView(desc)
+
+        group.setOnCheckedChangeListener { _, checkedId ->
+            val pushIndex = 10_000 + DIRECTIONS.indexOf(LabSyncDirection.PUSH)
+            val isPush = checkedId == pushIndex
+            syncFiles.isEnabled = !isPush
+            if (isPush) syncFiles.isChecked = false
+        }
+        if (default == DIRECTIONS.indexOf(LabSyncDirection.PUSH)) {
+            syncFiles.isEnabled = false
+        }
+
         AlertDialog.Builder(activity)
-            .setTitle(R.string.lab_sync_direction)
-            .setSingleChoiceItems(R.array.lab_sync_direction_entries, default) { dialog, which ->
-                dialog.dismiss()
-                start(activity, peer, DIRECTIONS[which])
+            .setTitle(R.string.lab_sync_title)
+            .setView(container)
+            .setPositiveButton(R.string.lab_sync_start) { _, _ ->
+                val checked = group.checkedRadioButtonId
+                val index = if (checked >= 0) checked - 10_000 else default
+                val direction = DIRECTIONS.getOrElse(index) { DIRECTIONS[0] }
+                start(activity, peer, direction, syncFiles.isChecked)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
-    private fun start(activity: Activity, peer: TrustedPeer, direction: LabSyncDirection) {
+    private fun start(
+        activity: Activity,
+        peer: TrustedPeer,
+        direction: LabSyncDirection,
+        syncFiles: Boolean,
+    ) {
         val padding = dp(activity, 24)
         val status = TextView(activity).apply {
             setPadding(0, 0, 0, dp(activity, 12))
@@ -104,32 +160,31 @@ object LabSyncDialog {
             .setNegativeButton(R.string.lab_sync_hide) { d, _ -> d.dismiss() }
             .show()
 
-        Thread({
-            val outcome = LabSyncEngine.getInstance(activity).requestSync(peer, direction) {
-                    phase, current, total, detail ->
-                activity.runOnUiThread {
-                    if (activity.isFinishing) return@runOnUiThread
-                    status.text = detail ?: phase
-                    if (total > 0 && current >= 0) {
-                        progress.isIndeterminate = false
-                        progress.max = total
-                        progress.progress = current
-                    } else {
-                        progress.isIndeterminate = true
-                    }
+        // 同步本身提交为正式后台任务：进度、日志和结果都会出现在「后台任务」，
+        // 关闭这个对话框或离开页面也不会中断。
+        val task = LabMetadataSyncTask(activity, peer.deviceId, direction, syncFiles)
+        task.progressCallback = { phase, current, total, detail ->
+            if (!activity.isFinishing && !activity.isDestroyed) {
+                status.text = detail ?: phase
+                if (total > 0 && current >= 0) {
+                    progress.isIndeterminate = false
+                    progress.max = total
+                    progress.progress = current
+                } else {
+                    progress.isIndeterminate = true
                 }
             }
-            activity.runOnUiThread {
-                if (activity.isFinishing) return@runOnUiThread
+        }
+        task.finishCallback = { _, message ->
+            if (!activity.isFinishing && !activity.isDestroyed) {
                 dialog.dismiss()
-                val message = if (outcome.success) {
-                    activity.getString(R.string.lab_sync_done, outcome.applied)
-                } else {
-                    activity.getString(R.string.lab_sync_failed, outcome.error.orEmpty())
-                }
                 Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
             }
-        }, "LabSyncManual").apply { isDaemon = true }.start()
+        }
+        if (!LabTasks.submit(task)) {
+            dialog.dismiss()
+            Toast.makeText(activity, R.string.lab_sync_busy, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun dp(activity: Activity, value: Int): Int = TypedValue.applyDimension(

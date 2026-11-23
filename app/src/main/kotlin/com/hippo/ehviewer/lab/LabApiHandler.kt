@@ -58,6 +58,7 @@ class LabApiHandler(
     private val configStore: LabConfigStore = labManager.configStore
     private val peerStore: TrustedPeerStore = labManager.peerStore
     private val pairingManager: PairingCodeManager = labManager.pairingManager
+    private val pairingLimiter = PairingAttemptLimiter()
 
     private val random = SecureRandom()
 
@@ -212,6 +213,10 @@ class LabApiHandler(
     }
 
     private fun handleProbePairing(session: fi.iki.elonen.NanoHTTPD.IHTTPSession): fi.iki.elonen.NanoHTTPD.Response {
+        val remoteIp = normalizeIp(session.remoteIpAddress)
+        if (!pairingLimiter.tryConsume(remoteIp)) {
+            return tooManyAttempts(remoteIp)
+        }
         val code = RequestParser.getQueryParameter(session, "code")
         if (code.isNullOrEmpty()) {
             return ResponseBuilder.jsonError(
@@ -231,6 +236,16 @@ class LabApiHandler(
 
     private fun handlePair(session: fi.iki.elonen.NanoHTTPD.IHTTPSession): fi.iki.elonen.NanoHTTPD.Response {
         try {
+            val remoteIp = normalizeIp(session.remoteIpAddress)
+            // 只允许局域网配对：/pair 为首次配对加入免认证白名单，
+            // 必须配合来源限制、一次性配对码与限流使用。
+            if (remoteIp == null || !AuthManager.isLocalNetwork(remoteIp)) {
+                return ResponseBuilder.forbidden("Pairing is only allowed on the local network")
+            }
+            if (!pairingLimiter.tryConsume(remoteIp)) {
+                return tooManyAttempts(remoteIp)
+            }
+
             val body = RequestParser.readBody(session)
             val json = JSON.parseObject(body)
             if (json == null) {
@@ -263,6 +278,18 @@ class LabApiHandler(
                 return ResponseBuilder.jsonError(
                     fi.iki.elonen.NanoHTTPD.Response.Status.BAD_REQUEST,
                     "myDevice must include deviceId, deviceName, deviceType",
+                )
+            }
+            if (remotePort != 0 && remotePort !in 1..65535) {
+                return ResponseBuilder.jsonError(
+                    fi.iki.elonen.NanoHTTPD.Response.Status.BAD_REQUEST,
+                    "Invalid myDevice.port",
+                )
+            }
+            if (remotePubkey != null && remotePubkey.length > MAX_PUBKEY_LENGTH) {
+                return ResponseBuilder.jsonError(
+                    fi.iki.elonen.NanoHTTPD.Response.Status.BAD_REQUEST,
+                    "myDevice.pubkey is too long",
                 )
             }
 
@@ -298,6 +325,7 @@ class LabApiHandler(
             }
 
             val peer = TrustedPeer.Builder(remoteId, remoteName, remoteType)
+                .host(remoteIp)
                 .port(remotePort)
                 .lastSeen(System.currentTimeMillis())
                 .online(true)
@@ -309,16 +337,65 @@ class LabApiHandler(
 
             peerStore.upsert(peer)
 
+            // 清理旧版手动添加留下的同地址假记录（无密钥且 deviceId 不同），
+            // 否则列表里会同时出现真实配对与永远不可用的旧条目。
+            val stale = peerStore.list().filter {
+                it.deviceId != peer.deviceId &&
+                    it.presharedKey.isNullOrEmpty() &&
+                    it.host == remoteIp
+            }
+            for (record in stale) {
+                peerStore.remove(record.deviceId)
+                TransferLogger.getInstance().i(
+                    TAG, "Removed stale unpaired peer ${record.deviceName} (${record.deviceId})",
+                )
+            }
+
             val resp = JSONObject()
             resp["success"] = true
             resp["message"] = "Pairing complete. Preshared key returned; store locally."
             resp["peer"] = peer.toJson()
             resp["presharedKey"] = selfPresharedKey
+            // 供扫码方直接建立本机记录，避免再发一次拓扑请求。
+            resp["self"] = selfDeviceJson()
             return ResponseBuilder.jsonSuccess(resp.toJSONString())
         } catch (e: Exception) {
             TransferLogger.getInstance().e(TAG, "Failed to pair", e)
             return ResponseBuilder.internalError(e.message)
         }
+    }
+
+    private fun selfDeviceJson(): JSONObject {
+        val self = JSONObject()
+        self["deviceId"] = labManager.getSelfDeviceId()
+        self["deviceName"] = labManager.getSelfDeviceName()
+        self["deviceType"] = labManager.getSelfDeviceType()
+        self["port"] = TransferPortHelper.getPort(context)
+        val caps = JSONArray()
+        caps.addAll(labManager.getSelfCapabilities().toList())
+        self["capabilities"] = caps
+        return self
+    }
+
+    private fun tooManyAttempts(remoteIp: String?): fi.iki.elonen.NanoHTTPD.Response {
+        val response = ResponseBuilder.jsonError(
+            fi.iki.elonen.NanoHTTPD.Response.Status.TOO_MANY_REQUESTS,
+            "Too many pairing attempts, please retry later",
+        )
+        val retry = pairingLimiter.retryAfterSeconds(remoteIp)
+        if (retry > 0) response.addHeader("Retry-After", retry.toString())
+        return response
+    }
+
+    /**
+     * 去掉 IPv6 映射前缀并裁剪空白，便于限流与局域网判断。
+     */
+    private fun normalizeIp(raw: String?): String? {
+        var ip = raw?.trim()
+        if (ip.isNullOrEmpty()) return null
+        if (ip.startsWith("::ffff:")) ip = ip.substring("::ffff:".length)
+        if (ip.startsWith("[") && ip.endsWith("]")) ip = ip.substring(1, ip.length - 1)
+        return ip
     }
 
     private fun handleRemovePeer(session: fi.iki.elonen.NanoHTTPD.IHTTPSession, deviceId: String): fi.iki.elonen.NanoHTTPD.Response {
@@ -340,7 +417,9 @@ class LabApiHandler(
         val list = ArrayList<String>()
         for (i in 0 until arr.size) {
             val s = arr.getString(i)
-            if (!s.isNullOrEmpty()) list.add(s)
+            if (!s.isNullOrEmpty() && TrustedPeer.ALL_CAPABILITIES.contains(s) && !list.contains(s)) {
+                list.add(s)
+            }
         }
         return list
     }
@@ -367,5 +446,6 @@ class LabApiHandler(
 
     companion object {
         private const val TAG = "LabApiHandler"
+        private const val MAX_PUBKEY_LENGTH = 2048
     }
 }

@@ -73,6 +73,26 @@ components:
       name: token
 
   schemas:
+    TrustedPeer:
+      type: object
+      properties:
+        deviceId: { type: string }
+        deviceName: { type: string }
+        deviceType: { type: string, example: android }
+        host: { type: string, nullable: true }
+        port: { type: integer }
+        trustedAt: { type: integer, format: int64 }
+        lastSeen: { type: integer, format: int64 }
+        online: { type: boolean }
+        capabilities:
+          type: array
+          items: { type: string }
+        role:
+          type: string
+          enum: [auto, master, slave]
+        pubkeyHint: { type: string, nullable: true }
+      description: 信任设备条目；presharedKey 永不出现在网络响应中
+
     Error:
       type: object
       properties:
@@ -3902,6 +3922,154 @@ paths:
                   complete: { type: boolean }
         "400":
           description: INDEX_BUCKET_OUT_OF_RANGE / INDEX_LAYOUT_MISMATCH
+
+  # ==================== Lab Pairing (§5.19.1) ====================
+  /api/v1/lab/trusted-peers:
+    get:
+      tags: [Lab]
+      summary: 信任设备列表
+      operationId: listLabTrustedPeers
+      responses:
+        "200":
+          description: 信任设备列表（不含 presharedKey）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  total: { type: integer }
+                  peers:
+                    type: array
+                    items: { $ref: "#/components/schemas/TrustedPeer" }
+        "401": { description: 未认证 }
+    post:
+      tags: [Lab]
+      summary: 申请配对码
+      description: 生成一次性 6 位配对码（60 秒有效），新码会替换旧码。需要认证。
+      operationId: issueLabPairingCode
+      responses:
+        "200":
+          description: 配对码
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  pairingCode: { type: string, pattern: "^[0-9]{6}$" }
+                  expiresAt: { type: integer, format: int64 }
+                  ttlSeconds: { type: integer, format: int64 }
+                  selfDeviceId: { type: string }
+                  selfDeviceName: { type: string }
+                  selfDeviceType: { type: string }
+                  selfPort: { type: integer }
+        "401": { description: 未认证 }
+
+  /api/v1/lab/trusted-peers/pair-info:
+    get:
+      tags: [Lab]
+      summary: 探测配对码
+      description: 不消费配对码，仅判断是否存在与过期时间。免认证，按 IP 限流。
+      operationId: probeLabPairingCode
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema: { type: string, pattern: "^[0-9]{6}$" }
+      responses:
+        "200":
+          description: 探测结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  exists: { type: boolean }
+                  expiresAt: { type: integer, format: int64 }
+                  deviceNameHint: { type: string, nullable: true }
+        "400": { description: 缺少 code }
+        "429": { description: 尝试过于频繁（Retry-After 头给出等待秒数） }
+
+  /api/v1/lab/trusted-peers/pair:
+    post:
+      tags: [Lab]
+      summary: 使用配对码完成配对
+      description: |
+        免认证（首次配对），但仅允许局域网来源，并受一次性配对码、60 秒 TTL 与按 IP/全局限流保护。
+        服务端用调用方公钥派生预共享密钥，返回 `presharedKey` 与自身身份 `self`；
+        双方各自保存对方为信任设备。
+      operationId: pairLabDevice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pairingCode, myDevice]
+              properties:
+                pairingCode: { type: string, pattern: "^[0-9]{6}$" }
+                myDevice:
+                  type: object
+                  required: [deviceId, deviceName, deviceType]
+                  properties:
+                    deviceId: { type: string }
+                    deviceName: { type: string }
+                    deviceType: { type: string }
+                    port: { type: integer, minimum: 1, maximum: 65535 }
+                    pubkey: { type: string, description: "X.509 公钥 Base64（ECDH P-256）" }
+                    capabilities:
+                      type: array
+                      items: { type: string }
+      responses:
+        "200":
+          description: 配对成功；presharedKey 只返回一次，务必本地保存
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  message: { type: string }
+                  presharedKey: { type: string }
+                  peer: { $ref: "#/components/schemas/TrustedPeer" }
+                  self:
+                    type: object
+                    properties:
+                      deviceId: { type: string }
+                      deviceName: { type: string }
+                      deviceType: { type: string }
+                      port: { type: integer }
+                      capabilities:
+                        type: array
+                        items: { type: string }
+        "400": { description: 配对码无效/已过期，或 myDevice 字段非法 }
+        "403": { description: 非局域网来源 }
+        "429": { description: 尝试过于频繁（Retry-After 头给出等待秒数） }
+
+  /api/v1/lab/trusted-peers/{id}:
+    delete:
+      tags: [Lab]
+      summary: 撤销信任
+      operationId: removeLabTrustedPeer
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: 已撤销（仅本机）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  deviceId: { type: string }
+                  message: { type: string }
+        "404": { description: 设备不存在 }
 
   # ==================== Device Sync (§5.30) ====================
   /api/v1/lab/sync/sessions:

@@ -16,7 +16,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -25,9 +24,11 @@ import androidx.viewpager2.widget.ViewPager2;
 import com.google.android.material.tabs.TabLayout;
 import com.google.android.material.tabs.TabLayoutMediator;
 import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.EhDB;
+import com.hippo.ehviewer.ui.EhActivity;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -35,7 +36,20 @@ import java.util.List;
 /**
  * 画廊选择器
  */
-public class GalleryPickerActivity extends AppCompatActivity {
+public class GalleryPickerActivity extends EhActivity {
+
+    @Override
+    protected int getThemeResId(int theme) {
+        switch (theme) {
+            case Settings.THEME_DARK:
+                return R.style.AppTheme_Toolbar_Dark;
+            case Settings.THEME_BLACK:
+                return R.style.AppTheme_Toolbar_Black;
+            case Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme_Toolbar;
+        }
+    }
 
     public static final String EXTRA_MODE = "mode";
     public static final String EXTRA_SOURCE = "source";

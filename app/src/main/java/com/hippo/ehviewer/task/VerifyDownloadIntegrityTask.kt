@@ -1,6 +1,7 @@
 package com.hippo.ehviewer.task
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
@@ -8,11 +9,9 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.GalleryPageFetcher
+import com.hippo.ehviewer.spider.GalleryIntegrityChecker
 import com.hippo.ehviewer.spider.SpiderDen
-import com.hippo.ehviewer.spider.SpiderInfo
-import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
-import com.hippo.unifile.UniFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
@@ -24,6 +23,9 @@ class VerifyDownloadIntegrityTask(
 
     companion object {
         private const val TAG = "VerifyIntegrityTask"
+
+        /** 每校验多少个画廊输出一行性能采样日志。 */
+        private const val PERF_SAMPLE_SIZE = 50L
     }
 
     @Volatile private var isPaused = false
@@ -34,6 +36,18 @@ class VerifyDownloadIntegrityTask(
     private var completeCount = 0
     private var incompleteCount = 0
     private var removedCount = 0
+
+    // 单画廊耗时（供性能采样使用）
+    private var lastScanMs = 0L
+    private var lastPages = 0
+    private var lastNetMs = 0L
+
+    // 性能采样累计值，每 PERF_SAMPLE_SIZE 个画廊输出一行
+    private var sampleGalleries = 0L
+    private var samplePages = 0L
+    private var sampleScanMs = 0L
+    private var sampleNetMs = 0L
+    private var sampleNetCalls = 0L
 
 
     override fun getTaskId(): String = "verify_integrity"
@@ -46,6 +60,7 @@ class VerifyDownloadIntegrityTask(
 
     override suspend fun execute(): Result<Unit> {
         return try {
+            val taskStartMs = SystemClock.elapsedRealtime()
             updateState(TaskState.RUNNING)
             Log.d(TAG, "开始校验下载完整性")
             appendTaskLog("开始校验下载完整性")
@@ -87,6 +102,17 @@ class VerifyDownloadIntegrityTask(
             completeCount = 0
             incompleteCount = 0
             removedCount = 0
+            sampleGalleries = 0L
+            samplePages = 0L
+            sampleScanMs = 0L
+            sampleNetMs = 0L
+            sampleNetCalls = 0L
+
+            Log.i(
+                TAG,
+                "开始校验: 共 $totalProgress 个画廊, 下载位置类型=" +
+                    (com.hippo.ehviewer.Settings.getDownloadLocation()?.javaClass?.simpleName ?: "null")
+            )
 
             appendTaskLog("总共需要校验 $totalProgress 个画廊（跳过 ${finishList.size - verifiableList.size} 个已删除/递进关系画廊）")
 
@@ -99,13 +125,17 @@ class VerifyDownloadIntegrityTask(
                     Thread.sleep(200)
                 }
 
-                appendTaskLog("正在校验 [${verifyCurrent + 1}/$totalProgress]: ${info.title} (${info.gid})")
+                // 全库校验一万多个画廊时，逐条写日志本身也是可观开销：
+                // 进度日志每 50 个记一条，完整的画廊只计数，不完整/已删除的仍然逐个记录。
+                if (verifyCurrent % 50 == 0) {
+                    appendTaskLog("正在校验 [${verifyCurrent + 1}/$totalProgress]: ${info.title} (${info.gid})")
+                }
 
                 val result = verifySingleGallery(info)
+                recordPerfSample()
                 when (result) {
                     VerifyResult.COMPLETE -> {
                         completeCount++
-                        appendTaskLog("✓ 画廊完整: ${info.title}")
                     }
                     VerifyResult.INCOMPLETE -> {
                         incompleteCount++
@@ -125,6 +155,13 @@ class VerifyDownloadIntegrityTask(
 
             val msg = context.getString(R.string.verify_integrity_complete, completeCount, incompleteCount)
             Log.i(TAG, msg)
+            Log.i(
+                TAG,
+                "校验耗时: ${SystemClock.elapsedRealtime() - taskStartMs}ms, 画廊=$totalProgress," +
+                    " 平均扫描=${if (totalProgress > 0) sampleScanMs / totalProgress else 0}ms," +
+                    " 平均网络=${if (totalProgress > 0) sampleNetMs / totalProgress else 0}ms," +
+                    " 网络请求次数=$sampleNetCalls"
+            )
             appendTaskLog(msg)
             appendTaskLog("校验完成: 完整 $completeCount 个, 不完整 $incompleteCount 个, 已删除 $removedCount 个")
             notifyCompleted()
@@ -143,11 +180,15 @@ class VerifyDownloadIntegrityTask(
     }
 
     private fun verifySingleGallery(info: DownloadInfo): VerifyResult {
+        lastScanMs = 0L
+        lastPages = 0
+        lastNetMs = 0L
+
         val dir = SpiderDen.getExistingGalleryDownloadDir(info)
         if (dir == null || !dir.isDirectory) {
             Log.w(TAG, "画廊目录不存在: ${info.title} (${info.gid})")
             appendTaskLog("画廊目录不存在，检查是否已删除...")
-            val removed = checkGalleryRemoved(info)
+            val removed = timeNetwork { checkGalleryRemoved(info) }
             if (removed) {
                 markAsRemoved(info)
                 return VerifyResult.REMOVED
@@ -156,65 +197,69 @@ class VerifyDownloadIntegrityTask(
             return VerifyResult.INCOMPLETE
         }
 
-        val spiderInfoFile = dir.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
-        if (spiderInfoFile == null) {
-            Log.w(TAG, "SpiderInfo 文件不存在: ${info.title} (${info.gid})")
-            appendTaskLog("SpiderInfo 文件不存在")
+        // 与内置引擎、系统委托下载共用同一完整性判定。
+        // 目录已经解析过，直接交给检查器，避免再解析一次（每次解析都读写一次目录名）。
+        val scanStart = SystemClock.elapsedRealtime()
+        val integrity = GalleryIntegrityChecker.checkIn(dir, info)
+        lastScanMs = SystemClock.elapsedRealtime() - scanStart
+        lastPages = integrity.expectedPages
+
+        if (integrity.spiderInfoMissing) {
+            Log.w(TAG, "SpiderInfo 文件不存在或页数无效: ${info.title} (${info.gid})")
+            appendTaskLog("SpiderInfo 文件不存在或页数无效")
             resetDownloadState(info)
             return VerifyResult.INCOMPLETE
         }
 
-        val spiderInfo = SpiderInfo.read(spiderInfoFile)
-        if (spiderInfo == null || spiderInfo.pages <= 0) {
-            Log.w(TAG, "SpiderInfo 读取失败或页数无效: ${info.title} (${info.gid})")
-            appendTaskLog("SpiderInfo 读取失败或页数无效")
-            resetDownloadState(info)
-            return VerifyResult.INCOMPLETE
+        if (integrity.isComplete) {
+            Log.d(TAG, "画廊完整: ${info.title} (${info.gid}), ${integrity.expectedPages} 页")
+            return VerifyResult.COMPLETE
         }
 
-        val expectedPages = spiderInfo.pages
-        val corruptedIndices = mutableListOf<Int>()
+        Log.w(
+            TAG,
+            "画廊不完整: ${info.title} (${info.gid}), 期望 ${integrity.expectedPages} 页," +
+                " 损坏 ${integrity.invalidIndices.size} 页"
+        )
+        appendTaskLog("期望 ${integrity.expectedPages} 页, 损坏 ${integrity.invalidIndices.size} 页")
 
-        for (index in 0 until expectedPages) {
-            if (isCancelled) throw CancellationException("任务已取消")
-
-            val imageFile = SpiderDen.findImageFile(dir, index)
-            if (imageFile == null) {
-                Log.w(TAG, "图片缺失: ${info.title} (${info.gid}), 第 ${index + 1} 页")
-                corruptedIndices.add(index)
-                continue
-            }
-
-            if (!imageFile.isFile) {
-                Log.w(TAG, "图片不是文件: ${info.title} (${info.gid}), 第 ${index + 1} 页")
-                corruptedIndices.add(index)
-                continue
-            }
-
-            val fileSize = imageFile.length()
-            if (fileSize <= 0) {
-                Log.w(TAG, "图片文件大小为0: ${info.title} (${info.gid}), 第 ${index + 1} 页")
-                corruptedIndices.add(index)
-            }
+        val removed = timeNetwork { checkGalleryRemoved(info) }
+        if (removed) {
+            markAsRemoved(info)
+            return VerifyResult.REMOVED
         }
 
-        if (corruptedIndices.isNotEmpty()) {
-            Log.w(TAG, "画廊不完整: ${info.title} (${info.gid}), 期望 $expectedPages 页, 损坏 ${corruptedIndices.size} 页")
-            appendTaskLog("期望 $expectedPages 页, 损坏 ${corruptedIndices.size} 页")
+        GalleryIntegrityChecker.deleteInvalidFiles(dir, integrity)
+        resetDownloadState(info)
+        return VerifyResult.INCOMPLETE
+    }
 
-            val removed = checkGalleryRemoved(info)
-            if (removed) {
-                markAsRemoved(info)
-                return VerifyResult.REMOVED
-            }
-
-            deleteCorruptedImages(dir, corruptedIndices)
-            resetDownloadState(info)
-            return VerifyResult.INCOMPLETE
+    private inline fun <T> timeNetwork(block: () -> T): T {
+        val start = SystemClock.elapsedRealtime()
+        try {
+            return block()
+        } finally {
+            lastNetMs = SystemClock.elapsedRealtime() - start
         }
+    }
 
-        Log.d(TAG, "画廊完整: ${info.title} (${info.gid}), $expectedPages 页")
-        return VerifyResult.COMPLETE
+    /**
+     * 每 [PERF_SAMPLE_SIZE] 个画廊汇总一行性能日志，用来区分耗时到底在扫描还是网络。
+     */
+    private fun recordPerfSample() {
+        sampleGalleries++
+        samplePages += lastPages
+        sampleScanMs += lastScanMs
+        sampleNetMs += lastNetMs
+        if (lastNetMs > 0L) sampleNetCalls++
+        if (sampleGalleries % PERF_SAMPLE_SIZE != 0L) return
+        Log.i(
+            TAG,
+            "性能采样: 画廊=$sampleGalleries 平均页数=${samplePages / sampleGalleries}" +
+                " 平均扫描=${sampleScanMs / sampleGalleries}ms" +
+                " 平均网络=${sampleNetMs / sampleGalleries}ms" +
+                " 网络请求次数=$sampleNetCalls"
+        )
     }
 
     private fun checkGalleryRemoved(info: DownloadInfo): Boolean {
@@ -247,16 +292,6 @@ class VerifyDownloadIntegrityTask(
         // 在下载历史中标记为已删除，避免后续重复校验
         EhDB.recordDownloadAsDuplicate(info, DownloadHistory.DELETION_NORMAL, 0L)
         Log.i(TAG, "画廊已被远端删除，标记为已完成: ${info.title} (${info.gid})")
-    }
-
-    private fun deleteCorruptedImages(dir: UniFile, corruptedIndices: List<Int>) {
-        for (index in corruptedIndices) {
-            val imageFile = SpiderDen.findImageFile(dir, index)
-            if (imageFile != null && imageFile.isFile) {
-                imageFile.delete()
-                Log.d(TAG, "已删除损坏图片: 第 ${index + 1} 页")
-            }
-        }
     }
 
     private fun resetDownloadState(info: DownloadInfo) {

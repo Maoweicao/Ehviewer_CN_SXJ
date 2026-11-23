@@ -100,7 +100,7 @@ public class SubscriptionManagerActivity extends EhActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_subscription_manager);
 
-        subscriptionManager = SubscriptionManager.getInstance();
+        subscriptionManager = SubscriptionManager.getInstance(getApplicationContext());
         subscriptions = new ArrayList<>();
 
         initToolbar();
@@ -198,6 +198,11 @@ public class SubscriptionManagerActivity extends EhActivity {
         if (url.startsWith("ssr://")) return "ssr";
         if (url.startsWith("vmess://") || url.startsWith("vless://")) return "v2ray";
         if (url.startsWith("trojan://")) return "trojan";
+        String lower = url.toLowerCase(java.util.Locale.US);
+        if (lower.contains("flag=clash") || lower.contains("type=clash")
+                || lower.contains("clash")) {
+            return "clash";
+        }
         return "mixed";
     }
 

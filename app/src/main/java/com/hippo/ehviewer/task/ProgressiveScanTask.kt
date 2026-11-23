@@ -7,6 +7,7 @@ import com.hippo.ehviewer.R
 import com.hippo.ehviewer.client.EhUtils
 import com.hippo.ehviewer.spider.SpiderDen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
 import java.util.Collections
@@ -246,125 +247,31 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
     private suspend fun buildProgressiveChains(folderInfos: List<FolderHashInfo>): List<ProgressiveChain> {
         val sorted = folderInfos.sortedBy { it.hashCount }
         val n = sorted.size
+        val job = coroutineContext[Job]
 
-        // Determine max hash id for array sizing
-        var maxHashId = 0
-        for (f in sorted) {
-            for (h in f.hashes) {
-                if (h > maxHashId) maxHashId = h
-            }
-        }
-
-        // Build inverted index: hashId -> list of gallery indices that contain it
-        val hashToOwners = Array(maxHashId + 1) { mutableListOf<Int>() }
-        for (i in 0 until n) {
-            for (h in sorted[i].hashes) {
-                hashToOwners[h].add(i)
-            }
-        }
-
-        // Union-Find
-        val uf = IntArray(n) { it }
-        totalCandidates = 0
-        checkedCandidates = 0
-
-        for (i in 0 until n) {
-            ensureNotCancelled()
-
-            val candidateSet = IntHashSet()
-            for (h in sorted[i].hashes) {
-                for (j in hashToOwners[h]) {
-                    if (j != i && sorted[j].hashCount > sorted[i].hashCount) {
-                        candidateSet.add(j)
-                    }
+        // 包含关系聚类统一走 SubsetContainment，与下载历史梳理共用同一套判定
+        val result = SubsetContainment.buildClusters(
+            sortedHashes = Array(n) { sorted[it].hashes },
+            onItem = { i ->
+                job?.ensureActive()
+                if (i % 100 == 0) {
+                    val pct = 15 + (i * 65 / maxOf(n, 1))
+                    updateProgress(pct, context.getString(R.string.progressive_scan_index_progress, i + 1, n))
                 }
+            },
+            onProgress = { checked, total ->
+                val pct = 15 + (checked * 65 / maxOf(total, 1))
+                updateProgress(pct, context.getString(R.string.progressive_scan_comparing, checked, total))
             }
+        )
 
-            totalCandidates += candidateSet.size
-
-            for (j in candidateSet.values()) {
-                ensureNotCancelled()
-                checkedCandidates++
-
-                if (intArrayContainsAll(sorted[j].hashes, sorted[i].hashes)) {
-                    union(uf, i, j)
-                }
-
-                if (checkedCandidates % 500 == 0L) {
-                    val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
-                    updateProgress(pct, context.getString(R.string.progressive_scan_comparing, checkedCandidates, totalCandidates))
-                }
-            }
-
-            if (i % 100 == 0) {
-                val pct = 15 + (checkedCandidates * 65 / maxOf(totalCandidates, 1)).toInt()
-                updateProgress(pct, context.getString(R.string.progressive_scan_index_progress, i + 1, n))
-            }
-        }
-
-        // Free inverted index
-        for (arr in hashToOwners) arr.clear()
+        totalCandidates = result.candidatePairs.toLong()
+        checkedCandidates = result.checkedPairs.toLong()
 
         ensureNotCancelled()
         updateProgress(80, context.getString(R.string.progressive_scan_building_chains))
         appendTaskLog(context.getString(R.string.progressive_scan_index_log, n, checkedCandidates))
-        return buildChainsFromComponents(sorted, uf, n)
-    }
-
-    private fun intArrayContainsAll(superArr: IntArray, subArr: IntArray): Boolean {
-        if (subArr.isEmpty()) return true
-        if (superArr.size < subArr.size) return false
-        var si = 0
-        var ci = 0
-        while (si < superArr.size && ci < subArr.size) {
-            when {
-                superArr[si] == subArr[ci] -> { si++; ci++ }
-                superArr[si] < subArr[ci] -> si++
-                else -> return false
-            }
-        }
-        return ci == subArr.size
-    }
-
-    private class IntHashSet {
-        private var count = 0
-        private var data = IntArray(16)
-
-        val size: Int get() = count
-
-        fun add(value: Int) {
-            for (i in 0 until count) {
-                if (data[i] == value) return
-            }
-            if (count == data.size) {
-                data = data.copyOf(data.size * 2)
-            }
-            data[count++] = value
-        }
-
-        fun values(): IntArray = data.copyOf(count)
-    }
-
-    private fun find(uf: IntArray, x: Int): Int {
-        var root = x
-        while (uf[root] != root) {
-            root = uf[root]
-        }
-        var cur = x
-        while (uf[cur] != root) {
-            val next = uf[cur]
-            uf[cur] = root
-            cur = next
-        }
-        return root
-    }
-
-    private fun union(uf: IntArray, a: Int, b: Int) {
-        val ra = find(uf, a)
-        val rb = find(uf, b)
-        if (ra != rb) {
-            uf[ra] = rb
-        }
+        return buildChainsFromComponents(sorted, result.parent, n)
     }
 
     private fun buildChainsFromComponents(
@@ -374,7 +281,7 @@ class ProgressiveScanTask(context: Context) : BaseBackgroundTask(context) {
     ): List<ProgressiveChain> {
         val components = HashMap<Int, MutableList<Int>>()
         for (i in 0 until n) {
-            val root = find(uf, i)
+            val root = SubsetContainment.find(uf, i)
             components.getOrPut(root) { mutableListOf() }.add(i)
         }
 

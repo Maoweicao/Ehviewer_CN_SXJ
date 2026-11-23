@@ -52,7 +52,7 @@ public class DownloadInfo extends GalleryInfo {
 	public long speed;
 	@Ignore
 	public long remaining;
-	@Ignore
+	@ColumnInfo(name = "FINISHED")
 	public int finished;
 	@Ignore
 	public int downloaded;
@@ -84,6 +84,11 @@ public class DownloadInfo extends GalleryInfo {
 	// transient UI state: 预下载合并/预碰撞检测的实时步骤说明（不入库）
 	@Ignore
 	public String mergeDetail;
+
+	// transient: 本次会话中已确认画廊被源站移除（404/410/Pining/Unavailable）。
+	// 只有该标记为 true 时，「将已移除画廊视为已完成」设置才会生效。
+	@Ignore
+	public boolean removedFromSource = false;
 
 	// 本地评分覆盖，0.0 - 5.0 星星刻度，-1 表示未设置。
 	// 该字段不入库（本地评分存储在 SharedPreferences，见 LocalRatingManager），
@@ -327,6 +332,9 @@ public class DownloadInfo extends GalleryInfo {
 		this.rating = galleryInfo.rating;
 		this.simpleTags = galleryInfo.simpleTags;
 		this.simpleLanguage = galleryInfo.simpleLanguage;
+		// 页数是持久化字段：从历史/磁盘恢复时必须在建记录时就带上，
+		// 否则列表里会出现「0 页」，也无法算出完成度。
+		this.pages = galleryInfo.pages;
 	}
 
 	public void updateInfo(GalleryInfo galleryInfo) {
@@ -340,6 +348,9 @@ public class DownloadInfo extends GalleryInfo {
 		this.rating = galleryInfo.rating;
 		this.simpleTags = galleryInfo.simpleTags;
 		this.simpleLanguage = galleryInfo.simpleLanguage;
+		if (galleryInfo.pages > 0) {
+			this.pages = galleryInfo.pages;
+		}
 	}
 
 	public JSONObject toJson() {

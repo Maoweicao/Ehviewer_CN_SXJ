@@ -113,7 +113,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
     private final DownloadsScene mScene;
     private final DownloadAdapterCallback mCallback;
 
-    private LinkedList<DownloadInfo> mWaitList;
+    private List<DownloadInfo> mWaitList;
 
     private View movedItem = null;
 
@@ -1000,7 +1000,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
         return null;
     }
 
-    public void setWaitList(LinkedList<DownloadInfo> waitList) {
+    public void setWaitList(List<DownloadInfo> waitList) {
         this.mWaitList = waitList;
     }
 
@@ -1010,7 +1010,7 @@ public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.Downlo
      * 直接查询 DownloadManager 可保证队列序号始终正确显示。
      */
     private int indexInWaitList(DownloadInfo info) {
-        LinkedList<DownloadInfo> list = mWaitList;
+        List<DownloadInfo> list = mWaitList;
         if (mCallback != null) {
             DownloadManager dm = mCallback.getDownloadManager();
             if (dm != null) {

@@ -71,7 +71,11 @@ class StartRangeDownloadTask(context: Context, private val gidList: LongList) : 
             val validCount = validGidList.size()
             updateProgress(10, context.getString(R.string.start_range_download_processing, validCount))
             delay(500)
-            
+
+            // 真正发起下载：之前这里只检查状态、没有调用任何启动方法，
+            // 导致下载列表里单本“开始”按钮点了没有反应。
+            DownloadService.startRangeDownload(context, validGidList)
+
             // 等待一段时间让下载状态更新
             delay(1000)
             

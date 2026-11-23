@@ -21,7 +21,6 @@ import android.content.Intent
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
@@ -29,6 +28,8 @@ import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.Settings
+import com.hippo.ehviewer.ui.EhActivity
 
 /**
  * 存储感知分析。
@@ -36,7 +37,14 @@ import com.hippo.ehviewer.R
  * 三个 Tab：存储概览（环形图 + 明细卡片）、画廊占用分析（按分类 / 占用特征 / 受保护）、
  * 缓存与清理。
  */
-class StorageAnalysisActivity : AppCompatActivity() {
+class StorageAnalysisActivity : EhActivity() {
+
+    override fun getThemeResId(theme: Int): Int = when (theme) {
+        Settings.THEME_DARK -> R.style.AppTheme_Toolbar_Dark
+        Settings.THEME_BLACK -> R.style.AppTheme_Toolbar_Black
+        else -> R.style.AppTheme_Toolbar
+    }
+
 
     private lateinit var viewPager: ViewPager2
 

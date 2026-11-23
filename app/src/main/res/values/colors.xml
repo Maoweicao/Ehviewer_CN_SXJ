@@ -258,4 +258,7 @@
     <color name="storage_chart_temp">#FF26C6DA</color>
     <color name="storage_chart_other">#FF9E9E9E</color>
 
+    <color name="tag_category_bookmark">#E08A2C</color>
+    <color name="tag_category_favorite">#C2527E</color>
+
 </resources>

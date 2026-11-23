@@ -90,12 +90,16 @@ public class EhProxySelector extends ProxySelector {
 
   @Override
   public List<Proxy> select(URI uri) {
-    // Priority 1: IpSwitchController proxy (lab feature)
-    if (Settings.getIpSwitchEnabled()) {
+    // Priority 1: 内置 Clash 内核（实验室自动换 IP）。
+    // 只接管远端主机，局域网/本机地址仍然直连，避免影响接力下载和局域网发现。
+    if (Settings.getIpSwitchEnabled() && !isLocalHost(uri.getHost())) {
       Proxy ipSwitchProxy = IpSwitchController.getInstance().getCurrentProxy();
       if (ipSwitchProxy != null) {
         return Collections.singletonList(ipSwitchProxy);
       }
+      // 自动换 IP 已启用但内核/节点尚未就绪：直接连接，避免回落到
+      // 已失效的系统代理或系统 VPN 代理导致“未知主机”。
+      return Collections.singletonList(Proxy.NO_PROXY);
     }
 
     // Priority 2: User-configured HTTP/SOCKS proxy
@@ -127,6 +131,36 @@ public class EhProxySelector extends ProxySelector {
     if (delegation != null) {
       delegation.connectFailed(uri, sa, ioe);
     }
+  }
+
+  /** 本机/局域网地址不走内置代理，保证接力、局域网下载和发现不受影响。 */
+  static boolean isLocalHost(String host) {
+    if (host == null || host.isEmpty()) return false;
+    String h = host.toLowerCase(java.util.Locale.US);
+    if (h.equals("localhost") || h.equals("ip6-localhost")
+        || h.equals("::1") || h.equals("0.0.0.0")) {
+      return true;
+    }
+    if (h.endsWith(".local")) {
+      return true;
+    }
+    if (h.contains(":") && (h.startsWith("fc") || h.startsWith("fd")
+        || h.startsWith("fe80"))) {
+      return true;
+    }
+    if (h.matches("^\\d{1,3}(\\.\\d{1,3}){3}$")) {
+      String[] parts = h.split("\\.");
+      try {
+        int a = Integer.parseInt(parts[0]);
+        int b = Integer.parseInt(parts[1]);
+        if (a == 127 || a == 10) return true;
+        if (a == 192 && b == 168) return true;
+        if (a == 169 && b == 254) return true;
+        return a == 172 && b >= 16 && b <= 31;
+      } catch (NumberFormatException ignored) {
+      }
+    }
+    return false;
   }
 
   /**

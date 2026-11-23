@@ -141,18 +141,19 @@ class TrustedPeerStore private constructor(private val appContext: Context) {
      */
     fun touch(deviceId: String, host: String?, port: Int, rttMs: Long): Boolean {
         ensureLoaded()
-        var updated = false
+        lateinit var peer: TrustedPeer
         synchronized(lock) {
             val map = peersById!!
-            val p = map[deviceId] ?: return@synchronized
+            val p = map[deviceId] ?: return false
             p.touchLastSeen(System.currentTimeMillis())
             if (host != null) p.setHost(host)
             if (port > 0) p.setPort(port)
             if (rttMs >= 0) p.setRttMs(rttMs)
             persistLocked()
-            updated = true
+            peer = p
         }
-        return updated
+        notifyUpdated(peer, peer)
+        return true
     }
 
     /**
@@ -160,12 +161,65 @@ class TrustedPeerStore private constructor(private val appContext: Context) {
      */
     fun markOffline(deviceId: String) {
         ensureLoaded()
+        lateinit var peer: TrustedPeer
         synchronized(lock) {
             val map = peersById!!
-            val p = map[deviceId] ?: return@synchronized
+            val p = map[deviceId] ?: return
             p.setOnline(false)
+            p.setRttMs(-1)
+            persistLocked()
+            peer = p
+        }
+        notifyUpdated(peer, peer)
+    }
+
+    /**
+     * 更新设备名称与地址，保留配对密钥、能力与信任时间。
+     *
+     * 与 [upsert] 的区别：本方法不会用新对象覆盖整条记录，
+     * 因此已配对设备的 `presharedKey` 不会被清空。
+     *
+     * @return 更新后的设备；deviceId 不存在时返回 null
+     */
+    fun updateEndpoint(deviceId: String, name: String?, host: String?, port: Int): TrustedPeer? {
+        ensureLoaded()
+        val old: TrustedPeer
+        val updated: TrustedPeer
+        synchronized(lock) {
+            val map = peersById!!
+            old = map[deviceId] ?: return null
+            val newName = name?.trim()?.takeIf { it.isNotEmpty() } ?: old.deviceName
+            updated = TrustedPeer.Builder(old.deviceId, newName, old.deviceType)
+                .host(host)
+                .port(port)
+                .trustedAt(old.trustedAt)
+                .lastSeen(old.lastSeen)
+                .online(old.online)
+                .capabilities(old.capabilities)
+                .role(old.role)
+                .pubkeyHint(old.pubkeyHint)
+                .presharedKey(old.presharedKey)
+                .rttMs(old.rttMs)
+                .build()
+            map[deviceId] = updated
             persistLocked()
         }
+        TransferLogger.getInstance().d(
+            "TrustedPeerStore",
+            "Updated peer endpoint: deviceId=$deviceId, host=$host, port=$port",
+        )
+        notifyUpdated(old, updated)
+        return updated
+    }
+
+    /**
+     * 界面用的在线判定：既要求 `online` 标志，也要求最近一次心跳在超时窗口内。
+     *
+     * 避免进程重启或对端掉线后，界面一直显示「在线」。
+     */
+    @JvmOverloads
+    fun isEffectivelyOnline(peer: TrustedPeer, now: Long = System.currentTimeMillis()): Boolean {
+        return peer.online && now - peer.lastSeen < ONLINE_TIMEOUT_MS
     }
 
     /**
@@ -229,6 +283,12 @@ class TrustedPeerStore private constructor(private val appContext: Context) {
         val arr = com.alibaba.fastjson.JSONArray()
         for (p in peersById!!.values) arr.add(TrustedPeer.toLocalJson(p))
         prefs.edit().putString(KEY_PEERS, arr.toJSONString()).apply()
+    }
+
+    private fun notifyUpdated(oldPeer: TrustedPeer, newPeer: TrustedPeer) {
+        mainHandler.post {
+            for (l in listeners) l.onPeerUpdated(oldPeer, newPeer)
+        }
     }
 
     interface Listener {

@@ -16,7 +16,6 @@ import com.hippo.lib.yorozuya.SimpleHandler
 import com.hippo.unifile.UniFile
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.coroutineContext
 
 /**
@@ -41,7 +40,9 @@ class PreDownloadMergeTask(
         /** 正常进入下载队列（可能已预合并文件） */
         PROCEED,
         /** 已存在更新更完整的版本，取消本次下载 */
-        CANCELLED_NEWER
+        CANCELLED_NEWER,
+        /** 限流导致扫描失败：等待自动换 IP 后由重试入口重新执行 */
+        FAILED_LIMIT
     }
 
     interface Callback {
@@ -78,11 +79,21 @@ class PreDownloadMergeTask(
     override suspend fun execute(): Result<Unit> {
         return try {
             runMerge()
+            PreDownloadScanRetryStore.clear(context, gid)
+            try {
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                    .getTaskStatusManager().markTaskRetryFinished(getTaskId())
+            } catch (_: Throwable) {
+            }
             notifyCompleted()
             Result.success(Unit)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) {
                 notifyCancelled()
+            } else if (e is PreDownloadLimitException) {
+                outcome = Outcome.FAILED_LIMIT
+                Log.w(TAG, "Pre-download scan paused by rate limit", e)
+                notifyError(e)
             } else {
                 Log.w(TAG, "Pre-download merge failed", e)
                 notifyError(e)
@@ -90,7 +101,7 @@ class PreDownloadMergeTask(
             Result.failure(e)
         } finally {
             // 无论成败都必须通知下载管理器收尾，避免任务卡死在合并阶段
-            finish(Outcome.PROCEED)
+            finish(outcome)
         }
     }
 
@@ -269,15 +280,49 @@ class PreDownloadMergeTask(
         else -> "UNKNOWN($state)"
     }
 
-    /** 预拉取新画廊完整 pTokenMap（循环 preview 页）。失败返回 null。 */
+    /** 预拉取新画廊完整 pTokenMap（循环 preview 页）。非限流失败返回 null，限流抛出。 */
     private suspend fun fetchNewSpiderInfo(info: DownloadInfo): SpiderInfo? {
-        return SpiderTokenUtils.fetchSpiderInfoFromRemote(context, info) { i, previewPages ->
-            ensureNotCancelled()
-            val pct = 10 + (i * 30) / maxOf(previewPages, 1)
-            postProgress(
-                pct,
-                context.getString(R.string.pre_download_merge_fetching) + " ${i + 1}/$previewPages"
-            )
+        var attempt = 0
+        while (true) {
+            try {
+                return SpiderTokenUtils.fetchSpiderInfoFromRemoteStrict(context, info) { i, previewPages ->
+                    ensureNotCancelled()
+                    val pct = 10 + (i * 30) / maxOf(previewPages, 1)
+                    postProgress(
+                        pct,
+                        context.getString(R.string.pre_download_merge_fetching) + " ${i + 1}/$previewPages"
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                if (!PreDownloadScanRetryCoordinator.isLimitFailure(context, t)) {
+                    Log.w(TAG, "预下载: 拉取 hash 失败（非限流），回退正常下载 gid=${info.gid}", t)
+                    return null
+                }
+                appendTaskLog("检测到限流，预下载扫描等待自动切换 IP 后重试（第 ${attempt + 1} 次）")
+                try {
+                    com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                        .getTaskStatusManager()
+                        .markTaskRetrying(getTaskId(), attempt + 1, 2, "等待 IP 切换后重试")
+                } catch (_: Throwable) {
+                }
+                val switched = PreDownloadScanRetryCoordinator.awaitIpSwitch(context)
+                if (switched && attempt < 2) {
+                    attempt++
+                    appendTaskLog("IP 已切换，重新拉取画廊 hash")
+                    try {
+                        com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                            .getTaskStatusManager().markTaskRetryFinished(getTaskId())
+                    } catch (_: Throwable) {
+                    }
+                    continue
+                }
+                PreDownloadScanRetryStore.markFailed(context, info.gid, t.message)
+                throw PreDownloadLimitException(
+                    "预下载扫描遇到限流，已登记等待 IP 切换后重试", t
+                )
+            }
         }
     }
 
@@ -437,40 +482,74 @@ class PreDownloadMergeTask(
  * 依次添加大量画廊时，每条下载记录的候选扫描（EhDB.getAllDownloadInfo + 标题归一化 + 目录存在性检查）
  * 代价较高且彼此高度重复。这里按 TTL 缓存已下载完成画廊的候选索引，
  * 以及每个候选画廊的 hash 集合，尽量复用扫描结果，避免重复解析文件元数据。
+ *
+ * <p>容量必须有上限：每个 hash 集合都是一整本画廊的 token（上千个 40 字符字符串），
+ * 依次扫描大量画廊时无上限累积会占用数百 MB 堆内存，最终在下载或索引线程上 OOM
+ * （crash-2026-10-31 11:55 / 15:05）。这里用访问序 LRU + 总 hash 数上限控制内存，
+ * 超出后按最久未使用顺序淘汰，失效时仍可重新从数据库/文件读取。
  */
 object SimpleScanCache {
     private const val TTL_MS = 60_000L
 
-    @Volatile
+    /** 最多缓存多少个画廊的 hash 集合。 */
+    private const val MAX_CACHED_HASH_SETS = 32
+
+    /** 所有缓存 hash 集合的 hash 条目总数上限（约 150k 个 40 字符串，十几 MB 量级）。 */
+    private const val MAX_CACHED_HASH_TOTAL = 150_000
+
+    private val lock = Any()
+
     private var cacheTime: Long = 0L
-    @Volatile
     private var cachedCandidates: List<DownloadInfo>? = null
 
-    private val hashSets = ConcurrentHashMap<Long, HashSet<String>>()
+    private val hashSets = LinkedHashMap<Long, HashSet<String>>(16, 0.75f, true)
 
-    @Synchronized
-    fun getCandidates(): List<DownloadInfo>? {
-        return if (System.currentTimeMillis() - cacheTime < TTL_MS) cachedCandidates else null
+    private var cachedHashTotal = 0
+
+    fun getCandidates(): List<DownloadInfo>? = synchronized(lock) {
+        if (System.currentTimeMillis() - cacheTime < TTL_MS) {
+            cachedCandidates
+        } else {
+            // TTL 到期后立即释放引用，避免一份全量 DownloadInfo 列表长期占着内存
+            cachedCandidates = null
+            cacheTime = 0L
+            null
+        }
     }
 
-    @Synchronized
-    fun putCandidates(candidates: List<DownloadInfo>) {
+    fun putCandidates(candidates: List<DownloadInfo>) = synchronized(lock) {
         cacheTime = System.currentTimeMillis()
         cachedCandidates = candidates
     }
 
-    fun getHashSet(gid: Long): HashSet<String>? = hashSets[gid]
+    fun getHashSet(gid: Long): HashSet<String>? = synchronized(lock) { hashSets[gid] }
 
-    fun putHashSet(gid: Long, set: HashSet<String>) {
-        hashSets[gid] = set
+    fun putHashSet(gid: Long, set: HashSet<String>) = synchronized(lock) {
+        val previous = hashSets.put(gid, set)
+        cachedHashTotal += set.size - (previous?.size ?: 0)
+        evictIfNeeded(gid)
+    }
+
+    private fun evictIfNeeded(keepGid: Long) {
+        val iterator = hashSets.entries.iterator()
+        while (iterator.hasNext() &&
+            (hashSets.size > MAX_CACHED_HASH_SETS || cachedHashTotal > MAX_CACHED_HASH_TOTAL)
+        ) {
+            val entry = iterator.next()
+            if (entry.key == keepGid) continue
+            cachedHashTotal -= entry.value.size
+            iterator.remove()
+        }
     }
 
     /** 数据发生变化（下载完成、删除、合并）时清空缓存。 */
     @JvmStatic
-    @Synchronized
     fun invalidate() {
-        cacheTime = 0L
-        cachedCandidates = null
-        hashSets.clear()
+        synchronized(lock) {
+            cacheTime = 0L
+            cachedCandidates = null
+            hashSets.clear()
+            cachedHashTotal = 0
+        }
     }
 }

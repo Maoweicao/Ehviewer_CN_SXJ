@@ -94,6 +94,13 @@ android {
         }
     }
 
+    packaging {
+        jniLibs {
+            // 内置 mihomo 内核需要解压到 nativeLibraryDir 后才能执行。
+            useLegacyPackaging = true
+        }
+    }
+
     externalNativeBuild {
         cmake {
 //            version '3.30.5'

@@ -72,6 +72,9 @@ public class AuthManager {
         // 实验室（v3.0）：拓扑与配对码探测无需认证，便于新设备探查
         WHITELIST_PATHS.add("/api/v1/lab/topology");
         WHITELIST_PATHS.add("/api/v1/lab/trusted-peers/pair-info");
+        // 首次配对：由一次性 6 位配对码 + 60s TTL + 来源限流 + 仅局域网保护，
+        // 不能要求调用方先持有传输密码，否则首次配对无法完成。
+        WHITELIST_PATHS.add("/api/v1/lab/trusted-peers/pair");
     }
     
     private AuthMode authMode;

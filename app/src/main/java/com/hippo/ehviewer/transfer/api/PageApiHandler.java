@@ -870,22 +870,28 @@ public class PageApiHandler extends BaseApiHandler {
             String newHash = null;
 
             if (!skipped) {
-                // 写入新文件
-                UniFile targetFile = downloadDir.createFile(filename);
-                if (targetFile == null) {
+                // 先写 .part，再重命名；进程被杀时不会留下被误认为完整的半张图。
+                String partName = filename + ".part";
+                UniFile partFile = downloadDir.findFile(partName);
+                if (partFile != null) {
+                    partFile.delete();
+                }
+                partFile = downloadDir.createFile(partName);
+                if (partFile == null) {
                     tmpFile.delete();
                     return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
-                            "Failed to create target file: " + filename);
+                            "Failed to create temp file: " + partName);
                 }
 
                 try (InputStream is = new FileInputStream(tmpFile);
-                     java.io.OutputStream os = targetFile.openOutputStream()) {
+                     java.io.OutputStream os = partFile.openOutputStream()) {
                     byte[] buf = new byte[8192];
                     int len;
                     while ((len = is.read(buf)) > 0) {
                         os.write(buf, 0, len);
                     }
                 } catch (Exception e) {
+                    partFile.delete();
                     tmpFile.delete();
                     TransferLogger.getInstance().e(TAG, "Failed to write uploaded page", e);
                     return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
@@ -893,11 +899,43 @@ public class PageApiHandler extends BaseApiHandler {
                 }
                 tmpFile.delete();
 
-                writtenSize = targetFile.length();
+                UniFile targetFile = downloadDir.findFile(filename);
+                if (targetFile != null) {
+                    targetFile.delete();
+                }
+                boolean moved = partFile.renameTo(filename);
+                if (!moved) {
+                    // 某些 SAF 提供方不支持 rename：退回直接复制
+                    targetFile = downloadDir.createFile(filename);
+                    if (targetFile == null) {
+                        partFile.delete();
+                        return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                                "Failed to create target file: " + filename);
+                    }
+                    try (InputStream is = partFile.openInputStream();
+                         java.io.OutputStream os = targetFile.openOutputStream()) {
+                        byte[] buf = new byte[8192];
+                        int len;
+                        while ((len = is.read(buf)) > 0) {
+                            os.write(buf, 0, len);
+                        }
+                    } catch (Exception e) {
+                        partFile.delete();
+                        targetFile.delete();
+                        return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.INTERNAL_ERROR,
+                                "Write failed: " + e.getMessage());
+                    }
+                    partFile.delete();
+                } else {
+                    targetFile = downloadDir.findFile(filename);
+                }
+
+                writtenSize = targetFile != null ? targetFile.length() : fileSize;
                 overwritten = existed;
 
                 // 计算新文件 hash（无论是否提供 providedHash 都计算一次，便于返回）
-                newHash = computeFileHash(targetFile, normalizedAlgorithm);
+                newHash = targetFile != null
+                        ? computeFileHash(targetFile, normalizedAlgorithm) : null;
 
                 // 更新下载计数
                 downloadManager.markPageDownloaded(gid, pageIndex, info);

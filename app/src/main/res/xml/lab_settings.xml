@@ -65,6 +65,12 @@
             app:entries="@array/lab_sync_direction_entries"
             app:entryValues="@array/lab_sync_direction_values" />
 
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="lab_download_lan_first"
+            android:summary="@string/lab_download_lan_first_summary"
+            android:title="@string/lab_download_lan_first" />
+
         <Preference
             android:key="lab_sync_hint"
             android:summary="@string/lab_sync_section_summary"

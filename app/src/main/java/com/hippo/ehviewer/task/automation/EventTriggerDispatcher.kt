@@ -171,7 +171,7 @@ class EventTriggerDispatcher private constructor(private val context: Context) {
                 )))
             }
             override fun onReplace(newInfo: DownloadInfo, oldInfo: DownloadInfo) {}
-            override fun onUpdate(info: DownloadInfo, list: MutableList<DownloadInfo>, waitList: java.util.LinkedList<DownloadInfo>) {}
+            override fun onUpdate(info: DownloadInfo, list: MutableList<DownloadInfo>, waitList: MutableList<DownloadInfo>) {}
             override fun onUpdateAll() {}
             override fun onReload() {}
             override fun onChange() {}

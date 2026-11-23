@@ -35,6 +35,9 @@ import com.hippo.ehviewer.download.filter.PostedTime;
 import com.hippo.ehviewer.download.filter.QuickFilterDefinition;
 import com.hippo.ehviewer.download.filter.QuickFilterKind;
 import com.hippo.ehviewer.download.filter.SortKey;
+import com.hippo.ehviewer.download.tag.TagQuery;
+import com.hippo.ehviewer.download.tag.TagQueryParser;
+import com.hippo.ehviewer.download.tag.TagStore;
 import com.hippo.ehviewer.lab.semantic.SemanticSearchManager;
 import com.hippo.ehviewer.lab.semantic.search.SemanticRanker;
 import com.hippo.ehviewer.local.LocalRatingManager;
@@ -88,6 +91,10 @@ public class DownloadListInfosExecutor {
 
     private DownloadManager mDownloadManager;
     private final Map<Long, Long> mGalleryTimeCache = new HashMap<>();
+
+    /** 标签范围筛选用的 `Gallery_Tags` 快照，一次任务只读一次。 */
+    @Nullable
+    private Map<Long, Set<String>> mTagTable;
 
     public DownloadListInfosExecutor(@Nullable List<DownloadInfo> mList, String searchKey) {
         this(mList, searchKey, null);
@@ -609,6 +616,15 @@ public class DownloadListInfosExecutor {
 
         if (condition.getRequireFinished()) {
             filtered = filterDownloadState(filtered, DownloadInfo.STATE_FINISH);
+        }
+
+        // 书签分类划定的标签范围：先圈定范围，后面的高级筛选都在这个范围内做
+        String tagQuery = condition.getTagQuery();
+        if (tagQuery != null && !tagQuery.trim().isEmpty()) {
+            filtered = filterByTagQuery(filtered, tagQuery);
+            if (filtered.isEmpty()) {
+                return filtered;
+            }
         }
 
         filtered = filterByTimeRange(filtered, condition.getTimeFrom(), condition.getTimeTo());
@@ -1231,6 +1247,35 @@ public class DownloadListInfosExecutor {
             cache.put(term, aliases);
             return aliases;
         };
+    }
+
+    /**
+     * 按书签分类的标签关键字过滤。
+     *
+     * 用 {@code Gallery_Tags} 与条目内存里的 simpleTags/tgList 一起判定；
+     * 关键字含非标签字段（title: / uploader: 等）时无法本地判定，宁可返回空列表，
+     * 也不要把所有条目都当成命中。
+     */
+    @WorkerThread
+    @NonNull
+    private List<DownloadInfo> filterByTagQuery(@NonNull List<DownloadInfo> source, @NonNull String query) {
+        TagQuery parsed = TagQueryParser.parse(query);
+        if (!parsed.isValid()) {
+            Log.i(TAG, "filterByTagQuery: 非标签查询，返回空列表: " + query);
+            return new ArrayList<>();
+        }
+        if (mTagTable == null) {
+            mTagTable = TagStore.loadAll();
+        }
+        List<DownloadInfo> result = new ArrayList<>();
+        for (DownloadInfo info : source) {
+            Set<String> tokens = TagStore.resolve(info.gid, mTagTable, info);
+            if (parsed.matches(tokens)) {
+                result.add(info);
+            }
+        }
+        Log.d(TAG, "filterByTagQuery: " + query + " -> " + result.size() + "/" + source.size());
+        return result;
     }
 
     private List<DownloadInfo> filterByRating(List<DownloadInfo> sourceList, float ratingFrom, float ratingTo) {

@@ -23,10 +23,14 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
+import com.hippo.ehviewer.R;
+import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
+import com.hippo.ehviewer.transfer.core.RelayPageBitmap;
+import com.hippo.ehviewer.transfer.core.RelayPoolManager;
 import com.hippo.ehviewer.transfer.core.RelayTaskManager;
 import com.hippo.ehviewer.transfer.log.TransferLogger;
 import com.hippo.ehviewer.transfer.data.RelayTask;
@@ -63,17 +67,44 @@ public class RelayApiHandler extends BaseApiHandler {
     private static final String TAG = "RelayApiHandler";
 
     private RelayTaskManager relayTaskManager;
+    private RelayPoolApiHandler poolApiHandler;
 
     public RelayApiHandler(Context context, AuthManager authManager) {
         super(context, authManager);
         this.relayTaskManager = RelayTaskManager.getInstance(context);
+        this.poolApiHandler = new RelayPoolApiHandler(context, authManager);
     }
 
     @Override
     public NanoHTTPD.Response handleGet(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("GET", uri);
+        if (!Settings.isRelayAnyEnabled()) {
+            return ResponseBuilder.forbidden("Relay is disabled");
+        }
 
         String path = uri.split("\\?")[0];
+
+        // GET /api/v1/relay/pool - 候选池
+        if (path.equals("/api/v1/relay/pool")) {
+            if (!Settings.isRelayPoolEnabled()) {
+                return ResponseBuilder.forbidden("Relay pool is disabled");
+            }
+            return poolApiHandler.handlePoolList(session, false);
+        }
+
+        // GET /api/v1/relay/pool/summary - 池摘要
+        if (path.equals("/api/v1/relay/pool/summary")) {
+            if (!Settings.isRelayPoolEnabled()) {
+                return ResponseBuilder.forbidden("Relay pool is disabled");
+            }
+            return poolApiHandler.handlePoolSummary(session, false);
+        }
+
+        // GET /api/v1/relay/{taskId}/plan - 执行计划
+        if (path.matches("/api/v1/relay/[^/]+/plan")) {
+            String taskId = extractTaskId(path, "plan");
+            return poolApiHandler.handlePlan(session, taskId, null, false);
+        }
 
         // GET /api/v1/relay/tasks - 获取任务列表
         if (path.equals("/api/v1/relay/tasks") || uri.startsWith("/api/v1/relay/tasks?")) {
@@ -98,8 +129,39 @@ public class RelayApiHandler extends BaseApiHandler {
     @Override
     public NanoHTTPD.Response handlePost(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("POST", uri);
+        if (!Settings.isRelayAnyEnabled()) {
+            return ResponseBuilder.forbidden("Relay is disabled");
+        }
 
         String path = uri.split("\\?")[0];
+
+        // POST /api/v1/relay/pool/claim - 原子认领
+        if (path.equals("/api/v1/relay/pool/claim")) {
+            if (!Settings.isRelayPoolEnabled()) {
+                return ResponseBuilder.forbidden("Relay pool is disabled");
+            }
+            return poolApiHandler.handleClaim(session, false);
+        }
+
+        // POST /api/v1/relay/return/partial - 逐页回传
+        if (path.equals("/api/v1/relay/return/partial")) {
+            if (!Settings.isRelayPoolEnabled() && !Settings.isAuxDownloadEnabled()) {
+                return ResponseBuilder.forbidden("Relay return is disabled");
+            }
+            return poolApiHandler.handlePartialReturn(session, false);
+        }
+
+        // POST /api/v1/relay/{taskId}/lease - 续租
+        if (path.matches("/api/v1/relay/[^/]+/lease")) {
+            String taskId = extractTaskId(path, "lease");
+            return poolApiHandler.handleLease(session, taskId);
+        }
+
+        // POST /api/v1/relay/{taskId}/release - 释放回池
+        if (path.matches("/api/v1/relay/[^/]+/release")) {
+            String taskId = extractTaskId(path, "release");
+            return poolApiHandler.handleRelease(session, taskId);
+        }
 
         // POST /api/v1/relay/create - 创建接力任务
         if (path.equals("/api/v1/relay/create")) {
@@ -145,6 +207,9 @@ public class RelayApiHandler extends BaseApiHandler {
     @Override
     public NanoHTTPD.Response handleDelete(NanoHTTPD.IHTTPSession session, String uri) {
         logRequest("DELETE", uri);
+        if (!Settings.isRelayAnyEnabled()) {
+            return ResponseBuilder.forbidden("Relay is disabled");
+        }
 
         String path = uri.split("\\?")[0];
 
@@ -197,12 +262,39 @@ public class RelayApiHandler extends BaseApiHandler {
             String targetDeviceId = json.getString("targetDeviceId");
             String priority = json.getString("priority");
             boolean autoReturn = json.getBooleanValue("autoReturn");
+            boolean missingOnly = !json.containsKey("missingOnly")
+                    || json.getBooleanValue("missingOnly");
+            String basePagesBitmap = json.getString("basePagesBitmap");
+            int expectedTotalPages = json.getIntValue("expectedTotalPages");
+            int leaseSeconds = RelayPoolManager.clampLeaseSeconds(json.getIntValue("leaseSeconds"));
 
             String remoteIp = session.getRemoteIpAddress();
             int sourcePort = json.getIntValue("sourcePort");
             if (sourcePort <= 0) sourcePort = 8080;
 
             if (priority == null) priority = RelayTask.PRIORITY_NORMAL;
+
+            // §5.17.7 断言：页数/位图不一致直接 412，禁止写入
+            DownloadManager createDm = EhApplication.getDownloadManager(context);
+            RelayPoolManager createPool = RelayPoolManager.getInstance(context);
+            RelayPoolManager.PageFacts createFacts = createPool.scan(createDm.getDownloadInfo(gid));
+            if (expectedTotalPages > 0 && createFacts.totalPages > 0
+                    && expectedTotalPages != createFacts.totalPages) {
+                JSONObject err = RelayPoolManager.error("page_count_mismatch", 412);
+                err.put("expectedTotalPages", expectedTotalPages);
+                err.put("actualTotalPages", createFacts.totalPages);
+                return SafeResponse.json(412, err.toJSONString());
+            }
+            if (basePagesBitmap != null && !basePagesBitmap.isEmpty()
+                    && createFacts.totalPages > 0) {
+                String actual = RelayPageBitmap.encode(createFacts.downloaded,
+                        createFacts.totalPages);
+                if (!RelayPoolManager.bitmapEquals(basePagesBitmap, actual)) {
+                    JSONObject err = RelayPoolManager.error("bitmap_mismatch", 412);
+                    err.put("expectedBitmap", actual);
+                    return SafeResponse.json(412, err.toJSONString());
+                }
+            }
 
             DownloadManager downloadManager = EhApplication.getDownloadManager(context);
             boolean isAlreadyCompleted = false;
@@ -237,6 +329,23 @@ public class RelayApiHandler extends BaseApiHandler {
                 TransferLogger.getInstance().i(TAG, "Gallery already completed for gid: " + gid + ", directly packaging and pushing back");
                 relayTaskManager.acceptTask(task.getTaskId(), null, null);
                 relayTaskManager.markCompleted(task.getTaskId());
+            } else if (shouldAutoAccept(autoReturn, isAlreadyCompleted)) {
+                // 发起端（手机）明确要求“自动回传”，说明是用户主动点“接力到设备”，
+                // 接收端直接接手并开始下载，避免再去接力中心手动点“接受”。
+                String selfName = com.hippo.ehviewer.lab.LabManager.getInstance(context)
+                        .getSelfDeviceName();
+                String selfId = com.hippo.ehviewer.lab.LabManager.getInstance(context)
+                        .getSelfDeviceId();
+                relayTaskManager.acceptTask(task.getTaskId(), selfName, selfId);
+                relayTaskManager.startDownload(task.getTaskId());
+                TransferLogger.getInstance().i(TAG,
+                        "Auto-accepted relay task " + task.getTaskId() + " for gid " + gid);
+                final String acceptedTitle = title != null ? title : String.valueOf(gid);
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
+                        android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.relay_auto_accepted, acceptedTitle),
+                                android.widget.Toast.LENGTH_LONG).show());
             }
 
             JSONObject response = new JSONObject();
@@ -245,9 +354,33 @@ public class RelayApiHandler extends BaseApiHandler {
             response.put("gid", gid);
             response.put("status", task.getStatus());
             response.put("createdTime", task.getCreatedTime());
+            int totalPages = createFacts.totalPages > 0 ? createFacts.totalPages : pages;
+            String bitmap = totalPages > 0
+                    ? RelayPageBitmap.encode(createFacts.downloaded, totalPages) : null;
+            task.setMissingOnly(missingOnly);
+            task.setBasePagesBitmap(basePagesBitmap);
+            task.setPagesBitmap(bitmap);
+            task.setMissingCount(totalPages > 0
+                    ? Math.max(0, totalPages - createFacts.downloadedCount) : 0);
+            long leaseExpiresAt = System.currentTimeMillis() + leaseSeconds * 1000L;
+            task.setLeaseExpiresAt(leaseExpiresAt);
+            if (targetDeviceId != null && !targetDeviceId.isEmpty()) {
+                task.setLeaseDeviceId(targetDeviceId);
+                task.setLeaseDeviceName(targetDevice);
+            } else if (task.getAcceptedDeviceId() != null) {
+                task.setLeaseDeviceId(task.getAcceptedDeviceId());
+                task.setLeaseDeviceName(task.getAcceptedDevice());
+            }
+            relayTaskManager.persist();
+            response.put("missingCount", task.getMissingCount());
+            response.put("pagesBitmap", bitmap);
+            response.put("leaseExpiresAt", leaseExpiresAt);
             if (isAlreadyCompleted) {
                 response.put("alreadyCompleted", true);
                 response.put("message", "Gallery already completed on this device, packaging for return...");
+            } else if (autoReturn) {
+                response.put("autoAccepted", true);
+                response.put("message", "Relay task accepted; download started");
             }
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
@@ -275,6 +408,9 @@ public class RelayApiHandler extends BaseApiHandler {
             String sourceDeviceId = json.getString("sourceDeviceId");
             String priority = json.getString("priority");
             boolean autoReturn = json.getBooleanValue("autoReturn");
+            boolean missingOnly = !json.containsKey("missingOnly")
+                    || json.getBooleanValue("missingOnly");
+            int leaseSeconds = RelayPoolManager.clampLeaseSeconds(json.getIntValue("leaseSeconds"));
 
             if (priority == null) priority = RelayTask.PRIORITY_NORMAL;
 
@@ -285,12 +421,19 @@ public class RelayApiHandler extends BaseApiHandler {
             DownloadManager downloadManager = EhApplication.getDownloadManager(context);
 
             JSONArray tasksArray = new JSONArray();
+            JSONArray errorsArray = new JSONArray();
+            RelayPoolManager pool = RelayPoolManager.getInstance(context);
             for (int i = 0; i < gidsArray.size(); i++) {
                 long gid = gidsArray.getLong(i);
 
                 // 检查是否已有相同的接力任务
                 RelayTask existingTask = relayTaskManager.getTaskByGid(gid);
                 if (existingTask != null && !existingTask.isTerminal()) {
+                    JSONObject err = new JSONObject();
+                    err.put("gid", gid);
+                    err.put("error", "already_exists");
+                    err.put("code", 409);
+                    errorsArray.add(err);
                     continue;
                 }
 
@@ -308,16 +451,32 @@ public class RelayApiHandler extends BaseApiHandler {
                         sourceDevice, sourceDeviceId, remoteIp, sourcePort, null, null,
                         priority, autoReturn);
 
+                RelayPoolManager.PageFacts facts = pool.scan(downloadManager.getDownloadInfo(gid));
+                String bitmap = facts.totalPages > 0
+                        ? RelayPageBitmap.encode(facts.downloaded, facts.totalPages) : null;
+                long leaseExpiresAt = System.currentTimeMillis() + leaseSeconds * 1000L;
+                task.setMissingOnly(missingOnly);
+                task.setMissingCount(facts.missingPages.size());
+                task.setPagesBitmap(bitmap);
+                task.setLeaseExpiresAt(leaseExpiresAt);
+                relayTaskManager.persist();
+
                 JSONObject taskJson = new JSONObject();
                 taskJson.put("taskId", task.getTaskId());
                 taskJson.put("gid", gid);
                 taskJson.put("status", task.getStatus());
+                taskJson.put("missingCount", task.getMissingCount());
+                taskJson.put("pagesBitmap", bitmap);
+                taskJson.put("leaseExpiresAt", leaseExpiresAt);
                 tasksArray.add(taskJson);
             }
 
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("tasks", tasksArray);
+            if (!errorsArray.isEmpty()) {
+                response.put("errors", errorsArray);
+            }
             response.put("total", tasksArray.size());
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
@@ -377,12 +536,30 @@ public class RelayApiHandler extends BaseApiHandler {
             String sourceDeviceId = json.getString("sourceDeviceId");
             String priority = json.getString("priority");
             boolean autoReturn = json.getBooleanValue("autoReturn");
+            boolean missingOnly = !json.containsKey("missingOnly")
+                    || json.getBooleanValue("missingOnly");
+            String basePagesBitmap = json.getString("basePagesBitmap");
+            int leaseSeconds = RelayPoolManager.clampLeaseSeconds(json.getIntValue("leaseSeconds"));
 
             String remoteIp = session.getRemoteIpAddress();
             int sourcePort = json.getIntValue("sourcePort");
             if (sourcePort <= 0) sourcePort = 8080;
 
             if (priority == null) priority = RelayTask.PRIORITY_NORMAL;
+
+            // 位图断言（§5.17.9）
+            RelayPoolManager requestPool = RelayPoolManager.getInstance(context);
+            RelayPoolManager.PageFacts requestFacts = requestPool.scan(downloadInfo);
+            if (basePagesBitmap != null && !basePagesBitmap.isEmpty()
+                    && requestFacts.totalPages > 0) {
+                String actual = RelayPageBitmap.encode(requestFacts.downloaded,
+                        requestFacts.totalPages);
+                if (!RelayPoolManager.bitmapEquals(basePagesBitmap, actual)) {
+                    JSONObject err = RelayPoolManager.error("bitmap_mismatch", 412);
+                    err.put("expectedBitmap", actual);
+                    return SafeResponse.json(412, err.toJSONString());
+                }
+            }
 
             // 将画廊设为接力下载状态（停止本机下载）
             downloadManager.setRelayDownload(gid);
@@ -409,6 +586,21 @@ public class RelayApiHandler extends BaseApiHandler {
             response.put("stateName", "relay_download");
             response.put("status", task.getStatus());
             response.put("accepted", true);
+            long leaseExpiresAt = System.currentTimeMillis() + leaseSeconds * 1000L;
+            JSONArray missingArr = new JSONArray();
+            for (Integer page : requestFacts.missingPages) missingArr.add(page);
+            task.setMissingOnly(missingOnly);
+            task.setMissingCount(requestFacts.missingPages.size());
+            task.setPagesBitmap(RelayPageBitmap.encode(requestFacts.downloaded,
+                    requestFacts.totalPages));
+            task.setLeaseExpiresAt(leaseExpiresAt);
+            task.setLeaseDeviceId(sourceDeviceId);
+            task.setLeaseDeviceName(sourceDevice);
+            relayTaskManager.persist();
+            response.put("missingPages", missingArr);
+            response.put("missingCount", task.getMissingCount());
+            response.put("pagesBitmap", task.getPagesBitmap());
+            response.put("leaseExpiresAt", leaseExpiresAt);
             response.put("createdTime", task.getCreatedTime());
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
@@ -432,6 +624,8 @@ public class RelayApiHandler extends BaseApiHandler {
             // 获取表单字段
             String taskId = files.get("taskId");
             String gidStr = files.get("gid");
+            String mode = files.get("mode");
+            if (mode == null || mode.isEmpty()) mode = "merge";
 
             if (gidStr == null) {
                 return ResponseBuilder.jsonError(NanoHTTPD.Response.Status.BAD_REQUEST, "Missing gid");
@@ -482,14 +676,32 @@ public class RelayApiHandler extends BaseApiHandler {
             }
 
             // 将解压的文件复制到下载目录
-            int fileCount = copyFilesToUniDir(extractTmpDir, downloadDir);
+            boolean replace = "replace".equalsIgnoreCase(mode);
+            File backupDir = null;
+            if (replace) {
+                backupDir = new File(context.getCacheDir(),
+                        "relay_backup_" + gid + "_" + System.currentTimeMillis());
+                backupDir.mkdirs();
+                backupExistingFiles(downloadDir, backupDir);
+            }
+            int fileCount = copyFilesToUniDir(extractTmpDir, downloadDir, replace);
             deleteRecursively(extractTmpDir);
+            if (replace && backupDir != null) {
+                // 替换成功即可丢弃备份；失败时保留以便人工恢复
+                deleteRecursively(backupDir);
+            }
 
-            // 更新下载状态为完成
-            downloadInfo.state = DownloadInfo.STATE_FINISH;
-            downloadInfo.speed = 0;
-            downloadInfo.remaining = 0;
-            EhDB.putDownloadInfo(downloadInfo);
+            // 更新下载状态：交由统一收尾流水线（完整校验/元数据/事件）
+            RelayPoolManager poolManager = RelayPoolManager.getInstance(context);
+            RelayPoolManager.PageFacts facts = poolManager.scan(downloadInfo);
+            poolManager.reconcile(downloadInfo, facts);
+            JSONObject finish = null;
+            if (facts.totalPages > 0 && facts.missingPages.isEmpty()) {
+                finish = poolManager.finalizeGallery(gid, taskId, facts);
+            } else {
+                downloadInfo.state = DownloadInfo.STATE_RELAY_DOWNLOAD;
+                EhDB.putDownloadInfo(downloadInfo);
+            }
 
             // 删除接力任务（如果存在）
             if (taskId != null) {
@@ -504,10 +716,13 @@ public class RelayApiHandler extends BaseApiHandler {
             JSONObject response = new JSONObject();
             response.put("success", true);
             response.put("gid", gid);
-            response.put("state", DownloadInfo.STATE_FINISH);
-            response.put("stateName", "finished");
+            response.put("mode", mode);
+            response.put("state", finish != null ? DownloadInfo.STATE_FINISH
+                    : downloadInfo.state);
+            response.put("stateName", finish != null ? "finished" : "relay_download");
             response.put("message", "Gallery imported successfully");
             response.put("fileCount", fileCount);
+            response.put("finish", finish);
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
@@ -538,13 +753,33 @@ public class RelayApiHandler extends BaseApiHandler {
      * 返回复制的文件数
      */
     private int copyFilesToUniDir(File srcDir, com.hippo.unifile.UniFile destDir) throws IOException {
+        return copyFilesToUniDir(srcDir, destDir, true);
+    }
+
+    /**
+     * 将源目录中的文件复制到UniFile目标目录。
+     *
+     * @param overwrite false 时（merge 默认）不覆盖主机已有页
+     * @return 实际写入的文件数
+     */
+    private int copyFilesToUniDir(File srcDir, com.hippo.unifile.UniFile destDir,
+                                  boolean overwrite) throws IOException {
         int count = 0;
         File[] files = srcDir.listFiles();
         if (files == null) return 0;
 
         for (File srcFile : files) {
             if (srcFile.isFile()) {
-                com.hippo.unifile.UniFile destFile = destDir.createFile("application/octet-stream");
+                // 必须保留原始文件名（页码命名），否则回传的图片无法被画廊识别。
+                // 同名旧文件先删除，避免 SAF 生成 “page (1).jpg” 这类重复文件。
+                com.hippo.unifile.UniFile existing = destDir.findFile(srcFile.getName());
+                if (existing != null) {
+                    if (!overwrite) {
+                        continue;
+                    }
+                    existing.delete();
+                }
+                com.hippo.unifile.UniFile destFile = destDir.createFile(srcFile.getName());
                 if (destFile != null) {
                     try (InputStream is = new FileInputStream(srcFile);
                          java.io.OutputStream os = destFile.openOutputStream()) {
@@ -561,6 +796,27 @@ public class RelayApiHandler extends BaseApiHandler {
         return count;
     }
 
+    /** replace 模式先把现有页复制到缓存备份目录。 */
+    private void backupExistingFiles(com.hippo.unifile.UniFile dir, File backupDir) {
+        try {
+            com.hippo.unifile.UniFile[] files = dir.listFiles();
+            if (files == null) return;
+            for (com.hippo.unifile.UniFile file : files) {
+                if (file == null || !file.isFile()) continue;
+                File target = new File(backupDir, file.getName());
+                try (InputStream is = file.openInputStream();
+                     java.io.OutputStream os = new java.io.FileOutputStream(target)) {
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    while ((len = is.read(buffer)) > 0) {
+                        os.write(buffer, 0, len);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     /**
      * 获取任务列表
      */
@@ -568,17 +824,29 @@ public class RelayApiHandler extends BaseApiHandler {
         try {
             String status = RequestParser.getQueryParameter(session, "status", "all");
             String direction = RequestParser.getQueryParameter(session, "direction", "all");
+            String includePages = RequestParser.getQueryParameter(session, "includePages", "bitmap");
+            long gidFilter = RequestParser.getLongQueryParameter(session, "gid", 0L);
+            int limit = RequestParser.getIntQueryParameter(session, "limit", 50);
+            if (limit <= 0) limit = 50;
+            if (limit > 200) limit = 200;
 
             List<RelayTask> tasks = relayTaskManager.getTasks(status, direction);
-
             JSONArray tasksArray = new JSONArray();
             for (RelayTask task : tasks) {
-                tasksArray.add(taskToJson(task));
+                if (gidFilter > 0 && task.getGid() != gidFilter) {
+                    continue;
+                }
+                if (tasksArray.size() >= limit) {
+                    break;
+                }
+                tasksArray.add(taskToJson(task, includePages));
             }
 
             JSONObject response = new JSONObject();
             response.put("tasks", tasksArray);
             response.put("total", tasksArray.size());
+            response.put("hasMore", tasks.size() > tasksArray.size());
+            response.put("nextCursor", null);
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
@@ -597,8 +865,8 @@ public class RelayApiHandler extends BaseApiHandler {
             if (task == null) {
                 return ResponseBuilder.notFound("Task");
             }
-
-            return ResponseBuilder.jsonSuccess(taskToJson(task).toJSONString());
+            String includePages = RequestParser.getQueryParameter(session, "includePages", "bitmap");
+            return ResponseBuilder.jsonSuccess(taskToJson(task, includePages).toJSONString());
 
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Failed to get relay task status", e);
@@ -632,6 +900,7 @@ public class RelayApiHandler extends BaseApiHandler {
             // 从请求体读取接受方设备信息
             String acceptedDevice = null;
             String acceptedDeviceId = null;
+            int leaseSeconds = 0;
             try {
                 String body = RequestParser.readBody(session);
                 if (body != null && !body.isEmpty()) {
@@ -639,6 +908,7 @@ public class RelayApiHandler extends BaseApiHandler {
                     if (json != null) {
                         acceptedDevice = json.getString("acceptedDevice");
                         acceptedDeviceId = json.getString("acceptedDeviceId");
+                        leaseSeconds = json.getIntValue("leaseSeconds");
                     }
                 }
             } catch (Exception e) {
@@ -656,6 +926,13 @@ public class RelayApiHandler extends BaseApiHandler {
             // 接受任务（带设备信息）
             relayTaskManager.acceptTask(taskId, acceptedDevice, acceptedDeviceId);
 
+            int lease = RelayPoolManager.clampLeaseSeconds(leaseSeconds);
+            long leaseExpiresAt = System.currentTimeMillis() + lease * 1000L;
+            task.setLeaseExpiresAt(leaseExpiresAt);
+            task.setLeaseDeviceId(acceptedDeviceId);
+            task.setLeaseDeviceName(acceptedDevice);
+            RelayPoolManager.getInstance(context).bumpPoolVersion(task.getGid(), "accepted");
+
             // 开始下载
             relayTaskManager.startDownload(taskId);
 
@@ -666,6 +943,8 @@ public class RelayApiHandler extends BaseApiHandler {
             if (acceptedDevice != null) {
                 response.put("acceptedDevice", acceptedDevice);
             }
+            response.put("leaseExpiresAt", leaseExpiresAt);
+            response.put("missingCount", task.getMissingCount());
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 
@@ -831,6 +1110,14 @@ public class RelayApiHandler extends BaseApiHandler {
     // ==================== 工具方法 ====================
 
     /**
+     * 接收端是否应自动接手：只有发起端主动点“接力到设备”（autoReturn=true）
+     * 且画廊尚未完成时才自动接受并开始下载。
+     */
+    static boolean shouldAutoAccept(boolean autoReturn, boolean alreadyCompleted) {
+        return autoReturn && !alreadyCompleted;
+    }
+
+    /**
      * 从路径中提取taskId
      */
     private String extractTaskId(String path, String action) {
@@ -853,70 +1140,12 @@ public class RelayApiHandler extends BaseApiHandler {
      * 任务转JSON
      */
     private JSONObject taskToJson(RelayTask task) {
-        JSONObject json = new JSONObject();
-        json.put("taskId", task.getTaskId());
-        json.put("gid", task.getGid());
-        json.put("token", task.getToken());
-        json.put("title", task.getTitle());
-        json.put("titleJpn", task.getTitleJpn());
-        json.put("thumb", task.getThumb());
-        json.put("category", task.getCategory());
-        json.put("posted", task.getPosted());
-        json.put("uploader", task.getUploader());
-        json.put("rating", task.getRating());
-        json.put("pages", task.getPages());
-        json.put("status", task.getStatus());
-        json.put("statusName", task.getStatusDisplayName());
-        json.put("direction", task.getDirection());
-        json.put("directionName", task.getDirectionDisplayName());
-        json.put("sourceDevice", task.getSourceDevice());
-        json.put("sourceDeviceId", task.getSourceDeviceId());
-        json.put("targetDevice", task.getTargetDevice());
-        json.put("targetDeviceId", task.getTargetDeviceId());
-        json.put("acceptedDevice", task.getAcceptedDevice());
-        json.put("acceptedDeviceId", task.getAcceptedDeviceId());
-        json.put("priority", task.getPriority());
-        json.put("autoReturn", task.isAutoReturn());
+        return taskToJson(task, "bitmap");
+    }
 
-        // 进度信息
-        json.put("finished", task.getFinished());
-        json.put("total", task.getTotal());
-        json.put("speed", task.getSpeed());
-        json.put("downloadedSize", task.getDownloadedSize());
-        json.put("totalSize", task.getTotalSize());
-        json.put("progress", task.getProgressPercent());
-
-        // 速度格式化
-        json.put("speedFormatted", formatSpeed(task.getSpeed()));
-
-        // 大小格式化
-        json.put("downloadedSizeFormatted", formatSize(task.getDownloadedSize()));
-        json.put("totalSizeFormatted", formatSize(task.getTotalSize()));
-
-        // 时间戳
-        json.put("createdTime", task.getCreatedTime());
-        json.put("updatedTime", task.getUpdatedTime());
-        json.put("acceptedTime", task.getAcceptedTime());
-        json.put("completedTime", task.getCompletedTime());
-        json.put("returnedTime", task.getReturnedTime());
-
-        // 时间格式化
-        json.put("createdDate", formatTime(task.getCreatedTime()));
-        json.put("updatedDate", formatTime(task.getUpdatedTime()));
-        json.put("acceptedDate", formatTime(task.getAcceptedTime()));
-        json.put("completedDate", formatTime(task.getCompletedTime()));
-        json.put("returnedDate", formatTime(task.getReturnedTime()));
-
-        // 文件信息
-        json.put("zipFileSize", task.getZipFileSize());
-        json.put("zipFileSizeFormatted", formatSize(task.getZipFileSize()));
-
-        // 错误信息
-        if (task.getErrorMessage() != null) {
-            json.put("errorMessage", task.getErrorMessage());
-        }
-
-        return json;
+    private JSONObject taskToJson(RelayTask task, String includePages) {
+        return RelayPoolApiHandler.taskJson(context, task,
+                "all".equals(includePages) || "list".equals(includePages));
     }
 
     /**

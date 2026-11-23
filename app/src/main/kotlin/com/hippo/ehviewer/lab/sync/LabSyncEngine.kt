@@ -57,6 +57,7 @@ class LabSyncEngine private constructor(private val context: Context) {
         val peerName: String,
         val applied: Int,
         val error: String? = null,
+        val touchedGids: List<Long> = emptyList(),
     ) {
         val success: Boolean get() = error == null
     }
@@ -68,19 +69,27 @@ class LabSyncEngine private constructor(private val context: Context) {
     private val labManager = LabManager.getInstance(appContext)
     private val configStore = LabConfigStore.getInstance(appContext)
     private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val syncLock = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    fun isSyncing(): Boolean = syncLock.get()
 
     /** 一次手动/自动化同步（发起方视角）。 */
     fun requestSync(peer: TrustedPeer, direction: LabSyncDirection, listener: ProgressListener?): Outcome {
         if (!isReady()) {
-            return Outcome(peer.deviceName, 0, "实验室同步未启用")
+            return Outcome(peer.deviceName, 0, "请先在实验室开启「数据快照同步」开关")
         }
         if (peer.presharedKey.isNullOrEmpty()) {
             return Outcome(peer.deviceName, 0, "设备未完成配对，无法签名")
         }
         val endpoint = endpointOf(peer) ?: return Outcome(peer.deviceName, 0, "设备地址不可用")
+        if (!syncLock.compareAndSet(false, true)) {
+            return Outcome(peer.deviceName, 0, "已有同步任务在进行")
+        }
+        val fullRefresh = !prefs.getBoolean(KEY_FULL_PAGE_REFRESH, false)
 
         var sessionId: String? = null
         var applied = 0
+        val touched = LinkedHashSet<Long>()
         return try {
             val session = createSession(peer, endpoint, direction)
             sessionId = session.getString("sessionId")
@@ -89,13 +98,16 @@ class LabSyncEngine private constructor(private val context: Context) {
             }
 
             if (direction != LabSyncDirection.PUSH) {
-                applied = pullScopes(peer, endpoint, listener)
+                applied = pullScopes(peer, endpoint, listener, touched, fullRefresh)
+                if (fullRefresh) {
+                    prefs.edit().putBoolean(KEY_FULL_PAGE_REFRESH, true).apply()
+                }
             }
             if (direction != LabSyncDirection.PULL) {
                 // 对端反向拉取本机；推送时等待对端完成，双向时做一次短暂状态同步
                 waitForPeerPull(peer, endpoint, sessionId, direction == LabSyncDirection.PUSH, listener)
             }
-            Outcome(peer.deviceName, applied, null)
+            Outcome(peer.deviceName, applied, null, touched.toList())
         } catch (t: Throwable) {
             SnapshotLogger.w(TAG, "同步失败: ${peer.deviceName} - ${t.message}", t)
             Outcome(peer.deviceName, applied, t.message ?: "同步失败")
@@ -106,6 +118,7 @@ class LabSyncEngine private constructor(private val context: Context) {
                 } catch (ignored: Throwable) {
                 }
             }
+            syncLock.set(false)
         }
     }
 
@@ -142,22 +155,23 @@ class LabSyncEngine private constructor(private val context: Context) {
         sessionId: String?,
         listener: ProgressListener?,
     ): Outcome {
-        if (!isReady()) return Outcome(peer.deviceName, 0, "实验室同步未启用")
+        if (!isReady()) return Outcome(peer.deviceName, 0, "请先在实验室开启「数据快照同步」开关")
         val endpoint = if (!host.isNullOrEmpty() && port > 0) Endpoint(host, port) else endpointOf(peer)
         if (endpoint == null) {
             sessionId?.let { LabSyncSessionStore.getInstance().finish(it, "failed", "地址不可用") }
             return Outcome(peer.deviceName, 0, "设备地址不可用")
         }
         return try {
+            val touched = LinkedHashSet<Long>()
             val applied = pullScopes(peer, endpoint, object : ProgressListener {
                 override fun onProgress(phase: String, current: Int, total: Int, detail: String?) {
                     sessionId?.let { LabSyncSessionStore.getInstance().update(it, null, detail ?: phase) }
                     listener?.onProgress(phase, current, total, detail)
                 }
-            })
+            }, touched, false)
             sessionId?.let { LabSyncSessionStore.getInstance().update(it, applied, "已应用 $applied 条") }
             sessionId?.let { LabSyncSessionStore.getInstance().finish(it, "completed", "已应用 $applied 条") }
-            Outcome(peer.deviceName, applied, null)
+            Outcome(peer.deviceName, applied, null, touched.toList())
         } catch (t: Throwable) {
             SnapshotLogger.w(TAG, "反向拉取失败: ${peer.deviceName} - ${t.message}", t)
             sessionId?.let { LabSyncSessionStore.getInstance().finish(it, "failed", t.message) }
@@ -172,13 +186,19 @@ class LabSyncEngine private constructor(private val context: Context) {
 
     // ==================== 数据面 ====================
 
-    private fun pullScopes(peer: TrustedPeer, endpoint: Endpoint, listener: ProgressListener?): Int {
+    private fun pullScopes(
+        peer: TrustedPeer,
+        endpoint: Endpoint,
+        listener: ProgressListener?,
+        touched: MutableSet<Long>,
+        forceFull: Boolean,
+    ): Int {
         var applied = 0
         val scopes = listOf("downloads", "favorites")
         for ((index, scope) in scopes.withIndex()) {
             listener?.onProgress("manifest", index, scopes.size, scope)
             val key = "wm:${peer.deviceId}:$scope"
-            var watermark = prefs.getLong(key, 0L)
+            var watermark = if (forceFull) 0L else prefs.getLong(key, 0L)
             var manifest = fetchManifest(peer, endpoint, scope, watermark)
 
             if (manifest.getBooleanValue("sinceStale")) {
@@ -210,7 +230,7 @@ class LabSyncEngine private constructor(private val context: Context) {
             try {
                 val futures = buckets.map { bucket ->
                     pool.submit(java.util.concurrent.Callable {
-                        pullBucket(peer, endpoint, scope, bucket, bucketSize, listener)
+                        pullBucket(peer, endpoint, scope, bucket, bucketSize, listener, touched)
                     })
                 }
                 futures.forEachIndexed { bucketIndex, future ->
@@ -273,6 +293,7 @@ class LabSyncEngine private constructor(private val context: Context) {
         bucket: Int,
         bucketSize: Int,
         listener: ProgressListener?,
+        touched: MutableSet<Long>,
     ): BucketResult {
         var cursor = 0L
         var pages = 0
@@ -307,7 +328,9 @@ class LabSyncEngine private constructor(private val context: Context) {
                 for (i in 0 until rows.size) {
                     rows.getJSONObject(i)?.let { parsed.add(it) }
                 }
-                applied += LabSyncApplier.apply(appContext, scope, parsed)
+                val applyResult = LabSyncApplier.apply(appContext, scope, parsed)
+                applied += applyResult.applied
+                touched.addAll(applyResult.gids)
                 listener?.onProgress("rows", pages, pages + 1, "$scope #$bucket")
             }
             val next = json.getString("nextCursor")?.toLongOrNull() ?: 0L
@@ -441,6 +464,7 @@ class LabSyncEngine private constructor(private val context: Context) {
     companion object {
         private const val TAG = "LabSyncEngine"
         private const val PREFS = "lab_sync"
+        private const val KEY_FULL_PAGE_REFRESH = "full_page_refresh_v1"
         private const val CONNECT_TIMEOUT_MS = 8_000
         private const val READ_TIMEOUT_MS = 30_000
         private const val MAX_PAGES_PER_BUCKET = 400

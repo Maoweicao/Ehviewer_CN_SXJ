@@ -1,5 +1,7 @@
 package com.hippo.ehviewer.ui.lab;
 
+import android.content.Context;
+import android.text.format.DateUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -11,6 +13,7 @@ import androidx.recyclerview.widget.RecyclerView;
 
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.lab.TrustedPeer;
+import com.hippo.ehviewer.lab.TrustedPeerStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,6 +24,8 @@ public class TrustedPeerAdapter extends RecyclerView.Adapter<TrustedPeerAdapter.
 
     public interface OnPeerActionListener {
         void onPeerDelete(TrustedPeer peer);
+
+        void onPeerEdit(TrustedPeer peer);
     }
 
     private OnPeerActionListener listener;
@@ -46,16 +51,24 @@ public class TrustedPeerAdapter extends RecyclerView.Adapter<TrustedPeerAdapter.
     @Override
     public void onBindViewHolder(@NonNull PeerViewHolder holder, int position) {
         TrustedPeer peer = peers.get(position);
+        Context context = holder.itemView.getContext();
+        TrustedPeerStore store = TrustedPeerStore.getInstance(context);
+
         holder.name.setText(peer.getDeviceName());
 
-        boolean online = peer.getOnline();
+        boolean paired = peer.getPresharedKey() != null && !peer.getPresharedKey().isEmpty();
+        boolean online = store.isEffectivelyOnline(peer);
+
         int onlineColor = online
-                ? holder.itemView.getContext().getColor(R.color.peer_online)
-                : holder.itemView.getContext().getColor(R.color.peer_offline);
+                ? context.getColor(R.color.peer_online)
+                : context.getColor(R.color.peer_offline);
         holder.online.setText(online
-                ? holder.itemView.getContext().getString(R.string.multi_device_online)
-                : holder.itemView.getContext().getString(R.string.multi_device_offline));
+                ? context.getString(R.string.multi_device_online)
+                : context.getString(R.string.multi_device_offline));
         holder.online.setTextColor(onlineColor);
+
+        holder.badge.setVisibility(paired ? View.GONE : View.VISIBLE);
+        holder.badge.setText(R.string.multi_device_unpaired);
 
         holder.id.setText(peer.getDeviceId());
 
@@ -66,9 +79,15 @@ public class TrustedPeerAdapter extends RecyclerView.Adapter<TrustedPeerAdapter.
             info.append("  |  ");
         }
         info.append(peer.getDeviceType());
-        if (peer.getRttMs() >= 0) {
-            info.append("  |  ").append(holder.itemView.getContext()
+        if (peer.getRttMs() >= 0 && online) {
+            info.append("  |  ").append(context
                     .getString(R.string.multi_device_rtt, peer.getRttMs()));
+        }
+        if (!online && peer.getLastSeen() > 0) {
+            CharSequence lastSeen = DateUtils.getRelativeTimeSpanString(
+                    peer.getLastSeen(), System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS);
+            info.append("  |  ").append(context
+                    .getString(R.string.multi_device_last_seen, lastSeen));
         }
         holder.info.setText(info.toString());
 
@@ -78,12 +97,15 @@ public class TrustedPeerAdapter extends RecyclerView.Adapter<TrustedPeerAdapter.
             caps.append(c);
         }
         holder.caps.setText(caps.length() > 0
-                ? holder.itemView.getContext().getString(R.string.multi_device_caps_prefix) + caps
+                ? context.getString(R.string.multi_device_caps_prefix) + caps
                 : "");
 
         final TrustedPeer current = peer;
         holder.delete.setOnClickListener(v -> {
             if (listener != null) listener.onPeerDelete(current);
+        });
+        holder.edit.setOnClickListener(v -> {
+            if (listener != null) listener.onPeerEdit(current);
         });
     }
 
@@ -94,19 +116,23 @@ public class TrustedPeerAdapter extends RecyclerView.Adapter<TrustedPeerAdapter.
 
     static class PeerViewHolder extends RecyclerView.ViewHolder {
         AppCompatTextView name;
+        AppCompatTextView badge;
         AppCompatTextView online;
         AppCompatTextView id;
         AppCompatTextView info;
         AppCompatTextView caps;
+        Button edit;
         Button delete;
 
         PeerViewHolder(@NonNull View itemView) {
             super(itemView);
             name = itemView.findViewById(R.id.peer_name);
+            badge = itemView.findViewById(R.id.peer_badge);
             online = itemView.findViewById(R.id.peer_online);
             id = itemView.findViewById(R.id.peer_id);
             info = itemView.findViewById(R.id.peer_info);
             caps = itemView.findViewById(R.id.peer_caps);
+            edit = itemView.findViewById(R.id.btn_edit);
             delete = itemView.findViewById(R.id.btn_delete);
         }
     }

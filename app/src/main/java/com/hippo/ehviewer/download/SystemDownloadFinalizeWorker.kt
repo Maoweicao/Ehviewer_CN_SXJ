@@ -97,10 +97,10 @@ class SystemDownloadFinalizeWorker(
         } catch (e: Exception) {
             null
         }
-        val allDone = dm2 != null && dm2.isSystemDMAllDone(gid)
-        if (allDone) {
+        val allIntegrity = dm2?.checkSystemDMCompletion(gid)
+        if (allIntegrity != null) {
             try {
-                dm2?.onSystemDMGalleryFinished(gid)
+                dm2?.onSystemDMGalleryFinished(gid, allIntegrity)
             } catch (e: Exception) {
                 Log.w(TAG, "onSystemDMGalleryFinished failed", e)
             }

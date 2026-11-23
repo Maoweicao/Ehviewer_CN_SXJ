@@ -290,7 +290,7 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
         public void bind(@NonNull BackgroundTaskInfo taskInfo) {
             mTaskInfo = taskInfo;
             // 通过状态判定是否在「已完成」段；用于「清空」按钮只清已完成列表
-            mIsCompletedSection = taskInfo.isCompleted() || taskInfo.isCancelled();
+            mIsCompletedSection = taskInfo.isCompleted() || taskInfo.isCancelled() || taskInfo.isFailed();
 
             // 任务名称
             mNameText.setText(taskInfo.getTaskName());
@@ -343,12 +343,17 @@ public class BackgroundTaskAdapter extends RecyclerView.Adapter<RecyclerView.Vie
             String status;
             if (taskInfo.isCancelled()) {
                 status = mContext.getString(R.string.task_status_cancelled);
+            } else if (taskInfo.isFailed()) {
+                status = mContext.getString(R.string.task_status_failed);
             } else if (taskInfo.isCompleted()) {
                 if (taskInfo.getErrorMessage() != null) {
                     status = mContext.getString(R.string.task_status_failed);
                 } else {
                     status = mContext.getString(R.string.task_status_completed);
                 }
+            } else if (taskInfo.isRetrying()) {
+                status = mContext.getString(R.string.task_status_retrying,
+                        taskInfo.getRetryAttempt(), taskInfo.getRetryMax());
             } else if (taskInfo.isQueued()) {
                 status = mContext.getString(R.string.task_status_pending);
             } else if (taskInfo.isPaused()) {

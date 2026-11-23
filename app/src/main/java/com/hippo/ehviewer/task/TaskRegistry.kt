@@ -62,7 +62,10 @@ object TaskRegistry {
         registerProgressiveBackupTask()
         registerMergeDuplicateGalleryTask()
         registerScanDownloadHistoryTask()
+        registerTidyDownloadHistoryTask()
+        registerBackfillGalleryTagsTask()
         registerLabSyncTask()
+        registerLabLocalCheckTask()
     }
     
     fun getAllTasks(): List<TaskMetadata> = registry.values.toList()
@@ -295,6 +298,27 @@ object TaskRegistry {
     
     // ==================== 需要参数的任务 ====================
     
+    private fun registerTidyDownloadHistoryTask() {
+        register(TaskMetadata(
+            taskClassName = "com.hippo.ehviewer.task.TidyDownloadHistoryTask",
+            displayNameResId = R.string.settings_download_tidy_download_history,
+            descriptionResId = R.string.settings_download_tidy_download_history_summary,
+            taskType = BackgroundTask.TaskType.CLEANUP,
+            requiresParams = true,
+            paramType = ParamType.CUSTOM
+        ))
+    }
+
+    private fun registerBackfillGalleryTagsTask() {
+        register(TaskMetadata(
+            taskClassName = "com.hippo.ehviewer.task.BackfillGalleryTagsTask",
+            displayNameResId = R.string.backfill_gallery_tags_title,
+            descriptionResId = R.string.settings_advanced_backfill_gallery_tags_summary,
+            taskType = BackgroundTask.TaskType.UPDATE,
+            requiresParams = false
+        ))
+    }
+    
     private fun registerCompressSelectedGalleriesTask() {
         register(TaskMetadata(
             taskClassName = "com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask",
@@ -431,6 +455,16 @@ object TaskRegistry {
             displayNameResId = R.string.lab_sync_task_name,
             descriptionResId = R.string.lab_sync_task_summary,
             taskType = BackgroundTask.TaskType.SYNC,
+            requiresParams = false
+        ))
+    }
+
+    private fun registerLabLocalCheckTask() {
+        register(TaskMetadata(
+            taskClassName = "com.hippo.ehviewer.task.LabLocalCheckTask",
+            displayNameResId = R.string.lab_task_check_name,
+            descriptionResId = R.string.lab_task_check_desc,
+            taskType = BackgroundTask.TaskType.SCAN,
             requiresParams = false
         ))
     }

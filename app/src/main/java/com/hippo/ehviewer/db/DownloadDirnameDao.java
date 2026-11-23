@@ -19,6 +19,10 @@ public interface DownloadDirnameDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     void upsert(DownloadDirname dirname);
 
+    /** 批量写入目录映射（重建下载列表时一次事务落库）。 */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void upsertAll(java.util.List<DownloadDirname> dirnames);
+
     @Query("DELETE FROM DOWNLOAD_DIRNAME WHERE GID = :gid")
     void deleteByGid(long gid);
 

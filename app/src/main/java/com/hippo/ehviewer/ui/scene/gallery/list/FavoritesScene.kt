@@ -74,6 +74,9 @@ import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.client.parser.FavoritesParser
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.DownloadManager
+import com.hippo.ehviewer.download.tag.TagCategoryBuilder
+import com.hippo.ehviewer.download.tag.TagQueryParser
+import com.hippo.ehviewer.download.tag.TagStore
 import com.hippo.ehviewer.task.impl.CompressSelectedGalleriesTask
 import com.hippo.ehviewer.ui.CommonOperations
 import com.hippo.ehviewer.ui.annotation.DrawerLifeCircle
@@ -88,6 +91,7 @@ import com.hippo.ehviewer.widget.GalleryInfoContentHelper
 import com.hippo.ehviewer.widget.JumpDateSelector
 import com.hippo.ehviewer.widget.JumpDateSelector.OnTimeSelectedListener
 import com.hippo.ehviewer.widget.SearchBar
+import com.hippo.ehviewer.widget.TagModeStrip
 import com.hippo.lib.yorozuya.AssertUtils
 import com.hippo.lib.yorozuya.ObjectUtils
 import com.hippo.lib.yorozuya.SimpleHandler
@@ -152,6 +156,31 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
     @DrawerLifeCircle
     private var mDrawerAdapter: FavDrawerAdapter? = null
+
+    @DrawerLifeCircle
+    private var mDrawerRecyclerView: EasyRecyclerView? = null
+
+    @DrawerLifeCircle
+    private var mDrawerToolbar: Toolbar? = null
+
+    @DrawerLifeCircle
+    private var mDrawerProgress: View? = null
+
+    private var mDrawerModeStrip: TagModeStrip? = null
+
+    /** 右滑面板模式：0 = 默认收藏夹分类，1 = 画廊书签标签分类。 */
+    private var mDrawerMode = MODE_DEFAULT
+
+    private var mTagAdapter: TagCategoryAdapter? = null
+
+    private var mTagRows: List<TagRow> = emptyList()
+
+    /** 当前生效的书签标签范围。 */
+    private var mTagQuery: String? = null
+
+    private var mTagName: String? = null
+
+    private var mTagRequestId = 0
 
     @WholeLifeCircle
     private var mClient: EhClient? = null
@@ -242,6 +271,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         mSearchMode = savedInstanceState.getBoolean(KEY_SEARCH_MODE)
         mHasFirstRefresh = savedInstanceState.getBoolean(KEY_HAS_FIRST_REFRESH)
         mFavCountArray = savedInstanceState.getIntArray(KEY_FAV_COUNT_ARRAY)
+        mTagQuery = savedInstanceState.getString(KEY_TAG_QUERY)
+        mTagName = savedInstanceState.getString(KEY_TAG_NAME)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -257,6 +288,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         outState.putParcelable(KEY_URL_BUILDER, mUrlBuilder)
         outState.putBoolean(KEY_SEARCH_MODE, mSearchMode)
         outState.putIntArray(KEY_FAV_COUNT_ARRAY, mFavCountArray)
+        outState.putString(KEY_TAG_QUERY, mTagQuery)
+        outState.putString(KEY_TAG_NAME, mTagName)
     }
 
     override fun onDestroy() {
@@ -414,17 +447,19 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             favCatName = getString(R.string.cloud_favorites)
         }
         val keyword = mUrlBuilder!!.getKeyword()
-        if (TextUtils.isEmpty(keyword)) {
+        // 标签范围优先显示分类名，避免本地收藏（关键词为空）看不出当前范围
+        val displayKeyword = mTagName?.takeIf { it.isNotEmpty() } ?: keyword
+        if (TextUtils.isEmpty(displayKeyword)) {
             if (!ObjectUtils.equal(favCatName, mOldFavCat)) {
                 mSearchBar!!.setTitle(getString(R.string.favorites_title, favCatName))
             }
         } else {
             if (!ObjectUtils.equal(favCatName, mOldFavCat) || !ObjectUtils.equal(
-                    keyword,
+                    displayKeyword,
                     mOldKeyword
                 )
             ) {
-                mSearchBar!!.setTitle(getString(R.string.favorites_title_2, favCatName, keyword))
+                mSearchBar!!.setTitle(getString(R.string.favorites_title_2, favCatName, displayKeyword))
             }
         }
 
@@ -442,7 +477,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         }
 
         mOldFavCat = favCatName
-        mOldKeyword = keyword
+        mOldKeyword = displayKeyword
 
         // Save recent fav cat
         Settings.putRecentFavCat(mUrlBuilder!!.getFavCat())
@@ -492,6 +527,13 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         mFabLayout?.setShowFabFunctionName(Settings.getShowFabFunctionName())
         // 返回列表时刷新一次，确保“已下载/已删除”等标注与下载列表及下载历史保持一致
         mAdapter?.notifyDataSetChanged()
+        // 设置里关掉书签分类后，别让标签范围卡住列表
+        if (!Settings.getFavoritesTagCategoryEnabled() && mTagQuery != null) {
+            mTagQuery = null
+            mTagName = null
+            mUrlBuilder?.setKeyword(null)
+            mHelper?.refresh()
+        }
     }
 
     override fun onCreateDrawerView(
@@ -531,6 +573,9 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         })
 
         val recyclerView = view.findViewById<View?>(R.id.recycler_view_drawer) as EasyRecyclerView
+        mDrawerRecyclerView = recyclerView
+        mDrawerToolbar = toolbar
+        mDrawerProgress = view.findViewById(R.id.drawer_progress)
         recyclerView.setLayoutManager(LinearLayoutManager(context))
         recyclerView.addItemDecoration(
             DividerItemDecoration(
@@ -540,16 +585,267 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         )
 
         mDrawerAdapter = FavDrawerAdapter(inflater)
-        recyclerView.setAdapter(mDrawerAdapter)
+        mTagAdapter = TagCategoryAdapter(inflater)
         recyclerView.setOnItemClickListener(this)
 
+        val modeContainer = view.findViewById<View>(R.id.drawer_mode_container)
+        setupDrawerModeStrip(context!!, modeContainer)
+
+        if (Settings.getFavoritesTagCategoryEnabled() && mTagQuery != null) {
+            setDrawerMode(MODE_TAGS)
+        } else {
+            setDrawerMode(MODE_DEFAULT)
+        }
+
         return view
+    }
+
+    private fun setupDrawerModeStrip(context: Context, container: View) {
+        if (!Settings.getFavoritesTagCategoryEnabled()) {
+            container.visibility = View.GONE
+            mDrawerModeStrip = null
+            return
+        }
+        val primary = try {
+            AttrResources.getAttrColor(context, androidx.appcompat.R.attr.colorPrimary)
+        } catch (t: Throwable) {
+            context.resources.getColor(R.color.tag_category_favorite)
+        }
+        val accent = context.resources.getColor(R.color.tag_category_favorite)
+        val defaultAccent = if (primary != 0) primary else accent
+        val strip = TagModeStrip(context)
+        strip.setModes(
+            listOf(
+                TagModeStrip.Mode(getString(R.string.tag_category_mode_default), defaultAccent),
+                TagModeStrip.Mode(getString(R.string.tag_category_mode_bookmarks), accent)
+            ), 0
+        )
+        strip.onModeSelected = TagModeStrip.OnModeSelectedListener { index ->
+            setDrawerMode(if (index == MODE_TAGS) MODE_TAGS else MODE_DEFAULT)
+        }
+        val group = container as ViewGroup
+        group.removeAllViews()
+        group.addView(
+            strip,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        container.visibility = View.VISIBLE
+        mDrawerModeStrip = strip
+    }
+
+    private fun setDrawerMode(mode: Int) {
+        mDrawerMode = mode
+        mDrawerModeStrip?.select(mode, false)
+        val rv = mDrawerRecyclerView ?: return
+        if (mode == MODE_TAGS) {
+            rv.setAdapter(mTagAdapter)
+            if (mTagQuery != null && mTagRows.isNotEmpty()) {
+                // 标签范围生效时列表已被服务端过滤，不能拿过滤后的条目重算计数；
+                // 沿用进入范围前算好的那份。
+                mTagAdapter?.submit(mTagRows)
+                mDrawerProgress?.visibility = View.GONE
+            } else {
+                rebuildTagCategories()
+            }
+        } else {
+            rv.setAdapter(mDrawerAdapter)
+            mDrawerAdapter?.notifyDataSetChanged()
+            mDrawerProgress?.visibility = View.GONE
+            mDrawerToolbar?.setSubtitle(null)
+            mDrawerToolbar?.setTitle(R.string.collections)
+        }
+    }
+
+    /**
+     * 统计书签分类命中数。
+     *
+     * 本地收藏用整张 LOCAL_FAVORITES 表；云端收藏只能按当前已加载的条目统计，
+     * 并在标题栏标注“基于已加载 N 项”。
+     */
+    private fun rebuildTagCategories() {
+        val context = getEHContext() ?: return
+        val requestId = ++mTagRequestId
+        val local = mUrlBuilder?.getFavCat() == FavListUrlBuilder.FAV_CAT_LOCAL
+
+        val loaded = ArrayList<GalleryInfo>()
+        val helper = mHelper
+        if (!local && helper != null) {
+            val size = helper.size()
+            for (i in 0 until size) {
+                helper.getDataAtEx(i)?.let { loaded.add(it) }
+            }
+        }
+
+        mDrawerProgress?.visibility = View.VISIBLE
+        val tagQuery = mTagQuery
+
+        IoThreadPoolExecutor.Companion.instance.execute {
+            val searches = try {
+                EhDB.getAllQuickSearch()
+            } catch (t: Throwable) {
+                emptyList()
+            }
+            val table = try {
+                TagStore.loadAll()
+            } catch (t: Throwable) {
+                emptyMap()
+            }
+
+            val merged = HashMap<Long, MutableSet<String>>()
+            for ((gid, tokens) in table) {
+                merged[gid] = LinkedHashSet(tokens)
+            }
+
+            val gids = HashSet<Long>()
+            if (local) {
+                val favorites = try {
+                    EhDB.getAllLocalFavorites()
+                } catch (t: Throwable) {
+                    emptyList<GalleryInfo>()
+                }
+                for (gi in favorites) {
+                    gids.add(gi.gid)
+                    mergeMemoryTags(merged, gi)
+                }
+            } else {
+                for (gi in loaded) {
+                    gids.add(gi.gid)
+                    mergeMemoryTags(merged, gi)
+                }
+            }
+
+            val categories = TagCategoryBuilder.build(searches, merged, gids)
+            val rows = ArrayList<TagRow>(categories.size + 1)
+            rows.add(
+                TagRow(
+                    context.getString(R.string.tag_category_all),
+                    gids.size.toString(),
+                    true,
+                    null,
+                    tagQuery == null
+                )
+            )
+            for (category in categories) {
+                rows.add(
+                    TagRow(
+                        category.name,
+                        if (category.valid) category.count.toString() else "—",
+                        category.valid,
+                        category.keyword,
+                        category.keyword == tagQuery
+                    )
+                )
+            }
+            val subtitle = if (local) {
+                context.getString(R.string.tag_category_favorites_local)
+            } else {
+                context.getString(R.string.tag_category_favorites_loaded, loaded.size)
+            }
+
+            SimpleHandler.getInstance().post {
+                if (requestId != mTagRequestId) {
+                    return@post
+                }
+                mTagRows = rows
+                mTagAdapter?.submit(rows)
+                mDrawerProgress?.visibility = View.GONE
+                mDrawerToolbar?.setSubtitle(subtitle)
+            }
+        }
+    }
+
+    private fun mergeMemoryTags(target: HashMap<Long, MutableSet<String>>, info: GalleryInfo) {
+        val memory = TagStore.tokensOf(info)
+        if (memory.isEmpty()) {
+            return
+        }
+        val tokens = target.getOrPut(info.gid) { LinkedHashSet() }
+        tokens.addAll(memory)
+    }
+
+    private fun onTagRowClick(position: Int) {
+        val row = mTagRows.getOrNull(position) ?: return
+        if (position == 0) {
+            clearTagScope()
+            return
+        }
+        if (!row.valid) {
+            Toast.makeText(getEHContext(), R.string.tag_category_invalid, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (mUrlBuilder == null || mHelper == null) {
+            return
+        }
+        if (mRecyclerView != null && mRecyclerView!!.isInCustomChoice()) {
+            mRecyclerView!!.outOfCustomChoiceMode()
+        }
+        exitSearchMode(true)
+        mTagQuery = row.keyword
+        mTagName = row.name
+        mTagRows = mTagRows.map { it.copy(active = it.keyword == row.keyword) }
+        if (mUrlBuilder!!.getFavCat() == FavListUrlBuilder.FAV_CAT_LOCAL) {
+            // 本地收藏的标签过滤在 onGetFavoritesLocal 里做，不能当成标题关键词
+            mUrlBuilder!!.setKeyword(null)
+        } else {
+            mUrlBuilder!!.setKeyword(row.keyword)
+        }
+        updateSearchBar()
+        mHelper!!.refresh()
+        closeDrawer(Gravity.RIGHT)
+    }
+
+    private fun clearTagScope() {
+        if (mUrlBuilder == null || mHelper == null) {
+            return
+        }
+        val keyword = mUrlBuilder!!.getKeyword()
+        if (mTagQuery != null && (keyword == null || keyword == mTagQuery)) {
+            mUrlBuilder!!.setKeyword(null)
+        }
+        mTagQuery = null
+        mTagName = null
+        mTagRows = mTagRows.map { it.copy(active = it.keyword == null) }
+        updateSearchBar()
+        mHelper!!.refresh()
+        closeDrawer(Gravity.RIGHT)
+    }
+
+    private fun filterLocalFavoritesByTag(
+        source: List<GalleryInfo>,
+        tagQuery: String
+    ): List<GalleryInfo> {
+        val parsed = TagQueryParser.parse(tagQuery)
+        if (!parsed.isValid) {
+            return emptyList()
+        }
+        val table = try {
+            TagStore.loadAll()
+        } catch (t: Throwable) {
+            emptyMap()
+        }
+        val result = ArrayList<GalleryInfo>()
+        for (gi in source) {
+            if (parsed.matches(TagStore.resolve(gi.gid, table, gi))) {
+                result.add(gi)
+            }
+        }
+        return result
     }
 
     override fun onDestroyDrawerView() {
         super.onDestroyDrawerView()
 
         mDrawerAdapter = null
+        mTagAdapter = null
+        mTagRows = emptyList()
+        mDrawerRecyclerView = null
+        mDrawerToolbar = null
+        mDrawerProgress = null
+        mDrawerModeStrip = null
+        mTagRequestId++
     }
 
     override fun onBackPressed() {
@@ -599,6 +895,11 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                 return true
             }
 
+            if (mDrawerMode == MODE_TAGS) {
+                onTagRowClick(position)
+                return true
+            }
+
             if (mUrlBuilder == null || mHelper == null) {
                 return true
             }
@@ -618,6 +919,8 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
             exitSearchMode(true)
 
+            mTagQuery = null
+            mTagName = null
             mUrlBuilder!!.setKeyword(null)
             mUrlBuilder!!.setFavCat(newFavCat)
             updateSearchBar()
@@ -793,6 +1096,10 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
 
         exitSearchMode(true)
 
+        // 用户主动搜索时退出标签范围，避免标题仍显示旧的分类
+        mTagQuery = null
+        mTagName = null
+        mTagRows = mTagRows.map { it.copy(active = false) }
         mUrlBuilder!!.setKeyword(query)
         updateSearchBar()
         mHelper!!.refresh()
@@ -1193,6 +1500,9 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             if (mDrawerAdapter != null) {
                 mDrawerAdapter!!.notifyDataSetChanged()
             }
+            if (mDrawerMode == MODE_TAGS && mTagQuery == null) {
+                rebuildTagCategories()
+            }
         }
     }
 
@@ -1208,9 +1518,10 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         if (mHelper == null || !mHelper!!.isCurrentTask(taskId)) {
             return
         }
+        val tagQuery = mTagQuery
         // 本地收藏可能是几千条，整表查询/搜索放到 IO 线程，结果回主线程再交给 helper
         IoThreadPoolExecutor.instance.execute {
-            val list: MutableList<GalleryInfo?>? = try {
+            val raw: List<GalleryInfo>? = try {
                 if (TextUtils.isEmpty(keyword)) {
                     EhDB.getAllLocalFavorites()
                 } else {
@@ -1219,6 +1530,12 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
             } catch (t: Throwable) {
                 null
             }
+            val filtered = if (raw != null && tagQuery != null) {
+                filterLocalFavoritesByTag(raw, tagQuery)
+            } else {
+                raw
+            }
+            val list: MutableList<GalleryInfo?>? = filtered?.let { ArrayList<GalleryInfo?>(it) }
             SimpleHandler.getInstance().post {
                 val helper = mHelper
                 if (helper == null || !helper.isCurrentTask(taskId) || list == null) {
@@ -1229,7 +1546,7 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
                 } else {
                     helper.onGetPageData(taskId, 1, 0, list)
                 }
-                if (TextUtils.isEmpty(keyword)) {
+                if (TextUtils.isEmpty(keyword) && tagQuery == null) {
                     mFavLocalCount = list.size
                     Settings.putFavLocalCount(mFavLocalCount)
                     mDrawerAdapter?.notifyDataSetChanged()
@@ -1913,13 +2230,59 @@ class FavoritesScene : BaseScene(), EasyRecyclerView.OnItemClickListener,
         }
     }
 
+    private data class TagRow(
+        val name: String,
+        val countText: String,
+        val valid: Boolean,
+        val keyword: String?,
+        val active: Boolean
+    )
+
+    private inner class TagCategoryAdapter(private val mInflater: LayoutInflater) :
+        RecyclerView.Adapter<FavDrawerHolder>() {
+
+        private val items = ArrayList<TagRow>()
+
+        fun submit(rows: List<TagRow>) {
+            items.clear()
+            items.addAll(rows)
+            notifyDataSetChanged()
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): FavDrawerHolder {
+            return FavDrawerHolder(mInflater.inflate(R.layout.item_drawer_favorites, parent, false))
+        }
+
+        @SuppressLint("SetTextI18n")
+        override fun onBindViewHolder(holder: FavDrawerHolder, position: Int) {
+            val row = items[position]
+            holder.key.text = row.name
+            holder.value.text = row.countText
+            holder.itemView.isEnabled = true
+            val typeface = if (row.active) {
+                android.graphics.Typeface.BOLD
+            } else {
+                android.graphics.Typeface.NORMAL
+            }
+            holder.key.setTypeface(null, typeface)
+            holder.value.setTypeface(null, typeface)
+        }
+
+        override fun getItemCount(): Int = items.size
+    }
+
     companion object {
         private const val ANIMATE_TIME = 300L
+
+        private const val MODE_DEFAULT = 0
+        private const val MODE_TAGS = 1
 
         private const val KEY_URL_BUILDER = "url_builder"
         private const val KEY_SEARCH_MODE = "search_mode"
         private const val KEY_HAS_FIRST_REFRESH = "has_first_refresh"
         private const val KEY_FAV_COUNT_ARRAY = "fav_count_array"
+        private const val KEY_TAG_QUERY = "tag_query"
+        private const val KEY_TAG_NAME = "tag_name"
         private const val TAG = "FavoritesScene"
     }
 }

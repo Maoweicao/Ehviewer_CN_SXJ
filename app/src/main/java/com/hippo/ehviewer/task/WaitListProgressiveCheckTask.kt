@@ -71,6 +71,12 @@ class WaitListProgressiveCheckTask(
     override suspend fun execute(): Result<Unit> {
         return try {
             runCheck()
+            PreDownloadScanRetryStore.clear(context, targetGid)
+            try {
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                    .getTaskStatusManager().markTaskRetryFinished(getTaskId())
+            } catch (_: Throwable) {
+            }
             notifyCompleted()
             Result.success(Unit)
         } catch (e: Throwable) {
@@ -109,7 +115,7 @@ class WaitListProgressiveCheckTask(
         )
 
         // 2. 拉取 target 的 token 集；拉取失败则放弃整个检查（保守策略）
-        val targetSet = fetchHashSetResilient(target)
+        val targetSet = fetchHashSetResilientChecked(target)
         if (targetSet == null) {
             logAndProgress(100, "目标画廊 token 拉取失败，跳过本次预碰撞检测（保守保留所有候选）")
             return
@@ -124,7 +130,7 @@ class WaitListProgressiveCheckTask(
         val total = candidates.size
         candidates.forEachIndexed { index, candidate ->
             ensureNotCancelled()
-            val candSet = fetchHashSetResilient(candidate)
+            val candSet = fetchHashSetResilientChecked(candidate)
             if (candSet == null) {
                 logAndProgress(
                     20 + (index + 1) * 70 / maxOf(total, 1),
@@ -198,10 +204,28 @@ class WaitListProgressiveCheckTask(
 
     /**
      * 拉取指定画廊的 token 集。实现集中在 [SpiderTokenUtils.fetchHashSetResilient]，
-     * 失败时返回 null，由调用方决定是否保守放弃。
+     * 失败时返回 null。若失败原因是限流，则等待自动换 IP 后重试一次，
+     * 仍失败则抛出 [PreDownloadLimitException]，让任务以失败状态结束并登记重试。
      */
-    private suspend fun fetchHashSetResilient(info: DownloadInfo): HashSet<String>? =
-        SpiderTokenUtils.fetchHashSetResilient(context, info)
+    private suspend fun fetchHashSetResilientChecked(info: DownloadInfo): HashSet<String>? {
+        var set = SpiderTokenUtils.fetchHashSetResilient(context, info)
+        if (set != null) return set
+        if (PreDownloadScanRetryCoordinator.isLimitState(context)) {
+            appendTaskLog("预碰撞检测遇到限流，等待自动切换 IP 后重试")
+            try {
+                com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                    .getTaskStatusManager().markTaskRetrying(getTaskId(), 1, 2, "等待 IP 切换后重试")
+            } catch (_: Throwable) {
+            }
+            if (PreDownloadScanRetryCoordinator.awaitIpSwitch(context)) {
+                set = SpiderTokenUtils.fetchHashSetResilient(context, info)
+                if (set != null) return set
+            }
+            PreDownloadScanRetryStore.markFailed(context, targetGid, "预碰撞检测限流")
+            throw PreDownloadLimitException("预碰撞检测遇到限流，已登记等待 IP 切换后重试")
+        }
+        return null
+    }
 
     private suspend fun ensureNotCancelled() {
         // 暂停：在这里等，恢复后继续

@@ -64,7 +64,7 @@ public abstract class EhDatabase extends RoomDatabase {
     private static final String TAG = "EhDatabase";
 
     public static final String NAME = "eh.db";
-    public static final int VERSION = 15;
+    public static final int VERSION = 16;
 
 
     public abstract BlackListDao blackListDao();

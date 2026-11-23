@@ -500,6 +500,23 @@ public class Settings {
         putIntToStr(KEY_GALLERY_SITE, value);
     }
 
+    // ========== 仅局域网模式 ==========
+
+    public static final String KEY_LAN_ONLY_MODE = "lan_only_mode";
+    private static final boolean DEFAULT_LAN_ONLY_MODE = false;
+
+    /**
+     * 开启后阻止所有对 e-hentai / exhentai 及其图片 CDN 的请求，
+     * 只允许访问局域网内的已配对设备。用于避免触发站点限流或 IP 封禁。
+     */
+    public static boolean getLanOnlyMode() {
+        return getBoolean(KEY_LAN_ONLY_MODE, DEFAULT_LAN_ONLY_MODE);
+    }
+
+    public static void putLanOnlyMode(boolean value) {
+        putBoolean(KEY_LAN_ONLY_MODE, value);
+    }
+
     private static final String KEY_LAUNCH_PAGE = "launch_page";
     private static final int DEFAULT_LAUNCH_PAGE = 0;
 
@@ -1428,6 +1445,95 @@ public class Settings {
         putIntToStr(KEY_MULTI_THREAD_DOWNLOAD, value);
     }
 
+    // ========== 批次下载 ==========
+
+    public static final String KEY_DOWNLOAD_BATCH_SIZE = "download_batch_size";
+    private static final int DEFAULT_DOWNLOAD_BATCH_SIZE = 50;
+
+    public static int getDownloadBatchSize() {
+        int value = getIntFromStr(KEY_DOWNLOAD_BATCH_SIZE, DEFAULT_DOWNLOAD_BATCH_SIZE);
+        return MathUtils.clamp(value, 1, 300);
+    }
+
+    public static void putDownloadBatchSize(int value) {
+        putIntToStr(KEY_DOWNLOAD_BATCH_SIZE, MathUtils.clamp(value, 1, 300));
+    }
+
+    public static final String KEY_DOWNLOAD_BATCH_COOLDOWN = "download_batch_cooldown";
+    private static final int DEFAULT_DOWNLOAD_BATCH_COOLDOWN = 0;
+
+    /** 批次间冷却时间（秒），0 表示不等待，最大 24 小时。 */
+    public static int getDownloadBatchCooldownSeconds() {
+        int value = getIntFromStr(KEY_DOWNLOAD_BATCH_COOLDOWN, DEFAULT_DOWNLOAD_BATCH_COOLDOWN);
+        return MathUtils.clamp(value, 0, 24 * 60 * 60);
+    }
+
+    public static void putDownloadBatchCooldownSeconds(int value) {
+        putIntToStr(KEY_DOWNLOAD_BATCH_COOLDOWN, MathUtils.clamp(value, 0, 24 * 60 * 60));
+    }
+
+    // ========== 限流/封禁探测 ==========
+
+    public static final String KEY_LIMIT_DETECTION_ENABLED = "limit_detection_enabled";
+    private static final boolean DEFAULT_LIMIT_DETECTION_ENABLED = true;
+
+    public static boolean isLimitDetectionEnabled() {
+        return getBoolean(KEY_LIMIT_DETECTION_ENABLED, DEFAULT_LIMIT_DETECTION_ENABLED);
+    }
+
+    public static void putLimitDetectionEnabled(boolean value) {
+        putBoolean(KEY_LIMIT_DETECTION_ENABLED, value);
+    }
+
+    /** 低速/零速判定为限流，独立于站点的 429/509/封禁探测。 */
+    public static final String KEY_LIMIT_LOW_SPEED_ENABLED = "limit_low_speed_enabled";
+    private static final boolean DEFAULT_LIMIT_LOW_SPEED_ENABLED = true;
+
+    public static boolean isLimitLowSpeedEnabled() {
+        return getBoolean(KEY_LIMIT_LOW_SPEED_ENABLED, DEFAULT_LIMIT_LOW_SPEED_ENABLED);
+    }
+
+    public static void putLimitLowSpeedEnabled(boolean value) {
+        putBoolean(KEY_LIMIT_LOW_SPEED_ENABLED, value);
+    }
+
+    /** 检测到限流后是否真的暂停远端下载（冷却）。关闭时只记录证据，不阻断下载。 */
+    public static final String KEY_LIMIT_COOLDOWN_ENABLED = "limit_cooldown_enabled";
+    private static final boolean DEFAULT_LIMIT_COOLDOWN_ENABLED = true;
+
+    public static boolean isLimitCooldownEnabled() {
+        return getBoolean(KEY_LIMIT_COOLDOWN_ENABLED, DEFAULT_LIMIT_COOLDOWN_ENABLED);
+    }
+
+    public static void putLimitCooldownEnabled(boolean value) {
+        putBoolean(KEY_LIMIT_COOLDOWN_ENABLED, value);
+    }
+
+    public static final String KEY_LIMIT_LOW_SPEED_KBPS = "limit_low_speed_kbps";
+    private static final int DEFAULT_LIMIT_LOW_SPEED_KBPS = 20;
+
+    public static int getLimitLowSpeedKbps() {
+        return MathUtils.clamp(
+                getIntFromStr(KEY_LIMIT_LOW_SPEED_KBPS, DEFAULT_LIMIT_LOW_SPEED_KBPS), 5, 200);
+    }
+
+    public static void putLimitLowSpeedKbps(int value) {
+        putIntToStr(KEY_LIMIT_LOW_SPEED_KBPS, MathUtils.clamp(value, 5, 200));
+    }
+
+    public static final String KEY_LIMIT_LOW_SPEED_SECONDS = "limit_low_speed_seconds";
+    private static final int DEFAULT_LIMIT_LOW_SPEED_SECONDS = 60;
+
+    public static int getLimitLowSpeedSeconds() {
+        return MathUtils.clamp(
+                getIntFromStr(KEY_LIMIT_LOW_SPEED_SECONDS, DEFAULT_LIMIT_LOW_SPEED_SECONDS),
+                10, 600);
+    }
+
+    public static void putLimitLowSpeedSeconds(int value) {
+        putIntToStr(KEY_LIMIT_LOW_SPEED_SECONDS, MathUtils.clamp(value, 10, 600));
+    }
+
     private static final String KEY_BACKGROUND_CONCURRENT_TASKS = "background_concurrent_tasks";
     private static final int DEFAULT_BACKGROUND_CONCURRENT_TASKS = 10;
 
@@ -2257,6 +2363,62 @@ public class Settings {
         putBoolean(KEY_ADVANCED_DOWNLOAD_SORT_ENABLED, value);
     }
 
+    // ========== 多级下载排序（v2） ==========
+
+    public static final String KEY_DOWNLOAD_SORT_RULES_V2 = "download_sort_rules_v2";
+    public static final String KEY_DOWNLOAD_SORT_RULES_MIGRATED_V2 =
+            "download_sort_rules_migrated_v2";
+
+    public static String getDownloadSortRulesV2() {
+        return getString(KEY_DOWNLOAD_SORT_RULES_V2, "");
+    }
+
+    public static void setDownloadSortRulesV2(String value) {
+        putString(KEY_DOWNLOAD_SORT_RULES_V2, value == null ? "" : value);
+    }
+
+    public static boolean isDownloadSortRulesMigratedV2() {
+        return getBoolean(KEY_DOWNLOAD_SORT_RULES_MIGRATED_V2, false);
+    }
+
+    public static void setDownloadSortRulesMigratedV2(boolean value) {
+        putBoolean(KEY_DOWNLOAD_SORT_RULES_MIGRATED_V2, value);
+    }
+
+    // ========== 打开应用时自动开始未完成下载 ==========
+
+    public static final String KEY_AUTO_START_DOWNLOAD_ON_OPEN = "auto_start_download_on_open";
+
+    public static boolean getAutoStartDownloadOnOpen() {
+        return getBoolean(KEY_AUTO_START_DOWNLOAD_ON_OPEN, false);
+    }
+
+    public static void setAutoStartDownloadOnOpen(boolean value) {
+        putBoolean(KEY_AUTO_START_DOWNLOAD_ON_OPEN, value);
+    }
+
+    // ========== 书签分类（下载管理器 / 收藏夹） ==========
+
+    public static final String KEY_DOWNLOAD_TAG_CATEGORY_ENABLED = "download_tag_category_enabled";
+
+    public static boolean getDownloadTagCategoryEnabled() {
+        return getBoolean(KEY_DOWNLOAD_TAG_CATEGORY_ENABLED, false);
+    }
+
+    public static void setDownloadTagCategoryEnabled(boolean value) {
+        putBoolean(KEY_DOWNLOAD_TAG_CATEGORY_ENABLED, value);
+    }
+
+    public static final String KEY_FAVORITES_TAG_CATEGORY_ENABLED = "favorites_tag_category_enabled";
+
+    public static boolean getFavoritesTagCategoryEnabled() {
+        return getBoolean(KEY_FAVORITES_TAG_CATEGORY_ENABLED, false);
+    }
+
+    public static void setFavoritesTagCategoryEnabled(boolean value) {
+        putBoolean(KEY_FAVORITES_TAG_CATEGORY_ENABLED, value);
+    }
+
     public static final String KEY_DUPLICATE_DOWNLOAD_BLOCKING_ENABLED = "duplicate_download_blocking_enabled";
 
     public static boolean getDuplicateDownloadBlockingEnabled() {
@@ -2527,6 +2689,90 @@ public class Settings {
 
     public static void putIpSubscriptionList(String value) {
         putString(KEY_IP_SUBSCRIPTION_LIST, value);
+    }
+
+    /** 节点缓存与订阅列表分开存储，避免两者互相覆盖。 */
+    public static final String KEY_IP_POOL_LIST = "ip_pool_list";
+
+    public static String getIpPoolList() {
+        return getString(KEY_IP_POOL_LIST, DEFAULT_IP_SUBSCRIPTION_LIST);
+    }
+
+    public static void putIpPoolList(String value) {
+        putString(KEY_IP_POOL_LIST, value);
+    }
+
+    /** 内置 Clash 内核当前配置里的节点名（JSON 数组）。 */
+    public static final String KEY_IP_PROFILE_NODES = "ip_profile_nodes";
+
+    public static String getIpProfileNodes() {
+        return getString(KEY_IP_PROFILE_NODES, DEFAULT_IP_SUBSCRIPTION_LIST);
+    }
+
+    public static void putIpProfileNodes(String value) {
+        putString(KEY_IP_PROFILE_NODES, value);
+    }
+
+    public static final String KEY_IP_PROFILE_UPDATED = "ip_profile_updated";
+
+    public static long getIpProfileUpdated() {
+        return getLong(KEY_IP_PROFILE_UPDATED, 0L);
+    }
+
+    public static void putIpProfileUpdated(long value) {
+        putLong(KEY_IP_PROFILE_UPDATED, value);
+    }
+
+    public static final String KEY_IP_PROFILE_SOURCE = "ip_profile_source";
+
+    public static String getIpProfileSource() {
+        return getString(KEY_IP_PROFILE_SOURCE, "");
+    }
+
+    public static void putIpProfileSource(String value) {
+        putString(KEY_IP_PROFILE_SOURCE, value);
+    }
+
+    /** 启用自动换 IP 前的代理类型，关闭时恢复；-1 表示没有快照。 */
+    public static final String KEY_IP_SWITCH_PREV_PROXY_TYPE = "ip_switch_prev_proxy_type";
+    private static final int DEFAULT_IP_SWITCH_PREV_PROXY_TYPE = -1;
+
+    public static int getIpSwitchPrevProxyType() {
+        return getInt(KEY_IP_SWITCH_PREV_PROXY_TYPE, DEFAULT_IP_SWITCH_PREV_PROXY_TYPE);
+    }
+
+    public static void putIpSwitchPrevProxyType(int value) {
+        putInt(KEY_IP_SWITCH_PREV_PROXY_TYPE, value);
+    }
+
+    /**
+     * 启用自动换 IP 前的“限流时暂停下载”设置，关闭自动换 IP 时恢复。
+     * -1 表示没有快照；0/1 表示原来的布尔值。
+     */
+    public static final String KEY_IP_SWITCH_PREV_LIMIT_COOLDOWN = "ip_switch_prev_limit_cooldown";
+    private static final int DEFAULT_IP_SWITCH_PREV_LIMIT_COOLDOWN = -1;
+
+    public static int getIpSwitchPrevLimitCooldown() {
+        return getInt(KEY_IP_SWITCH_PREV_LIMIT_COOLDOWN, DEFAULT_IP_SWITCH_PREV_LIMIT_COOLDOWN);
+    }
+
+    public static void putIpSwitchPrevLimitCooldown(int value) {
+        putInt(KEY_IP_SWITCH_PREV_LIMIT_COOLDOWN, value);
+    }
+
+    /**
+     * 启用自动换 IP 前的“限流检测”设置，关闭自动换 IP 时恢复。
+     * -1 表示没有快照。
+     */
+    public static final String KEY_IP_SWITCH_PREV_LIMIT_DETECTION = "ip_switch_prev_limit_detection";
+    private static final int DEFAULT_IP_SWITCH_PREV_LIMIT_DETECTION = -1;
+
+    public static int getIpSwitchPrevLimitDetection() {
+        return getInt(KEY_IP_SWITCH_PREV_LIMIT_DETECTION, DEFAULT_IP_SWITCH_PREV_LIMIT_DETECTION);
+    }
+
+    public static void putIpSwitchPrevLimitDetection(int value) {
+        putInt(KEY_IP_SWITCH_PREV_LIMIT_DETECTION, value);
     }
 
     public static final String KEY_IP_DOWNLOAD_THRESHOLD = "ip_download_threshold";
@@ -3130,6 +3376,23 @@ public class Settings {
         }
     }
 
+    // ===== 下载优先从局域网设备获取 =====
+
+    public static final String KEY_LAB_DOWNLOAD_LAN_FIRST = "lab_download_lan_first";
+    private static final boolean DEFAULT_LAB_DOWNLOAD_LAN_FIRST = false;
+
+    /**
+     * 下载每一页时先尝试从已配对设备读取；对端没有该页时才回退到 e-hentai。
+     * 与「仅局域网模式」同时开启时不会回退。
+     */
+    public static boolean getLabDownloadFromLanFirst() {
+        return getBoolean(KEY_LAB_DOWNLOAD_LAN_FIRST, DEFAULT_LAB_DOWNLOAD_LAN_FIRST);
+    }
+
+    public static void putLabDownloadFromLanFirst(boolean value) {
+        putBoolean(KEY_LAB_DOWNLOAD_LAN_FIRST, value);
+    }
+
     // 分页大小
     public static final String KEY_SELECTOR_PAGE_SIZE = "selector_page_size";
     private static final int DEFAULT_SELECTOR_PAGE_SIZE = 20;
@@ -3200,6 +3463,80 @@ public class Settings {
 
     public static void putAuxDownloadTrustLan(boolean value) {
         putBoolean(KEY_AUX_DOWNLOAD_TRUST_LAN, value);
+    }
+
+    // ========== 接力下载 v2（§5.17） ==========
+
+    /** 接力模式：0=关闭，1=仅定向委托，2=开放候选池。 */
+    public static final int RELAY_MODE_OFF = 0;
+    public static final int RELAY_MODE_TARGETED = 1;
+    public static final int RELAY_MODE_POOL = 2;
+
+    public static final String KEY_RELAY_MODE = "relay_mode";
+    private static final int DEFAULT_RELAY_MODE = RELAY_MODE_TARGETED;
+
+    public static int getRelayMode() {
+        return getIntFromStr(KEY_RELAY_MODE, DEFAULT_RELAY_MODE);
+    }
+
+    public static void putRelayMode(int value) {
+        putIntToStr(KEY_RELAY_MODE, value);
+    }
+
+    /** 开放候选池是否开启（§5.17.3 池端点与逐页回传总开关）。 */
+    public static boolean isRelayPoolEnabled() {
+        return getRelayMode() == RELAY_MODE_POOL;
+    }
+
+    /** 定向委托是否可用（模式非 off）。 */
+    public static boolean isRelayTargetedEnabled() {
+        return getRelayMode() != RELAY_MODE_OFF || isAuxDownloadEnabled();
+    }
+
+    /** 接力控制面/数据面是否至少有一条路径可用。 */
+    public static boolean isRelayAnyEnabled() {
+        return getRelayMode() != RELAY_MODE_OFF || isAuxDownloadEnabled();
+    }
+
+    public static final String KEY_RELAY_LEASE_SECONDS = "relay_lease_seconds";
+    private static final int DEFAULT_RELAY_LEASE_SECONDS = 600;
+
+    public static int getRelayLeaseSeconds() {
+        int value = getIntFromStr(KEY_RELAY_LEASE_SECONDS, DEFAULT_RELAY_LEASE_SECONDS);
+        if (value < 60) value = 60;
+        if (value > 3600) value = 3600;
+        return value;
+    }
+
+    public static void putRelayLeaseSeconds(int value) {
+        putIntToStr(KEY_RELAY_LEASE_SECONDS, value);
+    }
+
+    public static final String KEY_RELAY_POOL_MAX_ITEMS = "relay_pool_max_items";
+    private static final int DEFAULT_RELAY_POOL_MAX_ITEMS = 200;
+
+    public static int getRelayPoolMaxItems() {
+        int value = getIntFromStr(KEY_RELAY_POOL_MAX_ITEMS, DEFAULT_RELAY_POOL_MAX_ITEMS);
+        if (value <= 0) value = 50;
+        if (value > 200) value = 200;
+        return value;
+    }
+
+    public static void putRelayPoolMaxItems(int value) {
+        putIntToStr(KEY_RELAY_POOL_MAX_ITEMS, value);
+    }
+
+    /** 是否允许局域网匿名设备（认证模式 none 且网段内）直接认领池任务。 */
+    public static final String KEY_RELAY_ANONYMOUS_LAN_CLAIM = "relay_anonymous_lan_claim";
+    private static final boolean DEFAULT_RELAY_ANONYMOUS_LAN_CLAIM = false;
+
+    public static boolean isRelayAnonymousLanClaim() {
+        return getBoolean(KEY_RELAY_ANONYMOUS_LAN_CLAIM,
+                DEFAULT_RELAY_ANONYMOUS_LAN_CLAIM);
+    }
+
+    public static void putRelayAnonymousLanClaim(boolean value) {
+        putBoolean(KEY_RELAY_ANONYMOUS_LAN_CLAIM, value);
     }
 
     // 自动接收书签

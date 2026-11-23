@@ -25,7 +25,6 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
@@ -55,6 +54,8 @@ class LanImageFetcher private constructor(context: Context) {
     private val scheduler: ScheduledExecutorService = Executors.newScheduledThreadPool(2) { r ->
         Thread(r, "LabLanFetcher").apply { isDaemon = true }
     }
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     private val peerHealth = ConcurrentHashMap<String, PeerHealth>()
 
@@ -91,21 +92,18 @@ class LanImageFetcher private constructor(context: Context) {
      */
     fun listByRtt(): List<TrustedPeer> {
         val now = System.currentTimeMillis()
-        val peers = ArrayList(peerStore.listOnline())
+        // 不只用 listOnline()：对端可能因为一段时间没同步而被标记离线，
+        // 但实际仍可达。这里把所有有地址的设备都纳入，按在线优先、RTT 升序尝试。
+        val peers = ArrayList(peerStore.list().filter {
+            !it.host.isNullOrEmpty() && it.port > 0
+        })
         peers.removeIf { p ->
-            p.host.isNullOrEmpty() || p.port <= 0 ||
-                peerHealth[p.deviceId]?.isInCooldown(now) == true
+            peerHealth[p.deviceId]?.isInCooldown(now) == true
         }
-        Collections.sort(peers) { a, b ->
-            val ra = a.rttMs
-            val rb = b.rttMs
-            // -1 (未探测) 排末尾
-            when {
-                ra < 0 && rb >= 0 -> 1
-                rb < 0 && ra >= 0 -> -1
-                else -> ra.compareTo(rb)
-            }
-        }
+        peers.sortWith(
+            compareByDescending<TrustedPeer> { it.online }
+                .thenBy { if (it.rttMs < 0) Long.MAX_VALUE else it.rttMs },
+        )
         return peers
     }
 
@@ -114,6 +112,42 @@ class LanImageFetcher private constructor(context: Context) {
      */
     fun getConsecutiveFailures(deviceId: String): Int =
         peerHealth[deviceId]?.consecutiveFailures ?: 0
+
+    /**
+     * 从已配对设备读取某画廊的页数（不访问 e-hentai）。
+     *
+     * @return 页数；所有设备都没有该画廊时返回 -1
+     */
+    fun fetchGalleryPages(gid: Long): Int {
+        for (peer in listByRtt()) {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = openConn(peer, "/api/v1/galleries/$gid")
+                conn.requestMethod = "GET"
+                if (conn.responseCode != 200) continue
+                val text = conn.inputStream.bufferedReader().use { it.readText() }
+                val idx = text.indexOf("\"pages\":")
+                if (idx < 0) continue
+                var i = idx + 8
+                while (i < text.length && text[i].isWhitespace()) i++
+                var j = i
+                while (j < text.length && text[j].isDigit()) j++
+                val pages = text.substring(i, j).toIntOrNull() ?: continue
+                if (pages > 0) {
+                    SnapshotLogger.d(
+                        "LanImageFetcher",
+                        "gid=$gid pages=$pages from ${peer.deviceName}",
+                    )
+                    return pages
+                }
+            } catch (_: Throwable) {
+                // try next peer
+            } finally {
+                conn?.disconnect()
+            }
+        }
+        return -1
+    }
 
     /**
      * 探测某 peer 是否有指定页。
@@ -206,10 +240,39 @@ class LanImageFetcher private constructor(context: Context) {
 
     /**
      * 立即探测所有 peer 的 RTT，更新到 [TrustedPeer]。
+     *
+     * 注意：遍历的是「所有有地址的设备」，而不是 [TrustedPeerStore.listOnline]，
+     * 否则一旦被标记离线就永远不会再被探测，状态无法恢复。
+     *
+     * @param onDone 全部探测结束后在主线程回调（可为 null）
      */
-    fun probeAllRtt() {
-        for (peer in peerStore.listOnline()) {
-            scheduler.execute { probeRtt(peer) }
+    @JvmOverloads
+    fun probeAllRtt(onDone: Runnable? = null) {
+        val targets = peerStore.list().filter { !it.host.isNullOrEmpty() && it.port > 0 }
+        if (targets.isEmpty()) {
+            onDone?.let { callback -> mainHandler.post(callback) }
+            return
+        }
+        val latch = java.util.concurrent.CountDownLatch(targets.size)
+        for (peer in targets) {
+            scheduler.execute {
+                try {
+                    probeRtt(peer)
+                } finally {
+                    latch.countDown()
+                }
+            }
+        }
+        // 等待放在独立线程，避免占用探测线程池（池很小）
+        if (onDone != null) {
+            Thread({
+                try {
+                    latch.await(20, TimeUnit.SECONDS)
+                } catch (ignored: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                }
+                mainHandler.post(onDone)
+            }, "LabRttProbeWait").apply { isDaemon = true }.start()
         }
     }
 
@@ -242,6 +305,10 @@ class LanImageFetcher private constructor(context: Context) {
         val now = System.currentTimeMillis()
         val h = peerHealth.computeIfAbsent(deviceId) { PeerHealth() }
         h.recordFailure(now)
+        // 连续失败 2 次即认为离线，让界面及时变灰；记录保留，后续探测成功会自动恢复。
+        if (h.consecutiveFailures >= OFFLINE_FAILURE_THRESHOLD) {
+            peerStore.markOffline(deviceId)
+        }
         SnapshotLogger.d(
             "LanImageFetcher",
             "peer $deviceId failure ${h.consecutiveFailures}, cooldown until ${h.cooldownUntilMs}",
@@ -313,6 +380,7 @@ class LanImageFetcher private constructor(context: Context) {
         private const val READ_TIMEOUT_MS = 8_000
         private const val RTT_PROBE_INTERVAL_MS = 30_000L
         private const val RTT_TTL_MS = 60_000L
+        private const val OFFLINE_FAILURE_THRESHOLD = 2
 
         @Volatile private var INSTANCE: LanImageFetcher? = null
 

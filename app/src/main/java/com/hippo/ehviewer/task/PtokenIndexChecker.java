@@ -23,8 +23,13 @@ public class PtokenIndexChecker {
         void onNoRelation();
     }
 
-    /** 分批查询条数，避免一次将整张 PTOKENS_INDEX 表载入内存导致 OOM */
-    private static final int BATCH_SIZE = 500;
+    /**
+     * 分批查询条数。
+     *
+     * <p>单行 PTOKENS 是整本画廊的 hash 串，批次过大会一次构造出大量临时
+     * String/HashSet 并导致 OOM，因此与 {@link PtokenIndexUpdater} 保持一致。
+     */
+    private static final int BATCH_SIZE = 16;
 
     /**
      * 检查一组 ptoken 是否是某个已下载画廊的子集
@@ -44,20 +49,21 @@ public class PtokenIndexChecker {
         int bestOverlap = 0;
         boolean hasAny = false;
 
-        // 分批迭代索引表，控制峰值内存占用
-        long total = EhDB.getPtokensIndexCount();
-        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
-            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
-            if (batch.isEmpty()) {
+        long lastGid = Long.MIN_VALUE;
+        while (true) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatchAfter(
+                    lastGid, -1, BATCH_SIZE);
+            if (batch == null || batch.isEmpty()) {
                 break;
             }
             hasAny = true;
 
             for (PtokensIndex idx : batch) {
-                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
+                lastGid = idx.getGid();
+                String ptokens = idx.getPtokens();
+                if (ptokens == null || ptokens.isEmpty()) continue;
 
-                Set<String> existingPtokens = new HashSet<>(
-                        Arrays.asList(idx.getPtokens().split(",")));
+                Set<String> existingPtokens = new HashSet<>(Arrays.asList(ptokens.split(",")));
 
                 int overlap = 0;
                 for (String pt : newPtokenSet) {
@@ -76,6 +82,10 @@ public class PtokenIndexChecker {
                     bestOverlap = overlap;
                     bestGid = idx.getGid();
                 }
+            }
+
+            if (batch.size() < BATCH_SIZE) {
+                break;
             }
         }
 
@@ -102,24 +112,29 @@ public class PtokenIndexChecker {
 
         Set<String> newPtokenSet = new HashSet<>(newPtokens);
 
-        // 分批迭代索引表，控制峰值内存占用
-        long total = EhDB.getPtokensIndexCount();
-        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
-            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
-            if (batch.isEmpty()) {
+        long lastGid = Long.MIN_VALUE;
+        while (true) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatchAfter(
+                    lastGid, -1, BATCH_SIZE);
+            if (batch == null || batch.isEmpty()) {
                 break;
             }
 
             for (PtokensIndex idx : batch) {
-                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
+                lastGid = idx.getGid();
+                String ptokens = idx.getPtokens();
+                if (ptokens == null || ptokens.isEmpty()) continue;
                 if (idx.getPages() < newPtokens.size()) continue; // 跳过页数更少的画廊
 
-                Set<String> existingPtokens = new HashSet<>(
-                        Arrays.asList(idx.getPtokens().split(",")));
+                Set<String> existingPtokens = new HashSet<>(Arrays.asList(ptokens.split(",")));
 
                 if (existingPtokens.containsAll(newPtokenSet)) {
                     return idx.getGid();
                 }
+            }
+
+            if (batch.size() < BATCH_SIZE) {
+                break;
             }
         }
 

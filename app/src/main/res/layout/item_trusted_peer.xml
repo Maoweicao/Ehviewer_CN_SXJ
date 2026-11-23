@@ -38,6 +38,15 @@
                     android:ellipsize="end" />
 
                 <androidx.appcompat.widget.AppCompatTextView
+                    android:id="@+id/peer_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:textSize="11sp"
+                    android:textColor="#FF9800"
+                    android:layout_marginStart="8dp"
+                    android:visibility="gone" />
+
+                <androidx.appcompat.widget.AppCompatTextView
                     android:id="@+id/peer_online"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
@@ -75,14 +84,31 @@
 
         </LinearLayout>
 
-        <Button
-            android:id="@+id/btn_delete"
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="@string/multi_device_delete"
-            android:textSize="12sp"
-            style="@style/Widget.AppCompat.Button.Borderless"
-            android:textColor="#FF5722" />
+            android:orientation="vertical"
+            android:gravity="center_horizontal">
+
+            <Button
+                android:id="@+id/btn_edit"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_edit_peer"
+                android:textSize="12sp"
+                android:textColor="?attr/colorPrimary"
+                style="@style/Widget.AppCompat.Button.Borderless" />
+
+            <Button
+                android:id="@+id/btn_delete"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/multi_device_delete"
+                android:textSize="12sp"
+                style="@style/Widget.AppCompat.Button.Borderless"
+                android:textColor="#FF5722" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

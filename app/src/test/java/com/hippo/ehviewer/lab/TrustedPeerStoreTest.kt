@@ -234,4 +234,97 @@ class TrustedPeerStoreTest {
         // stale 因 lastSeen=0，超过 60s
         assertFalse(online.any { it.deviceId == "uuid-stale" })
     }
+
+    @Test
+    fun updateEndpoint_keepsKeyAndCapabilities() {
+        val store = TrustedPeerStore.getInstance(context)
+        store.upsert(
+            TrustedPeer.Builder("uuid-1", "Pixel-1", "android")
+                .host("192.168.1.10")
+                .port(8080)
+                .trustedAt(1234L)
+                .capabilities(listOf(TrustedPeer.CAP_PAGE_READ, TrustedPeer.CAP_RELAY))
+                .presharedKey("secret-key")
+                .pubkeyHint("hint")
+                .role("slave")
+                .build(),
+        )
+
+        val updated = store.updateEndpoint("uuid-1", "Pixel-1-renamed", "192.168.1.20", 9090)
+
+        assertNotNull(updated)
+        assertEquals("Pixel-1-renamed", updated!!.deviceName)
+        assertEquals("192.168.1.20", updated.host)
+        assertEquals(9090, updated.port)
+        // 密钥与配对相关字段不能丢
+        assertEquals("secret-key", updated.presharedKey)
+        assertEquals("hint", updated.pubkeyHint)
+        assertEquals(1234L, updated.trustedAt)
+        assertEquals("slave", updated.role)
+        assertEquals(
+            listOf(TrustedPeer.CAP_PAGE_READ, TrustedPeer.CAP_RELAY),
+            updated.capabilities,
+        )
+        // 持久化后仍保留密钥
+        TrustedPeerStore.resetForTest()
+        val reloaded = TrustedPeerStore.getInstance(context).findById("uuid-1")!!
+        assertEquals("secret-key", reloaded.presharedKey)
+        assertEquals("192.168.1.20", reloaded.host)
+    }
+
+    @Test
+    fun updateEndpoint_unknown_returnsNull() {
+        val store = TrustedPeerStore.getInstance(context)
+        assertNull(store.updateEndpoint("uuid-not-exist", "name", "192.168.1.20", 8080))
+    }
+
+    @Test
+    fun updateEndpoint_firesListener() {
+        val store = TrustedPeerStore.getInstance(context)
+        store.upsert(newPeer())
+        val latch = CountDownLatch(1)
+        var newName: String? = null
+        store.addListener(object : TrustedPeerStore.Listener {
+            override fun onPeerAdded(peer: TrustedPeer) {}
+            override fun onPeerUpdated(old: TrustedPeer, new: TrustedPeer) {
+                newName = new.deviceName
+                latch.countDown()
+            }
+            override fun onPeerRemoved(peer: TrustedPeer) {}
+        })
+
+        store.updateEndpoint("uuid-1", "Pixel-1-edited", "192.168.1.20", 8080)
+
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(latch.await(1, TimeUnit.SECONDS))
+        assertEquals("Pixel-1-edited", newName)
+    }
+
+    @Test
+    fun touch_notifiesListener() {
+        val store = TrustedPeerStore.getInstance(context)
+        store.upsert(newPeer())
+        val latch = CountDownLatch(1)
+        store.addListener(object : TrustedPeerStore.Listener {
+            override fun onPeerAdded(peer: TrustedPeer) {}
+            override fun onPeerUpdated(old: TrustedPeer, new: TrustedPeer) { latch.countDown() }
+            override fun onPeerRemoved(peer: TrustedPeer) {}
+        })
+
+        store.touch("uuid-1", null, 0, 12)
+
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(latch.await(1, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun isEffectivelyOnline_honoursHeartbeatWindow() {
+        val store = TrustedPeerStore.getInstance(context)
+        val peer = newPeer()
+        peer.setLastSeen(System.currentTimeMillis())
+        assertTrue(store.isEffectivelyOnline(peer))
+        assertFalse(store.isEffectivelyOnline(peer, System.currentTimeMillis() + 61_000L))
+        peer.setOnline(false)
+        assertFalse(store.isEffectivelyOnline(peer))
+    }
 }

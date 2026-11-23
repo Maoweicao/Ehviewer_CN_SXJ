@@ -282,6 +282,11 @@ public class EhApplication extends RecordingApplication {
 
         initialized = true;
 
+        if (Settings.getIpSwitchEnabled()) {
+            com.hippo.ehviewer.lab.ip.IpSwitchController.getInstance().ensureStarted(this);
+            com.hippo.ehviewer.lab.ip.SubscriptionManager.getInstance(this).startAutoRefresh();
+        }
+
         // 后台预热 EventBus：历史 pre-ANR 抓到的卡顿点是 GalleryListScene.onDestroy
         // 主线程里首次初始化 EventBus（AndroidComponents.<clinit>）。提前在 IO 线程完成
         // 类初始化，避免首次使用落在主线程的生命周期回调上。
@@ -347,13 +352,53 @@ public class EhApplication extends RecordingApplication {
      * Called when network changes to flush connections and DNS cache.
      */
     public static void onNetworkChanged() {
+        flushConnections();
+        if (instance != null && Settings.getIpSwitchEnabled()) {
+            com.hippo.ehviewer.lab.ip.core.VpnBypass.refresh(instance);
+        }
+    }
+
+    /**
+     * 立即断开全部 OkHttp 长连接，用于切换代理节点/IP 后强制走新连接。
+     */
+    public static void flushConnections() {
         try {
-            OkHttpClient client = getOkHttpClient(instance);
+            if (instance == null) return;
+            OkHttpClient client = instance.mOkHttpClient;
             if (client != null) {
                 client.connectionPool().evictAll();
             }
+            OkHttpClient imageClient = instance.mImageOkHttpClient;
+            if (imageClient != null) {
+                imageClient.connectionPool().evictAll();
+            }
+            EhProxySelector selector = instance.mEhProxySelector;
+            if (selector != null) {
+                selector.updateProxy();
+            }
         } catch (Exception e) {
-            Log.e(TAG, "Failed to flush connections on network change", e);
+            Log.e(TAG, "Failed to flush connections", e);
+        }
+    }
+
+    /**
+     * 取消主/图片 OkHttp 上所有正在执行的请求。
+     * 切换代理节点时使用：空闲连接 evictAll 不够，活动连接必须结束，
+     * 否则会继续复用旧节点。
+     */
+    public static void cancelAllCalls() {
+        try {
+            if (instance == null) return;
+            OkHttpClient client = instance.mOkHttpClient;
+            if (client != null) {
+                client.dispatcher().cancelAll();
+            }
+            OkHttpClient imageClient = instance.mImageOkHttpClient;
+            if (imageClient != null) {
+                imageClient.dispatcher().cancelAll();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to cancel calls", e);
         }
     }
 
@@ -446,6 +491,18 @@ public class EhApplication extends RecordingApplication {
     }
 
     @NonNull
+    /** e-hentai / exhentai 及其图片 CDN 域名；仅局域网模式下全部拦截。 */
+    private static boolean isEhRemoteHost(@Nullable String host) {
+        if (host == null) return false;
+        String h = host.toLowerCase(java.util.Locale.US);
+        return h.equals("ehentai.org") || h.endsWith(".ehentai.org")
+                || h.equals("e-hentai.org") || h.endsWith(".e-hentai.org")
+                || h.equals("exhentai.org") || h.endsWith(".exhentai.org")
+                || h.equals("ehgt.org") || h.endsWith(".ehgt.org")
+                || h.equals("ehtracker.org") || h.endsWith(".ehtracker.org")
+                || h.equals("hath.network") || h.endsWith(".hath.network");
+    }
+
     public static OkHttpClient getOkHttpClient(@NonNull Context context) {
         EhApplication application = ((EhApplication) context.getApplicationContext());
         if (application.mOkHttpClient == null) {
@@ -480,6 +537,18 @@ public class EhApplication extends RecordingApplication {
 //                    .hostnameVerifier((hostname, session) -> true)
 //                    .dispatcher(dispatcher)
                     .dns(new EhHosts(application))
+                    .addInterceptor(chain -> {
+                        // 仅局域网模式：在 DNS/连接之前直接拒绝远端站点请求，
+                        // 避免因为同步后的补图或自动下载再次触发站点限流/封 IP。
+                        if (Settings.getLanOnlyMode()) {
+                            String host = chain.request().url().host();
+                            if (isEhRemoteHost(host)) {
+                                throw new java.io.IOException(
+                                        "LAN-only mode: blocked remote host " + host);
+                            }
+                        }
+                        return chain.proceed(chain.request());
+                    })
                     .addNetworkInterceptor(sprocket -> {
                         try {
                             return sprocket.proceed(sprocket.request());
@@ -564,6 +633,18 @@ public class EhApplication extends RecordingApplication {
                     .cache(getOkHttpCache(application))
 //                    .hostnameVerifier((hostname, session) -> true)
                     .dns(new EhHosts(application))
+                    .addInterceptor(chain -> {
+                        // 仅局域网模式：在 DNS/连接之前直接拒绝远端站点请求，
+                        // 避免因为同步后的补图或自动下载再次触发站点限流/封 IP。
+                        if (Settings.getLanOnlyMode()) {
+                            String host = chain.request().url().host();
+                            if (isEhRemoteHost(host)) {
+                                throw new java.io.IOException(
+                                        "LAN-only mode: blocked remote host " + host);
+                            }
+                        }
+                        return chain.proceed(chain.request());
+                    })
                     .addNetworkInterceptor(sprocket -> {
                         try {
                             return sprocket.proceed(sprocket.request());

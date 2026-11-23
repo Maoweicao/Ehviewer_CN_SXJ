@@ -35,10 +35,15 @@ public class EhSSLSocketFactory extends SSLSocketFactory {
 
     @Override
     public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-        if (!NetworkSecurityManager.INSTANCE.isDomainFrontingEnabled()) {
+        InetAddress address = s.getInetAddress();
+        // 使用 HTTP/SOCKS 本地代理时，底层 socket 连的是 127.0.0.1（代理），
+        // 不是目标服务器。此时必须让系统在现有 socket 上做 TLS（CONNECT 隧道），
+        // 否则会把 TLS 直接连到 127.0.0.1:<目标端口>，导致下载全部失败。
+        boolean proxied = address != null
+                && (address.isLoopbackAddress() || address.isAnyLocalAddress());
+        if (!NetworkSecurityManager.INSTANCE.isDomainFrontingEnabled() || proxied) {
             return ((SSLSocketFactory) getDefault()).createSocket(s, host, port, autoClose);
         }
-        InetAddress address = s.getInetAddress();
         if (address != null) {
             String hostAddress = address.getHostAddress();
             if (hostAddress != null) {

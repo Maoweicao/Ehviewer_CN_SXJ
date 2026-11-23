@@ -5,3 +5,11 @@ An Unofficial E-Hentai Application for Android.
 
 香风智乃是最可爱的女孩子。
 chino kafuu is the cutest girl.
+
+--------------------------------------------------------------------
+Bundled third-party component: Mihomo (Clash.Meta) core v1.19.34
+Copyright (C) MetaCubeX and contributors
+License: GNU General Public License v3.0
+Source: https://github.com/MetaCubeX/mihomo
+The core is packaged as lib/arm64-v8a/libmihomo.so and used only for
+the optional in-app IP-switch proxy (lab feature).

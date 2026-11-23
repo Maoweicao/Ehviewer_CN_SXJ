@@ -108,6 +108,7 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
     private static final String KEY_VPN_AWARE_MODE = "vpn_aware_mode";
     private static final String KEY_VPN_STATUS_INDICATOR = "vpn_status_indicator";
     private static final String KEY_MERGE_SCAN_MODE = "merge_scan_mode";
+    private static final String KEY_BACKFILL_GALLERY_TAGS = "backfill_gallery_tags";
 
     public static final int REQUEST_CODE_PICK_EXPORT_DIR = 10;
     private static final String TAG = "AdvancedFragment";
@@ -233,6 +234,11 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
             mergeScanMode.setOnPreferenceChangeListener(this);
         }
 
+        Preference backfillGalleryTags = findPreference(KEY_BACKFILL_GALLERY_TAGS);
+        if (backfillGalleryTags != null) {
+            backfillGalleryTags.setOnPreferenceClickListener(this);
+        }
+
         // Register for VPN state changes
         NetworkSecurityManager.INSTANCE.addListener(this);
 
@@ -300,6 +306,8 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                 return exportDiagnostic();
             case KEY_ANR_AUTO_DISMISS_ACCESSIBILITY:
                 return gotoAccessibilitySettings();
+            case KEY_BACKFILL_GALLERY_TAGS:
+                return backfillGalleryTags();
             default:
                 return false;
         }
@@ -396,6 +404,31 @@ public class AdvancedFragment extends BasePreferenceFragmentCompat
                             }
                         });
                     }, "RebuildGalleryIndex").start();
+                })
+                .show();
+        return true;
+    }
+
+    private boolean backfillGalleryTags() {
+        if (context == null) {
+            return false;
+        }
+        new AlertDialog.Builder(context)
+                .setTitle(R.string.backfill_gallery_tags_title)
+                .setMessage(R.string.backfill_gallery_tags_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    try {
+                        com.hippo.ehviewer.BackgroundTaskManager.getInstance()
+                                .submitBackgroundTask(
+                                        new com.hippo.ehviewer.task.BackfillGalleryTagsTask(context));
+                        Toast.makeText(context, R.string.backfill_gallery_tags_started,
+                                Toast.LENGTH_SHORT).show();
+                    } catch (Throwable t) {
+                        Log.e(TAG, "Failed to start tag backfill", t);
+                        Toast.makeText(context, R.string.backfill_gallery_tags_title,
+                                Toast.LENGTH_SHORT).show();
+                    }
                 })
                 .show();
         return true;

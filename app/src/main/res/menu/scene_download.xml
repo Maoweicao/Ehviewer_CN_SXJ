@@ -210,6 +210,11 @@
         app:showAsAction="always"/>
 
     <item
+        android:id="@+id/action_batch_download"
+        android:title="@string/download_batch_start"
+        app:showAsAction="never"/>
+
+    <item
         android:id="@+id/action_stop_all"
         android:icon="@drawable/v_pause_dark_x24"
         android:title="@string/download_stop_all"
@@ -237,6 +242,11 @@
         app:showAsAction="ifRoom"/>
 
     <item
+        android:id="@+id/action_relay_large"
+        android:title="@string/relay_large_galleries"
+        app:showAsAction="never"/>
+
+    <item
         android:id="@+id/repair_thumbnails"
         android:title="@string/repair_thumbnail_menu"
         app:showAsAction="never"/>
@@ -244,6 +254,11 @@
     <item
         android:id="@+id/action_recheck_downloading"
         android:title="@string/download_recheck_downloading"
+        app:showAsAction="never"/>
+
+    <item
+        android:id="@+id/tidy_download_history"
+        android:title="@string/settings_download_tidy_download_history"
         app:showAsAction="never"/>
 
     <item

@@ -66,6 +66,58 @@ public class SafeResponse extends NanoHTTPD.Response {
         return new SafeResponse(status, "application/json", body);
     }
 
+    /**
+     * 用任意 HTTP 状态码构造 JSON 响应。
+     *
+     * <p>NanoHTTPD 2.3.1 的 Status 枚举没有 412/428 等常用码，协议 §5.17 又要求
+     * 原样返回，因此这里用 {@link IStatus} 自定义状态。
+     */
+    public static NanoHTTPD.Response json(int code, String json) {
+        return json(new SimpleStatus(code), json);
+    }
+
+    /** 任意状态码的 IStatus 实现。 */
+    public static IStatus status(int code) {
+        return new SimpleStatus(code);
+    }
+
+    private static final class SimpleStatus implements IStatus {
+        private final int code;
+
+        SimpleStatus(int code) {
+            this.code = code;
+        }
+
+        @Override
+        public int getRequestStatus() {
+            return code;
+        }
+
+        @Override
+        public String getDescription() {
+            String text;
+            switch (code) {
+                case 200: text = "OK"; break;
+                case 201: text = "Created"; break;
+                case 204: text = "No Content"; break;
+                case 304: text = "Not Modified"; break;
+                case 400: text = "Bad Request"; break;
+                case 401: text = "Unauthorized"; break;
+                case 403: text = "Forbidden"; break;
+                case 404: text = "Not Found"; break;
+                case 409: text = "Conflict"; break;
+                case 412: text = "Precondition Failed"; break;
+                case 428: text = "Precondition Required"; break;
+                case 500: text = "Internal Server Error"; break;
+                case 503: text = "Service Unavailable"; break;
+                default: text = "HTTP " + code; break;
+            }
+            // NanoHTTPD 的 send() 会先写入 "HTTP/1.1 "（含空格），
+            // 因此这里只返回 "状态码 描述"，不能再加前导空格。
+            return code + " " + text;
+        }
+    }
+
     /** 服务端低内存/过载的极小 503 响应。 */
     public static NanoHTTPD.Response serviceUnavailable() {
         return new SafeResponse(Status.SERVICE_UNAVAILABLE, "application/json", OOM_BODY);

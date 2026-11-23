@@ -815,7 +815,9 @@ class DownloadService : Service(), DownloadManager.DownloadListener {
         fun startRangeDownload(context: Context, gids: LongArray) {
             val intent = Intent(context, DownloadService::class.java).apply {
                 action = ACTION_START_RANGE
-                val list = ArrayList<Long>()
+                // 接收端按 LongList 读取；这里也必须写入 LongList，
+                // 否则 getParcelableExtra 读不出来，区间下载/接力下载会静默不动。
+                val list = com.hippo.lib.yorozuya.collect.LongList(gids.size)
                 for (g in gids) list.add(g)
                 putExtra(KEY_GID_LIST, list)
             }

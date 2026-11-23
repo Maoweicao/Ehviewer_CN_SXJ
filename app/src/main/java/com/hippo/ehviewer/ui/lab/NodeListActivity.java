@@ -18,6 +18,9 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.lab.ip.IpPoolManager;
+import com.hippo.ehviewer.lab.ip.IpSwitchController;
+import com.hippo.ehviewer.lab.ip.core.ClashProfileStore;
+import com.hippo.ehviewer.lab.ip.core.MihomoCore;
 import com.hippo.ehviewer.lab.ip.model.IpInfo;
 import com.hippo.ehviewer.ui.EhActivity;
 
@@ -38,6 +41,25 @@ public class NodeListActivity extends EhActivity {
     private Button btnTestAll;
     private final List<IpInfo> nodes = new ArrayList<>();
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final android.os.Handler statusHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable currentTick = new Runnable() {
+        @Override
+        public void run() {
+            if (isFinishing() || isDestroyed()) return;
+            IpSwitchController.getInstance().refreshCurrentNodeAsync();
+            String now = IpSwitchController.getInstance().getCurrentNodeName();
+            if (!java.util.Objects.equals(now, currentNode)) {
+                currentNode = now;
+                adapter.notifyDataSetChanged();
+                updateSummary();
+            }
+            statusHandler.postDelayed(this, 1500);
+        }
+    };
+    private volatile boolean testingAll;
+    private volatile boolean switching;
+    private String currentNode;
 
     @Override
     protected int getThemeResId(int theme) {
@@ -67,6 +89,7 @@ public class NodeListActivity extends EhActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        statusHandler.removeCallbacks(currentTick);
         executor.shutdown();
     }
 
@@ -89,24 +112,47 @@ public class NodeListActivity extends EhActivity {
     }
 
     private void loadNodes() {
+        ClashProfileStore.syncPool(this);
+        IpSwitchController.getInstance().refreshCurrentNodeAsync();
+        currentNode = IpSwitchController.getInstance().getCurrentNodeName();
         nodes.clear();
         nodes.addAll(poolManager.getAllIps());
         adapter.notifyDataSetChanged();
         updateSummary();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        loadNodes();
+        statusHandler.removeCallbacks(currentTick);
+        statusHandler.post(currentTick);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        statusHandler.removeCallbacks(currentTick);
+    }
+
     private void updateSummary() {
         int total = nodes.size();
         int available = 0;
         int tested = 0;
+        int failed = 0;
         for (IpInfo ip : nodes) {
             if (ip.isAvailable()) available++;
             if (ip.latency >= 0) tested++;
+            else if (ip.latency == -2) failed++;
         }
-        tvSummary.setText(String.format("总计: %d | 可用: %d | 已测: %d", total, available, tested));
+        String current = currentNode == null || currentNode.isEmpty() ? "自动选择中" : currentNode;
+        tvSummary.setText(String.format("总计: %d | 启用: %d | 成功: %d | 超时: %d\n当前: %s",
+                total, available, tested, failed, current));
     }
 
     private void testAllNodes() {
+        if (testingAll) return;
+        testingAll = true;
         btnTestAll.setEnabled(false);
         btnTestAll.setText("测试中...");
 
@@ -115,6 +161,8 @@ public class NodeListActivity extends EhActivity {
             for (IpInfo ip : nodes) {
                 if (!ip.enabled) continue;
                 int latency = testLatency(ip);
+                ip.latency = latency;
+                ip.lastTestTime = System.currentTimeMillis();
                 poolManager.updateIpLatency(ip, latency);
                 tested[0]++;
                 final int index = nodes.indexOf(ip);
@@ -124,6 +172,7 @@ public class NodeListActivity extends EhActivity {
                 });
             }
             runOnUiThread(() -> {
+                testingAll = false;
                 btnTestAll.setEnabled(true);
                 btnTestAll.setText("测试全部");
                 Toast.makeText(this, "已完成 " + tested[0] + " 个节点测试", Toast.LENGTH_SHORT).show();
@@ -134,6 +183,8 @@ public class NodeListActivity extends EhActivity {
     private void testSingleNode(IpInfo ip, int position) {
         executor.execute(() -> {
             int latency = testLatency(ip);
+            ip.latency = latency;
+            ip.lastTestTime = System.currentTimeMillis();
             poolManager.updateIpLatency(ip, latency);
             runOnUiThread(() -> {
                 adapter.notifyItemChanged(position);
@@ -142,7 +193,31 @@ public class NodeListActivity extends EhActivity {
         });
     }
 
+    private void selectNode(IpInfo node) {
+        if (switching || testingAll || node == null || node.name == null || node.name.isEmpty()) return;
+        switching = true;
+        Toast.makeText(this, "正在切换: " + node.name, Toast.LENGTH_SHORT).show();
+        executor.execute(() -> {
+            String selected = IpSwitchController.getInstance().selectNodeBlocking(node.name);
+            runOnUiThread(() -> {
+                switching = false;
+                if (selected == null) {
+                    Toast.makeText(this, "切换失败，节点不可用", Toast.LENGTH_LONG).show();
+                } else {
+                    currentNode = selected;
+                    Toast.makeText(this, "已切换到: " + selected, Toast.LENGTH_SHORT).show();
+                }
+                adapter.notifyDataSetChanged();
+                updateSummary();
+            });
+        });
+    }
+
     private int testLatency(IpInfo ip) {
+        if ("clash".equals(ip.actualProtocol)) {
+            long delay = MihomoCore.getInstance().testDelay(ip.name, 5000);
+            return delay > 0 ? (int) delay : -2;
+        }
         Socket socket = null;
         try {
             long start = System.currentTimeMillis();
@@ -176,10 +251,16 @@ public class NodeListActivity extends EhActivity {
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             IpInfo node = nodes.get(position);
 
-            holder.tvName.setText(node.getDisplayName());
+            boolean isCurrent = node.name != null && !node.name.isEmpty()
+                    && node.name.equals(currentNode);
+            holder.tvName.setText(isCurrent ? "● " + node.getDisplayName() : node.getDisplayName());
             holder.tvProtocol.setText(node.actualProtocol != null ? node.actualProtocol.toUpperCase() : node.protocol.toUpperCase());
             holder.tvSource.setText(node.source);
             holder.tvLatency.setText(node.getLatencyDisplay());
+            holder.itemView.setBackgroundColor(isCurrent
+                    ? 0x334CAF50 : android.graphics.Color.TRANSPARENT);
+            holder.itemView.setOnClickListener(v -> selectNode(node));
+            holder.itemView.setClickable(true);
 
             String status;
             int statusColor;
@@ -198,6 +279,9 @@ public class NodeListActivity extends EhActivity {
             } else {
                 status = "正常";
                 statusColor = getResources().getColor(android.R.color.holo_green_dark);
+            }
+            if (isCurrent) {
+                status = "当前 · " + status;
             }
             holder.tvStatus.setText(status);
             holder.tvStatus.setTextColor(statusColor);

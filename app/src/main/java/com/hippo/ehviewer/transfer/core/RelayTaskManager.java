@@ -182,6 +182,152 @@ public class RelayTaskManager {
         return null;
     }
 
+    /** 取得该 gid 当前阻断认领的任务（有活跃租约且未终结）。 */
+    public RelayTask getActiveLeaseTaskByGid(long gid) {
+        String taskId = gidToTaskMap.get(gid);
+        if (taskId == null) {
+            return null;
+        }
+        RelayTask task = tasks.get(taskId);
+        if (task == null || task.isTerminal()) {
+            return null;
+        }
+        if (task.hasActiveLease()) {
+            return task;
+        }
+        return null;
+    }
+
+    /** 取得该 gid 的非终结任务（包括刚释放/过期待重新认领的）。 */
+    public RelayTask getLiveTaskByGid(long gid) {
+        String taskId = gidToTaskMap.get(gid);
+        if (taskId == null) {
+            return null;
+        }
+        RelayTask task = tasks.get(taskId);
+        return task != null && !task.isTerminal() ? task : null;
+    }
+
+    /**
+     * 池认领创建任务（§5.17.5）。调用方需保证原子性。
+     */
+    public synchronized RelayTask createClaimedTask(long gid, String token, String title, String titleJpn,
+                                                    String thumb, int category, String posted, String uploader,
+                                                    float rating, int pages, String sourceDevice,
+                                                    String sourceDeviceId, String sourceHost, int sourcePort,
+                                                    String acceptedDevice, String acceptedDeviceId,
+                                                    String priority, boolean autoReturn, long leaseExpiresAt,
+                                                    int missingCount, String pagesBitmap, boolean missingOnly,
+                                                    String basePagesBitmap) {
+        RelayTask old = getTaskByGid(gid);
+        if (old != null) {
+            // 旧任务已终结时先从索引中移除，避免 gidToTaskMap 指向失效任务
+            tasks.remove(old.getTaskId());
+            gidToTaskMap.remove(gid);
+        }
+        RelayTask task = new RelayTask(gid, token, title);
+        task.setTitleJpn(titleJpn);
+        task.setThumb(thumb);
+        task.setCategory(category);
+        task.setPosted(posted);
+        task.setUploader(uploader);
+        task.setRating(rating);
+        task.setPages(pages);
+        task.setSourceDevice(sourceDevice);
+        task.setSourceDeviceId(sourceDeviceId);
+        task.setSourceDeviceHost(sourceHost);
+        task.setSourceDevicePort(sourcePort);
+        task.setAcceptedDevice(acceptedDevice);
+        task.setAcceptedDeviceId(acceptedDeviceId);
+        task.setAcceptedTime(System.currentTimeMillis());
+        task.setLeaseDeviceId(acceptedDeviceId);
+        task.setLeaseDeviceName(acceptedDevice);
+        task.setLeaseExpiresAt(leaseExpiresAt);
+        task.setPriority(priority);
+        task.setAutoReturn(autoReturn);
+        task.setMissingOnly(missingOnly);
+        task.setMissingCount(missingCount);
+        task.setPagesBitmap(pagesBitmap);
+        task.setBasePagesBitmap(basePagesBitmap);
+        task.setPoolClaim(true);
+        task.setDirection(RelayTask.DIRECTION_OUTGOING);
+        task.setStatus(RelayTask.STATUS_ACCEPTED);
+
+        tasks.put(task.getTaskId(), task);
+        gidToTaskMap.put(gid, task.getTaskId());
+        saveTasks();
+        notifyTaskCreated(task);
+        return task;
+    }
+
+    public synchronized boolean renewLease(String taskId, String deviceId, long expiresAt) {
+        RelayTask task = tasks.get(taskId);
+        if (task == null || task.isTerminal() || !task.isReturnWritable()) {
+            return false;
+        }
+        task.setLeaseExpiresAt(expiresAt);
+        if (deviceId != null) {
+            task.setLeaseDeviceId(deviceId);
+        }
+        task.setUpdatedTime(System.currentTimeMillis());
+        saveTasks();
+        notifyTaskUpdated(task);
+        return true;
+    }
+
+    public synchronized void clearLease(String taskId, String status) {
+        RelayTask task = tasks.get(taskId);
+        if (task == null) {
+            return;
+        }
+        task.setLeaseExpiresAt(0L);
+        task.setLeaseDeviceId(null);
+        task.setLeaseDeviceName(null);
+        if (status != null) {
+            task.setStatus(status);
+        }
+        saveTasks();
+        notifyTaskUpdated(task);
+    }
+
+    public synchronized void updateTaskPages(String taskId, int downloadedPages, int totalPages,
+                                             int missingCount, String pagesBitmap, int receivedPages,
+                                             int failedPages, String status) {
+        RelayTask task = tasks.get(taskId);
+        if (task == null) {
+            return;
+        }
+        task.setFinished(downloadedPages);
+        task.setTotal(totalPages);
+        task.setMissingCount(missingCount);
+        task.setPagesBitmap(pagesBitmap);
+        task.setReceivedPages(task.getReceivedPages() + receivedPages);
+        task.setFailedPages(task.getFailedPages() + failedPages);
+        if (status != null) {
+            task.setStatus(status);
+        }
+        saveTasks();
+        notifyTaskUpdated(task);
+    }
+
+    public synchronized void markExpired(String taskId) {
+        RelayTask task = tasks.get(taskId);
+        if (task == null) {
+            return;
+        }
+        task.setLeaseExpiresAt(0L);
+        task.setLeaseDeviceId(null);
+        task.setLeaseDeviceName(null);
+        task.setStatus(RelayTask.STATUS_EXPIRED);
+        saveTasks();
+        notifyTaskUpdated(task);
+    }
+
+    /** 供池管理器在批量状态变更后统一持久化。 */
+    public void persist() {
+        saveTasks();
+    }
+
     /**
      * 获取所有任务
      */
@@ -588,7 +734,7 @@ public class RelayTaskManager {
     private void registerDownloadListener() {
         downloadManager.addDownloadInfoListener(new DownloadManager.DownloadInfoListener() {
             @Override
-            public void onUpdate(DownloadInfo info, List<DownloadInfo> list, java.util.LinkedList<DownloadInfo> waitList) {
+            public void onUpdate(DownloadInfo info, List<DownloadInfo> list, List<DownloadInfo> waitList) {
                 handleDownloadUpdate(info);
             }
 
@@ -747,6 +893,16 @@ public class RelayTaskManager {
         json.put("zipFilePath", task.getZipFilePath());
         json.put("zipFileSize", task.getZipFileSize());
         json.put("errorMessage", task.getErrorMessage());
+        json.put("leaseDeviceId", task.getLeaseDeviceId());
+        json.put("leaseDeviceName", task.getLeaseDeviceName());
+        json.put("leaseExpiresAt", task.getLeaseExpiresAt());
+        json.put("missingOnly", task.isMissingOnly());
+        json.put("basePagesBitmap", task.getBasePagesBitmap());
+        json.put("pagesBitmap", task.getPagesBitmap());
+        json.put("missingCount", task.getMissingCount());
+        json.put("receivedPages", task.getReceivedPages());
+        json.put("failedPages", task.getFailedPages());
+        json.put("poolClaim", task.isPoolClaim());
         return json;
     }
 
@@ -789,6 +945,16 @@ public class RelayTaskManager {
             task.setZipFilePath(json.getString("zipFilePath"));
             task.setZipFileSize(json.getLongValue("zipFileSize"));
             task.setErrorMessage(json.getString("errorMessage"));
+            task.setLeaseDeviceId(json.getString("leaseDeviceId"));
+            task.setLeaseDeviceName(json.getString("leaseDeviceName"));
+            task.setLeaseExpiresAt(json.getLongValue("leaseExpiresAt"));
+            task.setMissingOnly(json.getBooleanValue("missingOnly"));
+            task.setBasePagesBitmap(json.getString("basePagesBitmap"));
+            task.setPagesBitmap(json.getString("pagesBitmap"));
+            task.setMissingCount(json.getIntValue("missingCount"));
+            task.setReceivedPages(json.getIntValue("receivedPages"));
+            task.setFailedPages(json.getIntValue("failedPages"));
+            task.setPoolClaim(json.getBooleanValue("poolClaim"));
             return task;
         } catch (Exception e) {
             TransferLogger.getInstance().e(TAG, "Failed to parse task json", e);

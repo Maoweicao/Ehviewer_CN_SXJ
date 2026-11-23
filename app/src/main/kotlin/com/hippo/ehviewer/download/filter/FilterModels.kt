@@ -175,6 +175,13 @@ data class FilterCondition @JvmOverloads constructor(
     val searchKeyword: String? = null,
     val searchOption: Int = 0,
     val exclude: ExcludeRule = ExcludeRule.EMPTY,
+    /**
+     * 书签分类划定的标签范围（快速搜索的 keyword）。
+     *
+     * 它在高级筛选之前生效：先按标签圈定范围，再在这个范围里做其它筛选。
+     * null / 空串表示不限定。
+     */
+    val tagQuery: String? = null,
 ) {
 
     /** 是否设置了“发布时间范围”条件。 */
@@ -188,6 +195,10 @@ data class FilterCondition @JvmOverloads constructor(
 
     /** Java 侧使用的便捷入口（Kotlin 具名参数在 Java 里不可用）。 */
     fun withExclude(rule: ExcludeRule): FilterCondition = copy(exclude = rule)
+
+    /** 设置/清除书签分类划定的标签范围。 */
+    fun withTagQuery(query: String?): FilterCondition =
+        copy(tagQuery = query?.trim()?.takeIf { it.isNotEmpty() })
 
     /**
      * 写入“低分 / 发布时间 / 未收藏 / AI 生成 / 无标签 / 每页体积”这组新增条件。
@@ -249,6 +260,9 @@ data class FilterCondition @JvmOverloads constructor(
         if (searchOption != 0) {
             json["searchOption"] = searchOption
         }
+        if (!tagQuery.isNullOrEmpty()) {
+            json["tagQuery"] = tagQuery
+        }
         return json
     }
 
@@ -295,6 +309,7 @@ data class FilterCondition @JvmOverloads constructor(
                 searchKeyword = keyword?.takeIf { it.isNotEmpty() },
                 searchOption = json.getIntValue("searchOption"),
                 exclude = exclude,
+                tagQuery = json.getString("tagQuery")?.trim()?.takeIf { it.isNotEmpty() },
             )
         }
 

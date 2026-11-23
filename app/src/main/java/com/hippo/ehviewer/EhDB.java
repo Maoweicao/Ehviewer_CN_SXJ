@@ -648,6 +648,50 @@ public class EhDB {
     }
 
     /**
+     * 批量插入下载记录（重建下载列表等批量导入场景，单事务）。
+     *
+     * <p>逐条 {@link #putDownloadInfo} 在 1 万条规模下会产生 1 万次事务 + 1 万次 UI 通知，
+     * 这里一次性 upsertAll，调用方在结束后自行刷新列表。
+     */
+    public static void putDownloadInfoList(@Nullable List<DownloadInfo> downloadInfoList) {
+        if (downloadInfoList == null || downloadInfoList.isEmpty()) {
+            return;
+        }
+        getDatabase().runInTransaction(() -> getDatabase().downloadsDao().upsertAll(downloadInfoList));
+    }
+
+    /**
+     * 批量写入「画廊 → 下载目录名」映射（单事务）。
+     */
+    public static void putDownloadDirnameList(@Nullable List<DownloadDirname> dirnameList) {
+        if (dirnameList == null || dirnameList.isEmpty()) {
+            return;
+        }
+        getDatabase().runInTransaction(() -> getDatabase().downloadDirnameDao().upsertAll(dirnameList));
+    }
+
+    /**
+     * 批量更新已存在的下载记录（异步、单事务）。
+     *
+     * <p>「开始全部」等操作一次可能改动几百上千条状态，逐条主线程写库会直接 ANR。
+     * 这里统一交给 {@code sAsyncWriteExecutor} 更新；使用 update 而不是 upsert，
+     * 避免异步执行期间记录已被删除时被重新插回。
+     */
+    public static void updateDownloadInfoBulkAsync(@Nullable List<DownloadInfo> downloadInfoList) {
+        if (downloadInfoList == null || downloadInfoList.isEmpty()) {
+            return;
+        }
+        final List<DownloadInfo> copy = new ArrayList<>(downloadInfoList);
+        sAsyncWriteExecutor.execute(() -> {
+            try {
+                getDatabase().downloadsDao().updateAll(copy);
+            } catch (Throwable t) {
+                Log.w(TAG, "updateDownloadInfoBulkAsync failed", t);
+            }
+        });
+    }
+
+    /**
      * 在一个数据库事务内执行批量写入。
      *
      * <p>逐条写入各自开事务会产生大量磁盘同步；设备同步（§5.30）一批最多 500 行，
@@ -1060,6 +1104,18 @@ public class EhDB {
      */
     public static void recordDownloadHistoryFromScan(long gid, @Nullable String token,
                                                      @Nullable String title, @Nullable String dirname) {
+        recordDownloadHistoryFromScan(gid, token, title, dirname, 0, 0);
+    }
+
+    /**
+     * 同 {@link #recordDownloadHistoryFromScan(long, String, String, String)}，
+     * 额外记录目录里的文件数量，便于后续“重建下载列表”判断完成度。
+     *
+     * @return 是否新建了历史记录（已存在时返回 false，绝不覆盖已有记录包括合并标记）
+     */
+    public static boolean recordDownloadHistoryFromScan(long gid, @Nullable String token,
+                                                        @Nullable String title, @Nullable String dirname,
+                                                        int totalFiles, int downloadedFiles) {
         final DownloadHistoryDao dao = getDatabase().downloadHistoryDao();
         final boolean[] inserted = new boolean[1];
         getDatabase().runInTransaction(() -> {
@@ -1079,12 +1135,17 @@ public class EhDB {
             history.setDeletionType(DownloadHistory.DELETION_NONE);
             history.setMergedTargetGid(0);
             history.setDeletedAt(0);
+            if (totalFiles > 0) {
+                history.setTotalFiles(totalFiles);
+                history.setDownloadedFiles(Math.max(0, downloadedFiles));
+            }
             dao.insert(history);
             inserted[0] = true;
         });
         if (inserted[0]) {
             DownloadHistoryStatusResolver.invalidate(gid);
         }
+        return inserted[0];
     }
 
     /**
@@ -1100,6 +1161,18 @@ public class EhDB {
      */
     public static boolean recordDownloadHistoryWithToken(long gid, @NonNull String token,
                                                          @Nullable String title, @Nullable String dirname) {
+        return recordDownloadHistoryWithToken(gid, token, title, dirname, -1, -1);
+    }
+
+    /**
+     * 同上，并可直接写入目录里的文件数（{@code totalFiles < 0} 表示沿用预取结果）。
+     *
+     * <p>注意：已有记录（含“已合并/已删除”标记）不会被重置为有效状态，只更新
+     * token / 标题 / 目录 / 文件数，避免把历史合并结果覆盖掉。
+     */
+    public static boolean recordDownloadHistoryWithToken(long gid, @NonNull String token,
+                                                         @Nullable String title, @Nullable String dirname,
+                                                         int totalFiles, int downloadedFiles) {
         if (token == null || token.isEmpty()) {
             return false;
         }
@@ -1139,8 +1212,14 @@ public class EhDB {
             if (dirname != null && (history.getFilePath() == null || history.getFilePath().isEmpty())) {
                 history.setFilePath(dirname);
             }
-            // 文件信息已在事务外取好
-            if (tokensInfo != null) {
+            // 文件信息已在事务外取好；调用方显式给了目录文件数时优先使用
+            if (totalFiles >= 0) {
+                history.setTotalFiles(totalFiles);
+                history.setDownloadedFiles(Math.max(0, downloadedFiles));
+                if (tokensInfo != null) {
+                    history.setFileTokens(tokensInfo.fileTokens);
+                }
+            } else if (tokensInfo != null) {
                 history.setTotalFiles(tokensInfo.totalFiles);
                 history.setDownloadedFiles(tokensInfo.downloadedFiles);
                 history.setFileTokens(tokensInfo.fileTokens);
@@ -1153,6 +1232,24 @@ public class EhDB {
         });
         DownloadHistoryStatusResolver.invalidate(gid);
         return true;
+    }
+
+    /**
+     * 修正下载历史里记录的目录名（梳理历史时保留目录可能与历史记录不一致）。
+     */
+    public static void updateDownloadHistoryFilePath(long gid, @NonNull String dirname) {
+        final DownloadHistoryDao dao = getDatabase().downloadHistoryDao();
+        getDatabase().runInTransaction(() -> {
+            DownloadHistory history = dao.load(gid);
+            if (history == null) {
+                return;
+            }
+            if (dirname.equals(history.getFilePath())) {
+                return;
+            }
+            history.setFilePath(dirname);
+            dao.update(history);
+        });
     }
 
     /**
@@ -1232,6 +1329,84 @@ public class EhDB {
         sDownloadDirnameCache.put(gid, dirname);
     }
 
+    // ==================== 目录映射占用 ====================
+
+    /** 该 gid 本来就映射到这个目录，无需写入 */
+    public static final int DIRNAME_CLAIM_SAME = 0;
+    /** 写入成功（新映射或替换陈旧映射） */
+    public static final int DIRNAME_CLAIM_UPDATED = 1;
+    /** 目录已被另一个 gid 占用 */
+    public static final int DIRNAME_CLAIM_REJECTED_OTHER_GID = -1;
+    /** 该 gid 已映射到另一个目录 */
+    public static final int DIRNAME_CLAIM_REJECTED_GID_ELSEWHERE = -2;
+
+    /**
+     * 一次性读出 dirname → gid 映射，供恢复/梳理任务建索引，避免逐条 load。
+     */
+    public static Map<String, Long> getDownloadDirnameMap() {
+        Map<String, Long> map = new HashMap<>();
+        try {
+            List<DownloadDirname> rows = getDatabase().downloadDirnameDao().loadAll();
+            if (rows != null) {
+                for (DownloadDirname row : rows) {
+                    String dirname = row.getDirname();
+                    if (dirname != null && !dirname.isEmpty()) {
+                        map.put(dirname, row.getGid());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "getDownloadDirnameMap failed", e);
+        }
+        return map;
+    }
+
+    /**
+     * 原子地占用目录映射：目录已被别的 gid 占用时拒绝，绝不让两个 gid 指向同一目录。
+     *
+     * @param replaceExisting 该 gid 已映射到别的目录时，是否允许改指（仅当旧目录已不存在时由调用方传 true）
+     * @return {@link #DIRNAME_CLAIM_SAME}、{@link #DIRNAME_CLAIM_UPDATED} 或 REJECTED_*
+     */
+    public static int claimDownloadDirname(long gid, @NonNull String dirname, boolean replaceExisting) {
+        final int[] result = new int[]{DIRNAME_CLAIM_SAME};
+        getDatabase().runInTransaction(() -> {
+            DownloadDirnameDao dao = getDatabase().downloadDirnameDao();
+            DownloadDirname existing = dao.load(gid);
+            if (existing != null && dirname.equals(existing.getDirname())) {
+                result[0] = DIRNAME_CLAIM_SAME;
+                return;
+            }
+            List<DownloadDirname> all = dao.loadAll();
+            if (all != null) {
+                for (DownloadDirname row : all) {
+                    if (row.getGid() != gid && dirname.equals(row.getDirname())) {
+                        result[0] = DIRNAME_CLAIM_REJECTED_OTHER_GID;
+                        return;
+                    }
+                }
+            }
+            if (existing != null && !replaceExisting) {
+                result[0] = DIRNAME_CLAIM_REJECTED_GID_ELSEWHERE;
+                return;
+            }
+            DownloadDirname raw = new DownloadDirname(gid);
+            raw.setDirname(dirname);
+            dao.upsert(raw);
+            result[0] = DIRNAME_CLAIM_UPDATED;
+        });
+        if (result[0] == DIRNAME_CLAIM_SAME || result[0] == DIRNAME_CLAIM_UPDATED) {
+            sDownloadDirnameCache.put(gid, dirname);
+        }
+        return result[0];
+    }
+
+    /**
+     * 占用目录映射，不替换已有映射（陈旧映射需调用方显式传 replaceExisting=true）。
+     */
+    public static int claimDownloadDirname(long gid, @NonNull String dirname) {
+        return claimDownloadDirname(gid, dirname, false);
+    }
+
     public static void removeDownloadDirname(long gid) {
         getDatabase().downloadDirnameDao().deleteByGid(gid);
         sDownloadDirnameCache.remove(gid);
@@ -1273,14 +1448,15 @@ public class EhDB {
     }
 
     /**
-     * 分批获取 ptoken 索引，避免一次把整张表载入内存导致 OOM。
+     * 按 GID 键集分批获取 ptoken 索引，避免一次把整张表载入内存导致 OOM。
      *
-     * @param offset 起始偏移
-     * @param limit  本批最大条数
+     * @param lastGid    上一批最后一行的 GID；首次调用传 {@link Long#MIN_VALUE}
+     * @param excludeGid 需要跳过的 GID（通常是当前画廊自身），不跳过时传 -1
+     * @param limit      本批最大条数
      * @return 该批次的索引条目（可能少于 limit）
      */
-    public static List<PtokensIndex> getPtokensIndexBatch(int offset, int limit) {
-        return getDatabase().ptokensIndexDao().loadBatch(offset, limit);
+    public static List<PtokensIndex> getPtokensIndexBatchAfter(long lastGid, long excludeGid, int limit) {
+        return getDatabase().ptokensIndexDao().loadBatchAfterGid(lastGid, excludeGid, limit);
     }
 
     public static void putPtokensIndex(long gid, String ptokens, int pages) {

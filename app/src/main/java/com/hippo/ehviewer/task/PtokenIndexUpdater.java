@@ -21,6 +21,16 @@ public class PtokenIndexUpdater {
 
     private static final String TAG = "PtokenIndexUpdater";
 
+    /**
+     * 每批载入的索引条数。
+     *
+     * <p>单行的 PTOKENS 是逗号分隔的整本画廊 hash（上千页时可达几十 KB），
+     * 旧实现的 500 条一批会在扫描时一次性构造出几十万个 String 和一个巨大的
+     * HashSet，堆紧张时直接 OOM（crash-2026-10-31 15:05 / 2026-08-06 13:13）。
+     * 这里把批次压到很小的值，并在每批结束后立即丢弃引用。
+     */
+    private static final int BATCH_SIZE = 16;
+
     public interface SupersetCallback {
         void onSupersetDetected(long newGid, List<Long> subsetGids);
     }
@@ -61,6 +71,10 @@ public class PtokenIndexUpdater {
 
             // 检查是否是其他画廊的超集
             checkAsSuperset(gid, meta.getHashes());
+        } catch (OutOfMemoryError oom) {
+            // 索引只是递进检测的加速缓存，缺一条不影响下载正确性；
+            // 扫描过程中堆紧张时放弃本次索引更新，而不是让整个进程崩溃。
+            Log.e(TAG, "OOM while updating ptoken index for gid=" + gid + ", skipped", oom);
         } catch (Exception e) {
             Log.e(TAG, "Failed to update ptoken index for gid=" + gid, e);
         }
@@ -70,29 +84,38 @@ public class PtokenIndexUpdater {
      * 检查新下载的画廊是否是其他已下载画廊的超集
      * 如果是，可以通过回调通知 UI 层
      *
-     * 采用分批查询，避免一次将整张 PTOKENS_INDEX 表载入内存导致 OOM。
+     * 采用按键集分批查询，避免一次将整张 PTOKENS_INDEX 表载入内存导致 OOM。
      */
     private static void checkAsSuperset(long newGid, List<String> newHashes) {
         Set<String> newPtokenSet = new HashSet<>(newHashes);
         List<Long> subsetGids = new ArrayList<>();
 
-        // 分批迭代索引表，控制峰值内存占用
-        final int BATCH_SIZE = 500;
-        long total = EhDB.getPtokensIndexCount();
-        for (long offset = 0; offset < total; offset += BATCH_SIZE) {
-            List<PtokensIndex> batch = EhDB.getPtokensIndexBatch((int) offset, BATCH_SIZE);
-            if (batch.isEmpty()) {
+        long lastGid = Long.MIN_VALUE;
+        while (true) {
+            List<PtokensIndex> batch = EhDB.getPtokensIndexBatchAfter(lastGid, newGid, BATCH_SIZE);
+            if (batch == null || batch.isEmpty()) {
                 break;
             }
-            for (PtokensIndex idx : batch) {
-                if (idx.getGid() == newGid) continue;
-                if (idx.getPtokens() == null || idx.getPtokens().isEmpty()) continue;
 
-                Set<String> existingPtokens = new HashSet<>(
-                        Arrays.asList(idx.getPtokens().split(",")));
+            for (PtokensIndex idx : batch) {
+                lastGid = idx.getGid();
+                if (idx.getGid() == newGid) {
+                    continue;
+                }
+                String ptokens = idx.getPtokens();
+                if (ptokens == null || ptokens.isEmpty()) {
+                    continue;
+                }
+
+                Set<String> existingPtokens = new HashSet<>(Arrays.asList(ptokens.split(",")));
                 if (newPtokenSet.containsAll(existingPtokens)) {
                     subsetGids.add(idx.getGid());
                 }
+            }
+
+            // 本批未读满说明已经到表尾
+            if (batch.size() < BATCH_SIZE) {
+                break;
             }
         }
 
@@ -119,6 +142,9 @@ public class PtokenIndexUpdater {
             String ptokens = String.join(",", meta.getHashes());
             EhDB.putPtokensIndex(gid, ptokens, meta.getHashes().size());
             return true;
+        } catch (OutOfMemoryError oom) {
+            Log.e(TAG, "OOM while rebuilding index for gid=" + gid + ", skipped", oom);
+            return false;
         } catch (Exception e) {
             Log.e(TAG, "Failed to rebuild index for gid=" + gid, e);
             return false;

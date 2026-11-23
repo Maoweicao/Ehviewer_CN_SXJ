@@ -50,6 +50,13 @@ import com.hippo.ehviewer.client.parser.GalleryPageApiParser;
 import com.hippo.ehviewer.client.parser.GalleryPageParser;
 import com.hippo.ehviewer.client.parser.GalleryPageUrlParser;
 import com.hippo.ehviewer.gallery.GalleryProvider2;
+import com.hippo.ehviewer.lab.TrustedPeer;
+import com.hippo.ehviewer.download.DownloadLogger;
+import com.hippo.ehviewer.lab.ip.IpSwitchController;
+import com.hippo.ehviewer.lab.source.ImageResult;
+import com.hippo.ehviewer.lab.source.LanImageFetcher;
+import com.hippo.ehviewer.limit.LimitSignals;
+import com.hippo.ehviewer.limit.RemoteLimitGuard;
 import com.hippo.lib.glgallery.GalleryPageView;
 import com.hippo.lib.glgallery.GalleryProvider;
 import com.hippo.lib.image.Image;
@@ -132,6 +139,30 @@ public final class SpiderQueen implements Runnable {
             "/509s.gif"
     };
     private static final SparseJLArray<SpiderQueen> sQueenMap = new SparseJLArray<>();
+
+    /**
+     * 下载链接日志：记录每一页的页面 URL、图片 URL、HTTP 状态、字节数、耗时和当前节点。
+     * 任何异常都不能影响下载本身。
+     */
+    private static void logPageEvent(long gid, int index, int total, int attempt,
+                                     String phase, String result, String pageUrl, String imageUrl,
+                                     int httpCode, long bytes, long elapsedMs, String detail) {
+        DownloadLogger logger = DownloadLogger.peek();
+        if (logger == null) return;
+        try {
+            logger.logPageEvent(String.valueOf(gid), index, total, attempt, phase, result,
+                    pageUrl, imageUrl, httpCode, bytes, elapsedMs, currentIpNode(), detail);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static String currentIpNode() {
+        try {
+            return IpSwitchController.getInstance().getCurrentNodeName();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
     /**
      * In-memory gid -> startPage cache. Gallery list bindings query the start
@@ -1311,6 +1342,54 @@ public final class SpiderQueen implements Runnable {
         }
     }
 
+    /**
+     * 限流后等待自动换 IP 完成或冷却解除。
+     *
+     * 自动换 IP 开启时，等待的是“切换结束”而不是 isBlocked()：
+     * 冷却关闭后 isBlocked() 永远为 false，旧实现会立即返回，
+     * 导致每秒 1-2 次重试同一个被封 IP。
+     *
+     * @return true 表示现在可以重试
+     */
+    private static boolean waitForIpSwitch(EhApplication app) {
+        if (app == null) return true;
+        RemoteLimitGuard guard = RemoteLimitGuard.getInstance(app);
+
+        if (Settings.getIpSwitchEnabled()) {
+            // 切换中：等切换结果（成功或失败）再重试。
+            if (guard.isSwitchInFlight() && !guard.awaitSwitch(30_000L)) {
+                // 切换超时：让该页先失败，交给后续重试，避免继续打旧 IP。
+                return false;
+            }
+            // 切换失败后的短退避：等退避结束再用当前节点试一次。
+            if (guard.isSwitchBackoff()) {
+                sleepQuietly(Math.min(guard.getSwitchBackoffRemainingMs(), 15_000L));
+                return true;
+            }
+            // 内核没起来等场景：短暂等待，避免打爆被封 IP。
+            long retryDelay = guard.getLimitRetryDelayRemainingMs();
+            if (retryDelay > 0) {
+                sleepQuietly(Math.min(retryDelay, 15_000L));
+            }
+            return true;
+        }
+
+        // 用户开启冷却（或未启用自动换 IP）时，仍按冷却状态等待。
+        for (int i = 0; i < 15; i++) {
+            if (!guard.isBlocked()) return true;
+            sleepQuietly(1000L);
+        }
+        return !guard.isBlocked();
+    }
+
+    private static void sleepQuietly(long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     private class SpiderWorker implements Runnable {
         private Timer downloadSpeedZeroTimeCount;
 
@@ -1365,8 +1444,86 @@ public final class SpiderQueen implements Runnable {
             return result;
         }
 
+        /**
+         * 尝试从已配对设备读取一页图片并写入本地下载目录。
+         *
+         * @return true 表示已成功写入，调用方无需再访问 e-hentai
+         */
+        private boolean tryDownloadImageFromLan(long gid, int index) {
+            try {
+                LanImageFetcher fetcher = LanImageFetcher.getInstance(EhApplication.getInstance());
+                java.util.List<TrustedPeer> peers = fetcher.listByRtt();
+                for (TrustedPeer peer : peers) {
+                    ImageResult result = fetcher.fetchImage(peer, gid, index);
+                    if (result == null || result.getData() == null || result.getData().length == 0) {
+                        continue;
+                    }
+                    String extension = android.webkit.MimeTypeMap.getSingleton()
+                            .getExtensionFromMimeType(result.getMimeType());
+                    if (extension == null || extension.isEmpty()) {
+                        extension = "jpg";
+                    }
+                    if (!extension.startsWith(".")) {
+                        extension = "." + extension;
+                    }
+                    OutputStreamPipe pipe = mSpiderDen.openOutputStreamPipe(index, extension);
+                    if (pipe == null) {
+                        continue;
+                    }
+                    try {
+                        pipe.obtain();
+                        java.io.OutputStream os = pipe.open();
+                        os.write(result.getData());
+                        os.flush();
+                        os.close();
+                    } finally {
+                        pipe.close();
+                        pipe.release();
+                    }
+                    Log.i(TAG, "[ImgLoad] LAN_OK gid=" + gid + " index=" + index
+                            + " from=" + peer.getDeviceName());
+                    logPageEvent(gid, index, mPageStateArray == null ? 0 : mPageStateArray.length,
+                            -1, "LAN_OK", "OK", null, null, -1, result.getData().length,
+                            -1, "peer=" + peer.getDeviceName());
+                    return true;
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "[ImgLoad] LAN_FAILED gid=" + gid + " index=" + index, t);
+            }
+            return false;
+        }
+
         // false for stop
         private boolean downloadImage(long gid, int index, String pToken, String previousPToken, boolean force) {
+            // 局域网优先：已配对设备有这一页时直接读取，完全不访问 e-hentai。
+            if (Settings.getLabDownloadFromLanFirst() || Settings.getLanOnlyMode()) {
+                if (tryDownloadImageFromLan(gid, index)) {
+                    updatePageState(index, STATE_FINISHED);
+                    return true;
+                }
+                if (Settings.getLanOnlyMode()) {
+                    mSpiderDen.remove(index);
+                    String msg = "仅局域网模式：对端没有第 " + (index + 1) + " 页，已跳过访问 e-hentai";
+                    Log.w(TAG, "[ImgLoad] LAN_ONLY_MISS gid=" + gid + " index=" + index);
+                    logPageEvent(gid, index, mPageStateArray == null ? 0 : mPageStateArray.length,
+                            -1, "SKIP", "LAN_ONLY_MISS", null, null, -1, -1, -1, msg);
+                    updatePageState(index, STATE_FAILED, msg);
+                    return true;
+                }
+            }
+
+            // 限流冷却中：局域网页已经尝试过，仍未拿到时不再访问远端。
+            EhApplication app = EhApplication.getInstance();
+            if (app != null && RemoteLimitGuard.getInstance(app).isBlocked()) {
+                mSpiderDen.remove(index);
+                String msg = "站点限流冷却中，已暂停远端下载";
+                Log.w(TAG, "[ImgLoad] LIMIT_BLOCKED gid=" + gid + " index=" + index);
+                logPageEvent(gid, index, mPageStateArray == null ? 0 : mPageStateArray.length,
+                        -1, "SKIP", "LIMIT_BLOCKED", null, null, -1, -1, -1, msg);
+                updatePageState(index, STATE_FAILED, msg);
+                return true;
+            }
+
             String skipHathKey = null;
             List<String> skipHathKeys = new ArrayList<>(5);
             String originImageUrl = null;
@@ -1375,8 +1532,13 @@ public final class SpiderQueen implements Runnable {
             boolean forceHtml = false;
             boolean interrupt = false;
             boolean leakSkipHathKey = false;
+            int switchGen = IpSwitchController.getInstance().getSwitchGeneration();
 
             Log.d(TAG, "[ImgLoad] SPIDER_START gid=" + gid + " index=" + index + " pToken=" + pToken + " force=" + force);
+            final int pageTotal = mPageStateArray == null ? 0 : mPageStateArray.length;
+            final long pageStartMs = System.currentTimeMillis();
+            logPageEvent(gid, index, pageTotal, 0, "START", "BEGIN",
+                    null, null, -1, -1, -1, "force=" + force + " pToken=" + pToken);
 
             for (int i = 0; i < 5; i++) {
                 String imageUrl = null;
@@ -1393,6 +1555,9 @@ public final class SpiderQueen implements Runnable {
                         // Try to get show key
                         pageUrl = getPageUrl(gid, index, pToken, pageUrl, skipHathKey);
                         Log.d(TAG, "[ImgLoad] FETCH_URL pageUrl=" + pageUrl + " attempt=" + i);
+                        final long pageReqStart = System.currentTimeMillis();
+                        logPageEvent(gid, index, pageTotal, i, "PAGE_REQ", null,
+                                pageUrl, null, -1, -1, -1, null);
                         try {
                             GalleryPageParser.Result result = fetchPageResultFromHtml(index, pageUrl);
                             imageUrl = result.imageUrl;
@@ -1400,6 +1565,10 @@ public final class SpiderQueen implements Runnable {
                             originImageUrl = result.originImageUrl;
                             localShowKey = result.showKey;
                             Log.d(TAG, "[ImgLoad] PAGE_OK imageUrl=" + (imageUrl != null ? imageUrl.substring(0, Math.min(60, imageUrl.length())) : "null") + " showKey=" + localShowKey);
+                            logPageEvent(gid, index, pageTotal, i, "PAGE_OK", "OK",
+                                    pageUrl, imageUrl, -1, -1,
+                                    System.currentTimeMillis() - pageReqStart,
+                                    "showKey=" + (localShowKey == null ? "none" : "yes"));
 
                             if (!TextUtils.isEmpty(skipHathKey)) {
                                 if (skipHathKeys.contains(skipHathKey)) {
@@ -1416,11 +1585,42 @@ public final class SpiderQueen implements Runnable {
                         } catch (Image509Exception e) {
                             error = GetText.getString(R.string.error_509);
                             Log.e(TAG, "[ImgLoad] 509_ERROR index=" + index);
+                            logPageEvent(gid, index, pageTotal, i, "PAGE_509", "LIMIT",
+                                    pageUrl, null, 509, -1,
+                                    System.currentTimeMillis() - pageReqStart, error);
+                            if (app != null) {
+                                RemoteLimitGuard.getInstance(app).report509("spider_509");
+                            }
                             break;
                         } catch (Throwable e) {
                             ExceptionUtils.throwIfFatal(e);
                             error = ExceptionUtils.getReadableString(e);
+                            if (app != null) {
+                                RemoteLimitGuard.getInstance(app).inspectThrowable(e, "image_page");
+                            }
                             Log.e(TAG, "[ImgLoad] PAGE_FAILED index=" + index + " pageUrl=" + pageUrl + " error=" + error, e);
+                            logPageEvent(gid, index, pageTotal, i, "PAGE_ERR",
+                                    e.getClass().getSimpleName(), pageUrl, null, -1, -1,
+                                    System.currentTimeMillis() - pageReqStart, error);
+                            int nowGen = IpSwitchController.getInstance().getSwitchGeneration();
+                            if (nowGen != switchGen) {
+                                // 手动/自动切换节点会取消当前 call；用新节点重试同一页。
+                                switchGen = nowGen;
+                                logPageEvent(gid, index, pageTotal, i, "SWITCH_RETRY", "GENERATION",
+                                        pageUrl, null, -1, -1, -1,
+                                        "generation=" + nowGen);
+                                forceHtml = true;
+                                continue;
+                            }
+                            if (LimitSignals.isLimitThrowable(e) && waitForIpSwitch(app)) {
+                                // 自动换 IP 已切换/解除冷却，重试同一页。
+                                logPageEvent(gid, index, pageTotal, i, "SWITCH_RETRY", "LIMIT",
+                                        pageUrl, null, -1, -1,
+                                        System.currentTimeMillis() - pageReqStart,
+                                        "after limit wait");
+                                forceHtml = true;
+                                continue;
+                            }
                             break;
                         }
 
@@ -1449,6 +1649,8 @@ public final class SpiderQueen implements Runnable {
                         originImageUrl = result.originImageUrl;
                     } catch (Image509Exception e) {
                         error = GetText.getString(R.string.error_509);
+                        logPageEvent(gid, index, pageTotal, i, "PAGE_509", "LIMIT",
+                                pageUrl, null, 509, -1, -1, "api");
                         break;
                     } catch (Throwable e) {
                         if (e instanceof ParseException && "Key mismatch".equals(e.getMessage())) {
@@ -1458,6 +1660,9 @@ public final class SpiderQueen implements Runnable {
                         } else {
                             ExceptionUtils.throwIfFatal(e);
                             error = ExceptionUtils.getReadableString(e);
+                            logPageEvent(gid, index, pageTotal, i, "PAGE_ERR",
+                                    e.getClass().getSimpleName(), pageUrl, null, -1, -1, -1,
+                                    "api: " + error);
                             break;
                         }
                     }
@@ -1497,6 +1702,9 @@ public final class SpiderQueen implements Runnable {
                     } catch (IOException | NoSuchElementException e) {
                         error = "GP不足/Insufficient GP";
                         IOException ioException = new IOException("原图链接获取失败", e);
+                        logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "ORIGIN_FAILED",
+                                pageUrl, targetImageUrl, -1, -1, -1,
+                                e.getClass().getSimpleName() + ": " + e.getMessage());
                         Analytics.recordException(ioException);
                         break;
                     }
@@ -1525,8 +1733,16 @@ public final class SpiderQueen implements Runnable {
                     Call call = mHttpClient.newBuilder()
                             .callTimeout(downloadTimeout, TimeUnit.SECONDS).build()
                             .newCall(new EhRequestBuilder(targetImageUrl, referer).build());
+                    final long imgStart = System.currentTimeMillis();
+                    logPageEvent(gid, index, pageTotal, i, "IMG_REQ", null,
+                            pageUrl, targetImageUrl, -1, -1, -1, "referer=" + referer);
                     Response response = call.execute();
                     ResponseBody responseBody = response.body();
+                    logPageEvent(gid, index, pageTotal, i, "IMG_RESP", "OK",
+                            pageUrl, targetImageUrl, response.code(),
+                            responseBody == null ? -1 : responseBody.contentLength(),
+                            System.currentTimeMillis() - imgStart,
+                            "contentType=" + (responseBody == null ? "null" : responseBody.contentType()));
 
                     String responseUrl = null;
                     if (response.networkResponse() != null) {
@@ -1537,23 +1753,69 @@ public final class SpiderQueen implements Runnable {
                     // 反劫持校验
                     if (!targetImageUrl.equals(responseUrl)) {
                         error = "链接疑似被劫持\nThe link is suspected to be hijacked";
+                        logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "HIJACK",
+                                pageUrl, targetImageUrl, response.code(), -1,
+                                System.currentTimeMillis() - imgStart,
+                                "responseUrl=" + responseUrl);
                         response.close();
                         forceHtml = true;
                         continue;
                     }
 
                     if (response.code() >= 400) {
+                        boolean rateLimited = app != null
+                                && (response.code() == 429 || response.code() == 509);
+                        if (rateLimited) {
+                            RemoteLimitGuard.getInstance(app).inspectHttp(
+                                    response.code(), response.headers(), null, null,
+                                    "image_download");
+                        }
                         // Maybe 404
+                        logPageEvent(gid, index, pageTotal, i, "IMG_ERR",
+                                "HTTP_" + response.code(), pageUrl, targetImageUrl,
+                                response.code(), -1, System.currentTimeMillis() - imgStart, null);
                         response.close();
                         error = "Bad code: " + response.code();
                         forceHtml = true;
+                        if (rateLimited && waitForIpSwitch(app)) {
+                            logPageEvent(gid, index, pageTotal, i, "SWITCH_RETRY", "LIMIT",
+                                    pageUrl, targetImageUrl, response.code(), -1, -1,
+                                    "after image limit wait");
+                        }
                         continue;
                     }
 
                     if (responseBody == null) {
                         error = "Empty response body";
+                        logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "EMPTY_BODY",
+                                pageUrl, targetImageUrl, response.code(), -1,
+                                System.currentTimeMillis() - imgStart, null);
                         forceHtml = true;
                         continue;
+                    }
+
+                    MediaType contentType = responseBody.contentType();
+                    if (contentType != null
+                            && ("text".equalsIgnoreCase(contentType.type())
+                            || "html".equalsIgnoreCase(contentType.subtype()))) {
+                        // 有些封禁/Cloudflare 页会以 200 + text/html 返回，不能当图片保存。
+                        String text = responseBody.string();
+                        if (app != null) {
+                            RemoteLimitGuard.getInstance(app).inspectBody(text, "image_body");
+                        }
+                        error = text.length() > 160 ? text.substring(0, 160) : text;
+                        logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "HTML_BODY",
+                                pageUrl, targetImageUrl, response.code(),
+                                text.length(), System.currentTimeMillis() - imgStart, error);
+                        response.close();
+                        forceHtml = true;
+                        if (waitForIpSwitch(app)) {
+                            logPageEvent(gid, index, pageTotal, i, "SWITCH_RETRY", "LIMIT",
+                                    pageUrl, targetImageUrl, response.code(), -1, -1,
+                                    "after html body limit wait");
+                            continue;
+                        }
+                        break;
                     }
 
                     // Get extension
@@ -1632,21 +1894,37 @@ public final class SpiderQueen implements Runnable {
                         if (contentLength >= 0) {
                             if (receivedSize < contentLength) {
                                 Log.e(TAG, "[ImgLoad] DL_INCOMPLETE index=" + index);
+                                logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "INCOMPLETE",
+                                        pageUrl, targetImageUrl, response.code(), receivedSize,
+                                        System.currentTimeMillis() - imgStart,
+                                        "contentLength=" + contentLength);
                                 error = "Incomplete";
                                 forceHtml = true;
                                 continue;
                             } else if (receivedSize > contentLength) {
                                 Log.w(TAG, "[ImgLoad] DL_OVERSIZED index=" + index);
+                                logPageEvent(gid, index, pageTotal, i, "IMG_WARN", "OVERSIZED",
+                                        pageUrl, targetImageUrl, response.code(), receivedSize,
+                                        System.currentTimeMillis() - imgStart,
+                                        "contentLength=" + contentLength);
                             }
                         }
 
                         // Check for empty file (0 bytes)
                         if (receivedSize == 0) {
                             Log.e(TAG, "[ImgLoad] DL_EMPTY index=" + index);
+                            logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "EMPTY",
+                                    pageUrl, targetImageUrl, response.code(), 0,
+                                    System.currentTimeMillis() - imgStart, null);
                             error = "Empty file";
                             forceHtml = true;
                             continue;
                         }
+
+                        logPageEvent(gid, index, pageTotal, i, "IMG_OK", "OK",
+                                pageUrl, targetImageUrl, response.code(), receivedSize,
+                                System.currentTimeMillis() - imgStart,
+                                "contentLength=" + contentLength);
                     } finally {
                         if (osPipe != null) {
                             osPipe.close();
@@ -1680,6 +1958,8 @@ public final class SpiderQueen implements Runnable {
                         }
                         if (isPlainTxt) {
                             error = GetText.getString(R.string.error_reading_failed);
+                            logPageEvent(gid, index, pageTotal, i, "IMG_ERR", "PLAINTEXT",
+                                    pageUrl, targetImageUrl, response.code(), -1, -1, null);
                             forceHtml = true;
                             continue;
                         }
@@ -1712,6 +1992,9 @@ public final class SpiderQueen implements Runnable {
                 } catch (IOException | NoSuchElementException e) {
                     e.printStackTrace();
                     error = GetText.getString(R.string.error_socket);
+                    logPageEvent(gid, index, pageTotal, i, "IMG_ERR",
+                            e.getClass().getSimpleName(), pageUrl, targetImageUrl, -1, -1, -1,
+                            String.valueOf(e.getMessage()));
                     forceHtml = true;
                 } finally {
                     IOUtils.closeQuietly(is);
@@ -1727,6 +2010,8 @@ public final class SpiderQueen implements Runnable {
             mSpiderDen.remove(index);
 
             Log.e(TAG, "[ImgLoad] SPIDER_FAILED gid=" + gid + " index=" + index + " pToken=" + pToken + " error=" + error);
+            logPageEvent(gid, index, pageTotal, 0, "FAIL", "FAILED", pageUrl, null, -1, -1,
+                    System.currentTimeMillis() - pageStartMs, String.valueOf(error));
             updatePageState(index, STATE_FAILED, error);
             return !interrupt;
         }

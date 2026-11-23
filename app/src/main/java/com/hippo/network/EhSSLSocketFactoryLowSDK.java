@@ -38,10 +38,13 @@ public class EhSSLSocketFactoryLowSDK extends SSLSocketFactory {
 
     @Override
     public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-        if (!NetworkSecurityManager.INSTANCE.isDomainFrontingEnabled()) {
+        InetAddress address = s.getInetAddress();
+        // 走本地代理时 socket 连的是代理地址，必须在现有 socket 上做 TLS。
+        boolean proxied = address != null
+                && (address.isLoopbackAddress() || address.isAnyLocalAddress());
+        if (!NetworkSecurityManager.INSTANCE.isDomainFrontingEnabled() || proxied) {
             return ((SSLSocketFactory) getDefault()).createSocket(s, host, port, autoClose);
         }
-        InetAddress address = s.getInetAddress();
         Log.d("EhSSLSocketFactory", "Host: " + host + " Address: " + address.getHostAddress());
         if (autoClose) s.close();
         return enableTLSOnSocket(mSSLSocketFactory.createSocket(address, port));

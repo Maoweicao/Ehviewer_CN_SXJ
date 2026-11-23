@@ -18,19 +18,17 @@
             android:summary="@string/lab_ip_subscription_manage_summary"
             app:allowDividerAbove="true" />
 
+        <Preference
+            android:key="ip_switch_next"
+            android:title="@string/lab_ip_switch_next"
+            android:summary="@string/lab_ip_switch_next_summary"
+            app:allowDividerAbove="true" />
+
     </PreferenceCategory>
 
     <PreferenceCategory
         android:title="@string/lab_ip_switch_strategy"
         app:allowDividerAbove="true">
-
-        <ListPreference
-            android:key="ip_download_threshold"
-            android:title="@string/lab_ip_download_threshold"
-            android:summary="@string/lab_ip_download_threshold_summary"
-            android:entries="@array/ip_threshold_entries"
-            android:entryValues="@array/ip_threshold_values"
-            android:defaultValue="50" />
 
         <ListPreference
             android:key="ip_block_duration"
@@ -72,6 +70,12 @@
             android:key="ip_pool_status"
             android:title="@string/lab_ip_pool_status"
             android:summary="@string/lab_ip_pool_status_summary"
+            app:allowDividerAbove="true" />
+
+        <Preference
+            android:key="ip_http_pool_diag"
+            android:title="@string/lab_ip_http_pool_diag"
+            android:summary="@string/lab_ip_http_pool_diag_summary"
             app:allowDividerAbove="true" />
 
         <Preference

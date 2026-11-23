@@ -105,6 +105,8 @@ import com.hippo.ehviewer.client.MergedGalleryChecker;
 import com.hippo.ehviewer.client.data.GalleryInfo;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.DownloadLabel;
+import com.hippo.ehviewer.lab.TrustedPeer;
+import com.hippo.ehviewer.lab.TrustedPeerStore;
 import com.hippo.ehviewer.transfer.core.DataChangeBus;
 import com.hippo.ehviewer.download.DeleteProtectHelper;
 import com.hippo.ehviewer.download.DownloadDeleteHelper;
@@ -224,12 +226,18 @@ public class DownloadsScene extends ToolbarScene
     private static final String KEY_LAST_QUICK_FILTER_ID = "last_quick_filter_id";
     /** 当前应用的快速设置预设 id，用于面板高亮。 */
     private static final String KEY_APPLIED_PRESET_ID = "applied_preset_id";
+    /** 书签分类划定的标签范围。 */
+    private static final String KEY_TAG_QUERY = "tag_query";
+    private static final String KEY_TAG_NAME = "tag_name";
 
     public static final String ACTION_CLEAR_DOWNLOAD_SERVICE = "clear_download_service";
 
     public static final int LOCAL_GALLERY_INFO_CHANGE = 909;
 
     private static final long ANIMATE_TIME = 300L;
+
+    /** “接力大画廊”一次最多列出的画廊数，避免对话框过长。 */
+    private static final int RELAY_LARGE_MAX = 50;
 
     @Nullable
     private AddDeleteDrawable mActionFabDrawable;
@@ -272,6 +280,8 @@ public class DownloadsScene extends ToolbarScene
     private MyEasyRecyclerView mRecyclerView;
     @Nullable
     private ViewTransition mViewTransition;
+    @Nullable
+    private TextView mTipView;
     @Nullable
     private FabLayout mFabLayout;
     @Nullable
@@ -338,6 +348,11 @@ public class DownloadsScene extends ToolbarScene
      */
     @NonNull
     private FilterCondition mFilterExtra = FilterCondition.EMPTY;
+    /** 当前书签分类划定的标签范围；非空时列表先按标签圈定，再叠加其它筛选。 */
+    @Nullable
+    private String mTagQuery;
+    @Nullable
+    private String mTagName;
     @Nullable
     private String mLastQuickFilterId;
     @Nullable
@@ -450,6 +465,8 @@ public class DownloadsScene extends ToolbarScene
         if (null != mDownloadManager && -1L != (gid = args.getLong(KEY_GID, -1L))) {
             DownloadInfo info = mDownloadManager.getDownloadInfo(gid);
             if (null != info) {
+                mTagQuery = null;
+                mTagName = null;
                 mLabel = info.getLabel();
                 updateForLabel();
                 updateView();
@@ -539,7 +556,10 @@ public class DownloadsScene extends ToolbarScene
             return;
         }
 
-        if (mLabel == null) {
+        if (mTagQuery != null) {
+            // 书签分类是“整个下载库”的范围，不受当前下载标签限制
+            mList = new ArrayList<>(mDownloadManager.getAllDownloadInfoList());
+        } else if (mLabel == null) {
             mList = mDownloadManager.getDefaultDownloadInfoList();
         } else {
             mList = mDownloadManager.getLabelDownloadInfoList(mLabel);
@@ -558,6 +578,54 @@ public class DownloadsScene extends ToolbarScene
         updatePaginationIndicator();
         Settings.putRecentDownloadLabel(mLabel);
         queryUnreadSpiderInfo();
+    }
+
+    @Nullable
+    public String getTagQuery() {
+        return mTagQuery;
+    }
+
+    @Nullable
+    public String getTagName() {
+        return mTagName;
+    }
+
+    /**
+     * 书签分类：把整个下载列表按标签圈定，再沿用当前高级筛选条件。
+     */
+    public void applyTagScope(@Nullable String query, @Nullable String name) {
+        if (query == null || query.trim().isEmpty()) {
+            clearTagScope();
+            return;
+        }
+        mTagQuery = query;
+        mTagName = name != null && !name.isEmpty() ? name : query;
+        // applyAdvancedFilter 会清掉搜索、用 buildFilterCondition()（含 tagQuery）重新筛选
+        applyAdvancedFilter();
+    }
+
+    /**
+     * 清除标签范围，回到原来的下载标签（文件夹）列表。
+     */
+    public void clearTagScope() {
+        if (mTagQuery == null) {
+            return;
+        }
+        mTagQuery = null;
+        mTagName = null;
+        updateForLabel();
+        filterByCategory();
+        updateView();
+    }
+
+    /**
+     * 由右滑面板切换下载标签（文件夹）；同时退出标签范围。
+     */
+    public void applyLabel(@Nullable String label) {
+        mTagQuery = null;
+        mTagName = null;
+        mLabel = label;
+        updateForLabel();
     }
 
     private void updatePaginationIndicator() {
@@ -586,6 +654,12 @@ public class DownloadsScene extends ToolbarScene
     @SuppressLint("StringFormatMatches")
     private void updateTitle() {
         try {
+            if (mTagQuery != null) {
+                setTitle(getString(R.string.tag_category_scope_title,
+                        mTagName != null ? mTagName : mTagQuery,
+                        mList == null ? 0 : mList.size()));
+                return;
+            }
             setTitle(getString(R.string.scene_download_title_new,
                     mLabel != null ? mLabel : getString(R.string.default_download_label_name),
                     Integer.toString(mList == null ? 0 : mList.size())));
@@ -629,6 +703,8 @@ public class DownloadsScene extends ToolbarScene
         mFilterExtra = parseExtraCondition(savedInstanceState.getString(KEY_FILTER_EXTRA_JSON));
         mLastQuickFilterId = savedInstanceState.getString(KEY_LAST_QUICK_FILTER_ID);
         mAppliedPresetId = savedInstanceState.getString(KEY_APPLIED_PRESET_ID);
+        mTagQuery = savedInstanceState.getString(KEY_TAG_QUERY);
+        mTagName = savedInstanceState.getString(KEY_TAG_NAME);
 
         mSearchActive = savedInstanceState.getBoolean(KEY_SEARCH_ACTIVE, false);
         mSearchOption = savedInstanceState.getInt(KEY_SEARCH_OPTION, 0);
@@ -639,7 +715,8 @@ public class DownloadsScene extends ToolbarScene
 
         updateForLabel();
         // Defer applying filters until the view is created to avoid touching null views
-        mPendingRestoreFilter = mAdvancedFilterActive
+        mPendingRestoreFilter = mTagQuery != null
+                || mAdvancedFilterActive
                 || (mLastFilterSortId > 0 && mLastFilterSortId != R.id.all && mLastFilterSortId != R.id.sort_by_default)
                 || (mSearchActive && searchKey != null && !searchKey.isEmpty());
     }
@@ -686,6 +763,8 @@ public class DownloadsScene extends ToolbarScene
         outState.putString(KEY_FILTER_EXTRA_JSON, mFilterExtra.toJson().toJSONString());
         outState.putString(KEY_LAST_QUICK_FILTER_ID, mLastQuickFilterId);
         outState.putString(KEY_APPLIED_PRESET_ID, mAppliedPresetId);
+        outState.putString(KEY_TAG_QUERY, mTagQuery);
+        outState.putString(KEY_TAG_NAME, mTagName);
 
         outState.putBoolean(KEY_SEARCH_ACTIVE, mSearchActive);
         outState.putInt(KEY_SEARCH_OPTION, mSearchOption);
@@ -697,7 +776,9 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private void applyPendingFilter() {
-        if (mAdvancedFilterActive) {
+        if (mTagQuery != null) {
+            applyAdvancedFilter();
+        } else if (mAdvancedFilterActive) {
             applyAdvancedFilter();
         } else if (mLastQuickFilterId != null) {
             gotoQuickFilter(mLastQuickFilterId);
@@ -753,7 +834,7 @@ public class DownloadsScene extends ToolbarScene
                 false,
                 searchKey,
                 mSearchOption,
-                extra.getExclude());
+                extra.getExclude()).withTagQuery(mTagQuery);
     }
 
     /**
@@ -843,6 +924,11 @@ public class DownloadsScene extends ToolbarScene
     }
 
     private void refreshListKeepState() {
+        if (mTagQuery != null) {
+            // 标签范围下重新圈定并叠加当前高级筛选
+            applyAdvancedFilter();
+            return;
+        }
         if (mSearchActive && searchKey != null && !searchKey.isEmpty()) {
             applyPendingSearch(false);
         } else {
@@ -946,6 +1032,7 @@ public class DownloadsScene extends ToolbarScene
         FastScroller fastScroller = (FastScroller) ViewUtils.$$(content, R.id.fast_scroller);
         mFabLayout = (FabLayout) ViewUtils.$$(view, R.id.fab_layout);
         TextView tip = (TextView) ViewUtils.$$(view, R.id.tip);
+        mTipView = tip;
         if (mPaginationIndicator != null) {
             needInitPage = true;
         }
@@ -1196,6 +1283,7 @@ public class DownloadsScene extends ToolbarScene
         }
 
         mViewTransition = null;
+        mTipView = null;
         mAdapter = null;
         mOriginalAdapter = null;
         mLayoutManager = null;
@@ -1221,6 +1309,10 @@ public class DownloadsScene extends ToolbarScene
         reloadMenu();
         // 自动检查是否有可恢复的下载历史
         checkAutoResumeFromHistory();
+        // 设置里关掉书签分类后，别让标签范围卡住列表
+        if (!Settings.getDownloadTagCategoryEnabled() && mTagQuery != null) {
+            clearTagScope();
+        }
     }
 
     @Override
@@ -1361,6 +1453,24 @@ public class DownloadsScene extends ToolbarScene
                 activity.startService(intent);
                 return true;
             }
+            case R.id.action_batch_download: {
+                if (mDownloadManager != null) {
+                    int pending = mDownloadManager.startBatchDownload();
+                    if (pending > 0) {
+                        Toast.makeText(activity,
+                                getString(R.string.download_batch_started,
+                                        pending, Settings.getDownloadBatchSize()),
+                                Toast.LENGTH_LONG).show();
+                    } else if (mDownloadManager.isRemoteDownloadBlocked()) {
+                        Toast.makeText(activity, R.string.limit_blocked_short,
+                                Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(activity, R.string.download_batch_none,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                }
+                return true;
+            }
             case R.id.action_stop_all: {
                 if (null != mDownloadManager) {
                     mDownloadManager.stopAllDownload();
@@ -1452,11 +1562,18 @@ public class DownloadsScene extends ToolbarScene
                 activity.startActivity(intent);
                 return true;
             }
+            case R.id.action_relay_large: {
+                relayLargeGalleries();
+                return true;
+            }
             case R.id.repair_thumbnails:
                 repairThumbnails();
                 return true;
             case R.id.action_recheck_downloading:
                 recheckDownloading();
+                return true;
+            case R.id.tidy_download_history:
+                tidyDownloadHistory();
                 return true;
 //            case R.id.misc:
 //            case R.id.doujinshi:
@@ -2283,6 +2400,9 @@ public class DownloadsScene extends ToolbarScene
     }
 
     public void updateView() {
+        if (mTipView != null) {
+            mTipView.setText(mTagQuery != null ? R.string.tag_category_empty : R.string.no_download_info);
+        }
         if (mViewTransition != null) {
             if (mList == null || mList.size() == 0) {
                 mViewTransition.showView(1);
@@ -2548,21 +2668,18 @@ public class DownloadsScene extends ToolbarScene
     }
 
     /**
-     * 处理接力下载：检查已连接设备，弹出选择对话框，调用接力API
+     * 处理接力下载：检查已连接/已配对的设备，弹出选择对话框，调用接力API
      */
     private void handleRelayDownload(MainActivity activity, DownloadInfo di) {
-        // 获取已连接设备
-        TransferClientManager clientManager = TransferClientManager.getInstance(getEHContext());
-        if (clientManager == null || clientManager.getConnectedDevices().isEmpty()) {
-            Toast.makeText(getEHContext(), R.string.relay_no_connected_devices, Toast.LENGTH_SHORT).show();
+        List<ConnectedDevice> devices = collectRelayDevices();
+        if (devices.isEmpty()) {
+            Toast.makeText(getEHContext(), R.string.relay_no_available_devices, Toast.LENGTH_LONG).show();
             return;
         }
 
-        java.util.List<ConnectedDevice> devices = clientManager.getConnectedDevices();
-
         if (devices.size() == 1) {
             // 只有一台设备，直接确认
-            showRelayConfirmDialog(activity, di, clientManager, devices.get(0));
+            showRelayConfirmDialog(activity, di, devices.get(0));
         } else {
             // 多台设备，弹出选择对话框
             String[] deviceNames = new String[devices.size()];
@@ -2573,7 +2690,7 @@ public class DownloadsScene extends ToolbarScene
             new AlertDialog.Builder(getDialogContext())
                     .setTitle(R.string.relay_device_select)
                     .setItems(deviceNames, (dialog, which) -> {
-                        showRelayConfirmDialog(activity, di, clientManager, devices.get(which));
+                        showRelayConfirmDialog(activity, di, devices.get(which));
                     })
                     .setNegativeButton(android.R.string.cancel, null)
                     .show();
@@ -2581,15 +2698,169 @@ public class DownloadsScene extends ToolbarScene
     }
 
     /**
+     * 接力目标：优先使用传输页已连接的设备，其次回退到接力中心已配对的设备。
+     * 这样手机重启后不必每次手动“连接设备”才能接力。
+     */
+    private List<ConnectedDevice> collectRelayDevices() {
+        List<ConnectedDevice> devices = new ArrayList<>();
+        Context context = getEHContext();
+        if (context == null) return devices;
+        TransferClientManager clientManager = TransferClientManager.getInstance(context);
+        if (clientManager != null) {
+            devices.addAll(clientManager.getConnectedDevices());
+        }
+        Set<String> seen = new HashSet<>();
+        for (ConnectedDevice device : devices) {
+            seen.add(device.getHost() + ":" + device.getPort());
+        }
+        try {
+            for (TrustedPeer peer : TrustedPeerStore.getInstance(context).list()) {
+                String host = peer.getHost();
+                if (host == null || host.isEmpty() || peer.getPort() <= 0) continue;
+                String key = host + ":" + peer.getPort();
+                if (!seen.add(key)) continue;
+                devices.add(new ConnectedDevice(peer.getDeviceName(), peer.getDeviceId(),
+                        host, peer.getPort()));
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "collectRelayDevices: read trusted peers failed", t);
+        }
+        return devices;
+    }
+
+    private static int remainingPages(DownloadInfo info) {
+        return info.pages - Math.max(0, info.finished);
+    }
+
+    /** “接力大画廊”：按剩余页数从多到少列出待下载画廊，勾选后逐个交给目标设备。 */
+    private void relayLargeGalleries() {
+        Context context = getEHContext();
+        if (context == null || mDownloadManager == null) return;
+        List<ConnectedDevice> devices = collectRelayDevices();
+        if (devices.isEmpty()) {
+            Toast.makeText(context, R.string.relay_no_available_devices, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (devices.size() == 1) {
+            showLargeRelayDialog(devices.get(0));
+            return;
+        }
+        String[] deviceNames = new String[devices.size()];
+        for (int i = 0; i < devices.size(); i++) {
+            ConnectedDevice d = devices.get(i);
+            deviceNames[i] = d.getName() + " (" + d.getHost() + ":" + d.getPort() + ")";
+        }
+        new AlertDialog.Builder(getDialogContext())
+                .setTitle(R.string.relay_device_select)
+                .setItems(deviceNames, (dialog, which) -> showLargeRelayDialog(devices.get(which)))
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void showLargeRelayDialog(ConnectedDevice device) {
+        Context context = getEHContext();
+        if (context == null || mDownloadManager == null) return;
+        List<DownloadInfo> candidates = new ArrayList<>();
+        for (DownloadInfo info : mDownloadManager.getAllDownloadInfoSnapshot()) {
+            int state = info.state;
+            if (state != DownloadInfo.STATE_NONE
+                    && state != DownloadInfo.STATE_FAILED
+                    && state != DownloadInfo.STATE_WAIT
+                    && state != DownloadInfo.STATE_DOWNLOAD) {
+                continue;
+            }
+            if (info.pages <= 0) continue;
+            if (remainingPages(info) <= 0) continue;
+            candidates.add(info);
+        }
+        if (candidates.isEmpty()) {
+            Toast.makeText(context, R.string.relay_large_none, Toast.LENGTH_SHORT).show();
+            return;
+        }
+        candidates.sort((a, b) -> Integer.compare(remainingPages(b), remainingPages(a)));
+        if (candidates.size() > RELAY_LARGE_MAX) {
+            candidates = new ArrayList<>(candidates.subList(0, RELAY_LARGE_MAX));
+        }
+        int size = candidates.size();
+        CharSequence[] labels = new CharSequence[size];
+        boolean[] checked = new boolean[size];
+        for (int i = 0; i < size; i++) {
+            DownloadInfo info = candidates.get(i);
+            labels[i] = getString(R.string.relay_large_item,
+                    EhUtils.getSuitableTitle(info), remainingPages(info), info.pages);
+            checked[i] = true;
+        }
+        final List<DownloadInfo> items = candidates;
+        new AlertDialog.Builder(getDialogContext())
+                .setTitle(R.string.relay_large_title)
+                .setMultiChoiceItems(labels, checked, null)
+                .setPositiveButton(R.string.relay_large_confirm, (dialog, which) -> {
+                    List<DownloadInfo> selected = new ArrayList<>();
+                    for (int i = 0; i < items.size(); i++) {
+                        if (checked[i]) selected.add(items.get(i));
+                    }
+                    if (!selected.isEmpty()) {
+                        relayGalleriesSequentially(selected, 0, 0, device);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void relayGalleriesSequentially(List<DownloadInfo> items, int index,
+                                            int successCount, ConnectedDevice device) {
+        Context context = getEHContext();
+        if (context == null) return;
+        if (index >= items.size()) {
+            Toast.makeText(context,
+                    getString(R.string.relay_large_done, successCount, device.getName()),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        final DownloadInfo info = items.get(index);
+        TransferClientManager clientManager = TransferClientManager.getInstance(context);
+        if (clientManager == null) return;
+        clientManager.createRelayTask(device, info, new TransferClientManager.RelayTaskCallback() {
+            @Override
+            public void onSuccess(String taskId) {
+                Context ctx = getEHContext();
+                if (ctx != null) {
+                    RelayTaskManager relayTaskManager = RelayTaskManager.getInstance(ctx);
+                    relayTaskManager.createTask(
+                            info.gid, info.token, info.title, info.titleJpn,
+                            info.thumb, info.category, info.posted, info.uploader,
+                            info.rating, info.pages,
+                            null, null, null, 0,
+                            device.getName(), device.getDeviceId(),
+                            null, true);
+                    if (mDownloadManager != null) {
+                        mDownloadManager.setRelayDownload(info.gid);
+                    }
+                }
+                relayGalleriesSequentially(items, index + 1, successCount + 1, device);
+            }
+
+            @Override
+            public void onError(String error) {
+                Log.w(TAG, "Relay failed for gid=" + info.gid + ": " + error);
+                relayGalleriesSequentially(items, index + 1, successCount, device);
+            }
+        });
+    }
+
+    /**
      * 显示接力确认对话框
      */
     private void showRelayConfirmDialog(MainActivity activity, DownloadInfo di,
-                                         TransferClientManager clientManager, ConnectedDevice device) {
+                                         ConnectedDevice device) {
         String title = EhUtils.getSuitableTitle(di);
         new AlertDialog.Builder(getDialogContext())
                 .setTitle(R.string.relay_confirm_relay)
                 .setMessage(getString(R.string.relay_confirm_message, title, device.getName()))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    TransferClientManager clientManager =
+                            TransferClientManager.getInstance(getEHContext());
+                    if (clientManager == null) return;
                     // 调用接力API
                     clientManager.createRelayTask(device, di, new TransferClientManager.RelayTaskCallback() {
                         @Override
@@ -2966,7 +3237,7 @@ public class DownloadsScene extends ToolbarScene
     }
 
     @Override
-    public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, LinkedList<DownloadInfo> mWaitList) {
+    public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, List<DownloadInfo> mWaitList) {
         if (mList != list && !mList.contains(info)) {
             return;
         }
@@ -3159,7 +3430,12 @@ public class DownloadsScene extends ToolbarScene
         executor.setDownloadSearchingListener(this);
 
         cancelCurrentExecutor();
-        executor.executeSearching();
+        if (mTagQuery != null) {
+            // 搜索也在标签范围内进行
+            executor.executeFilterAndSort(buildFilterCondition());
+        } else {
+            executor.executeSearching();
+        }
         mCurrentExecutor = executor;
     }
 
@@ -3174,6 +3450,9 @@ public class DownloadsScene extends ToolbarScene
         mLastFilterSortId = id;
         mLastQuickFilterId = null;
         mAdvancedFilterActive = false;
+        // 普通筛选/排序不是“在标签范围内细化”，清掉标签范围避免标题与结果不一致
+        mTagQuery = null;
+        mTagName = null;
         // Running a normal filter cancels any active search, so the filter applies to the full list
         clearSearchState();
         if (mProgressView != null) {
@@ -3219,6 +3498,9 @@ public class DownloadsScene extends ToolbarScene
         mLastQuickFilterId = quickFilterId;
         mLastFilterSortId = 0;
         mAdvancedFilterActive = false;
+        // 快捷筛选是另一套整表视图，退出标签范围
+        mTagQuery = null;
+        mTagName = null;
         // 快捷筛选取消当前搜索，作用于完整下载列表
         clearSearchState();
         showFilterLoading();
@@ -3519,6 +3801,39 @@ public class DownloadsScene extends ToolbarScene
                 Toast.makeText(context, R.string.import_archive_failed, Toast.LENGTH_SHORT).show();
             }
         }
+    }
+
+    /**
+     * 梳理下载历史：重复 / 被递进包含的文件夹只保留最完整的一份。
+     * 先让用户在“移入回收站 / 永久删除”之间二选一；永久删除再确认一次。
+     */
+    private void tidyDownloadHistory() {
+        Context context = getEHContext();
+        Activity activity = getActivity2();
+        if (context == null || activity == null) return;
+
+        new AlertDialog.Builder(activity)
+                .setTitle(R.string.tidy_download_history_title)
+                .setMessage(R.string.tidy_download_history_message)
+                .setPositiveButton(R.string.tidy_download_history_recycle_bin,
+                        (dialog, which) -> startTidyDownloadHistory(context, com.hippo.ehviewer.task.FileDisposal.RECYCLE_BIN))
+                .setNeutralButton(R.string.tidy_download_history_permanent, (dialog, which) ->
+                        new AlertDialog.Builder(activity)
+                                .setTitle(R.string.tidy_download_history_permanent_title)
+                                .setMessage(R.string.tidy_download_history_permanent_message)
+                                .setPositiveButton(R.string.tidy_download_history_permanent,
+                                        (d, w) -> startTidyDownloadHistory(context, com.hippo.ehviewer.task.FileDisposal.PERMANENT_DELETE))
+                                .setNegativeButton(android.R.string.cancel, null)
+                                .show())
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void startTidyDownloadHistory(Context context, com.hippo.ehviewer.task.FileDisposal disposal) {
+        com.hippo.ehviewer.task.TidyDownloadHistoryTask task =
+                new com.hippo.ehviewer.task.TidyDownloadHistoryTask(context, disposal);
+        com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
+        Toast.makeText(context, R.string.tidy_download_history_started, Toast.LENGTH_SHORT).show();
     }
 
     private void repairThumbnails() {

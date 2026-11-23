@@ -117,4 +117,40 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory
+        android:title="@string/relay_settings_title"
+        app:allowDividerAbove="true">
+
+        <ListPreference
+            android:key="relay_mode"
+            android:title="@string/relay_mode_title"
+            android:summary="@string/relay_mode_summary"
+            android:entries="@array/relay_mode_entries"
+            android:entryValues="@array/relay_mode_values"
+            android:defaultValue="1" />
+
+        <ListPreference
+            android:key="relay_lease_seconds"
+            android:title="@string/relay_lease_seconds_title"
+            android:summary="@string/relay_lease_seconds_summary"
+            android:entries="@array/relay_lease_seconds_entries"
+            android:entryValues="@array/relay_lease_seconds_values"
+            android:defaultValue="600" />
+
+        <ListPreference
+            android:key="relay_pool_max_items"
+            android:title="@string/relay_pool_max_items_title"
+            android:summary="@string/relay_pool_max_items_summary"
+            android:entries="@array/relay_pool_max_items_entries"
+            android:entryValues="@array/relay_pool_max_items_values"
+            android:defaultValue="200" />
+
+        <com.hippo.preference.SwitchPreference
+            android:key="relay_anonymous_lan_claim"
+            android:title="@string/relay_anonymous_lan_claim_title"
+            android:summary="@string/relay_anonymous_lan_claim_summary"
+            android:defaultValue="false" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

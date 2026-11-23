@@ -19,6 +19,8 @@ package com.hippo.ehviewer.transfer.core;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.annotation.Nullable;
+
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -43,6 +45,13 @@ public final class DataChangeBus {
     public static final String TYPE_DOWNLOAD_REMOVED = "download_removed";
     public static final String TYPE_LOGIN_CHANGED = "login_changed";
     public static final String TYPE_DATA_CHANGED = "data_changed";
+    // §5.17 接力下载事件（与 §5.23 labEvent 同名同义）
+    public static final String TYPE_RELAY_POOL_CHANGED = "relay_pool_changed";
+    public static final String TYPE_RELAY_TASK_CHANGED = "relay_task_changed";
+    public static final String TYPE_PAGE_RECEIVED = "page_received";
+    public static final String TYPE_RELAY_LEASE_EXPIRED = "relay_lease_expired";
+    public static final String TYPE_GALLERY_PROGRESS = "gallery_progress";
+    public static final String TYPE_GALLERY_COMPLETED = "gallery_completed";
 
     private static final AtomicLong sVersion = new AtomicLong(0L);
 
@@ -112,6 +121,11 @@ public final class DataChangeBus {
 
     private static final CopyOnWriteArrayList<Listener> sListeners = new CopyOnWriteArrayList<>();
 
+    /** §5.23 labEvent 待投递队列（下次 /connect 心跳带回）。 */
+    private static final java.util.concurrent.ConcurrentLinkedQueue<String> sLabEvents =
+            new java.util.concurrent.ConcurrentLinkedQueue<>();
+    private static final int MAX_LAB_EVENTS = 64;
+
     public static void addListener(Listener listener) {
         if (listener != null) {
             sListeners.add(listener);
@@ -148,6 +162,69 @@ public final class DataChangeBus {
         }
         sb.append(",\"time\":").append(System.currentTimeMillis()).append('}');
         String data = sb.toString();
+        enqueueLabEvent(type, data);
+        broadcast(type, data);
+        return version;
+    }
+
+    /** 便捷方法：无附加字段的变更（如 data_changed） */
+    public static long publish(String type) {
+        return publish(type, 0L, null, null);
+    }
+
+    /**
+     * 发布带自定义字段的事件（§5.17 接力事件）。
+     *
+     * @param type       事件类型
+     * @param fieldsJson 不含外层大括号的 JSON 字段串，例如
+     *                   {@code "gid":123,"status":"partial"}；可为 null
+     * @return 新的数据版本号
+     */
+    public static long publishFields(String type, String fieldsJson) {
+        long version = nextVersion();
+        StringBuilder sb = new StringBuilder(128);
+        sb.append("{\"version\":").append(version);
+        if (fieldsJson != null && !fieldsJson.isEmpty()) {
+            sb.append(',').append(fieldsJson);
+        }
+        sb.append(",\"time\":").append(System.currentTimeMillis()).append('}');
+        String data = sb.toString();
+        enqueueLabEvent(type, data);
+        broadcast(type, data);
+        return version;
+    }
+
+    private static void enqueueLabEvent(String type, String data) {
+        sLabEvents.offer("{\"type\":" + quote(type) + ",\"payload\":" + data + "}");
+        while (sLabEvents.size() > MAX_LAB_EVENTS) {
+            sLabEvents.poll();
+        }
+    }
+
+    /**
+     * 取出并清空待投递的 labEvent（§5.23）。
+     *
+     * @return JSON 数组字符串；无事件时返回 null
+     */
+    @Nullable
+    public static String drainLabEventsJson() {
+        if (sLabEvents.isEmpty()) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder(256);
+        sb.append('[');
+        boolean first = true;
+        String item;
+        while ((item = sLabEvents.poll()) != null) {
+            if (!first) sb.append(',');
+            sb.append(item);
+            first = false;
+        }
+        sb.append(']');
+        return first ? null : sb.toString();
+    }
+
+    private static void broadcast(String type, String data) {
         for (Listener listener : sListeners) {
             try {
                 listener.onEvent(type, data);
@@ -155,11 +232,32 @@ public final class DataChangeBus {
                 // 单个监听器异常不得影响其它监听器与写操作
             }
         }
-        return version;
     }
 
-    /** 便捷方法：无附加字段的变更（如 data_changed） */
-    public static long publish(String type) {
-        return publish(type, 0L, null, null);
+    /** JSON 字符串字段转义（双引号包裹）。 */
+    public static String quote(@Nullable String value) {
+        if (value == null) {
+            return "null";
+        }
+        StringBuilder sb = new StringBuilder(value.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            switch (c) {
+                case '"': sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                default:
+                    if (c < 0x20) {
+                        sb.append(String.format(java.util.Locale.US, "\\u%04x", (int) c));
+                    } else {
+                        sb.append(c);
+                    }
+            }
+        }
+        sb.append('"');
+        return sb.toString();
     }
 }

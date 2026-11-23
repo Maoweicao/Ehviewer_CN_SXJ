@@ -117,6 +117,80 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        android:key="category_download_batch"
+        android:title="@string/settings_download_batch_category"
+        android:summary="@string/settings_download_batch_category_summary">
+
+        <com.hippo.preference.ListPreference
+            android:defaultValue="50"
+            android:key="download_batch_size"
+            android:summary="@string/settings_download_batch_size_summary"
+            android:title="@string/settings_download_batch_size"
+            app:entries="@array/download_batch_size_entries"
+            app:entryValues="@array/download_batch_size_values" />
+
+        <com.hippo.preference.ListPreference
+            android:defaultValue="0"
+            android:key="download_batch_cooldown"
+            android:summary="@string/settings_download_batch_cooldown_summary"
+            android:title="@string/settings_download_batch_cooldown"
+            app:entries="@array/download_batch_cooldown_entries"
+            app:entryValues="@array/download_batch_cooldown_values" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
+        android:key="category_download_limit"
+        android:title="@string/settings_download_limit_category"
+        android:summary="@string/settings_download_limit_category_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="limit_detection_enabled"
+            android:summary="@string/settings_download_limit_enabled_summary"
+            android:title="@string/settings_download_limit_enabled" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="limit_low_speed_enabled"
+            android:dependency="limit_detection_enabled"
+            android:summary="@string/settings_download_limit_low_speed_enabled_summary"
+            android:title="@string/settings_download_limit_low_speed_enabled" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="true"
+            android:key="limit_cooldown_enabled"
+            android:dependency="limit_detection_enabled"
+            android:summary="@string/settings_download_limit_cooldown_summary"
+            android:title="@string/settings_download_limit_cooldown" />
+
+        <com.hippo.ehviewer.preference.SliderPreference
+            android:defaultValue="20"
+            android:key="limit_low_speed_kbps"
+            android:title="@string/settings_download_limit_low_speed"
+            android:dependency="limit_low_speed_enabled"
+            app:minValue="5"
+            app:maxValue="200"
+            app:stepSize="5"
+            app:unit="KB/s"
+            app:showValue="true" />
+
+        <com.hippo.preference.ListPreference
+            android:defaultValue="60"
+            android:key="limit_low_speed_seconds"
+            android:summary="%s"
+            android:title="@string/settings_download_limit_low_speed_duration"
+            android:dependency="limit_low_speed_enabled"
+            app:entries="@array/limit_low_speed_seconds_entries"
+            app:entryValues="@array/limit_low_speed_seconds_values" />
+
+        <com.hippo.ehviewer.preference.DownloadLimitStatusPreference
+            android:key="limit_status"
+            android:title="@string/settings_download_limit_status" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory
         android:key="category_download_image"
         android:title="@string/settings_category_download_image"
         android:summary="@string/settings_category_download_image_summary">
@@ -159,24 +233,17 @@
             android:summary="@string/settings_download_download_order_by_asc_summary"
             android:title="@string/settings_download_download_order_by_asc" />
 
-        <Preference
-            android:key="download_queue_order_header"
-            android:title="@string/settings_download_download_queue_order" />
-
         <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
             android:key="advanced_download_sort_enabled"
             android:summary="@string/settings_advanced_advanced_download_sort_summary"
             android:title="@string/settings_advanced_advanced_download_sort" />
 
-        <com.hippo.preference.ListPreference
-            android:defaultValue="0"
-            android:key="download_queue_order"
-            android:summary="@string/settings_download_download_queue_order_summary"
-            android:title="@string/settings_download_download_queue_order"
+        <com.hippo.ehviewer.preference.DownloadSortOrderPreference
+            android:key="download_sort_order_v2"
             android:dependency="advanced_download_sort_enabled"
-            app:entries="@array/download_queue_order_entries"
-            app:entryValues="@array/download_queue_order_entry_values" />
+            android:summary="@string/download_sort_order_summary"
+            android:title="@string/download_sort_order_title" />
 
         <com.hippo.ehviewer.preference.CategoryPriorityDialogPreference
             android:key="download_category_priority_order"
@@ -184,27 +251,18 @@
             android:title="@string/settings_advanced_download_category_priority_order"
             android:dependency="advanced_download_sort_enabled" />
 
-        <com.hippo.preference.ListPreference
-            android:defaultValue="0"
-            android:key="download_queue_secondary_order"
-            android:title="@string/download_queue_secondary_order"
-            android:summary="@string/download_queue_secondary_order_summary"
-            android:dependency="advanced_download_sort_enabled"
-            app:entries="@array/download_queue_secondary_order_entries"
-            app:entryValues="@array/download_queue_secondary_order_entry_values" />
-
-        <com.hippo.preference.SwitchPreference
-            android:defaultValue="false"
-            android:key="download_sort_by_remaining"
-            android:summary="@string/settings_download_sort_by_remaining_summary"
-            android:title="@string/settings_download_sort_by_remaining" />
-
     </PreferenceCategory>
 
     <PreferenceCategory
         android:key="category_download_behavior"
         android:title="@string/settings_category_download_behavior"
         android:summary="@string/settings_category_download_behavior_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="auto_start_download_on_open"
+            android:summary="@string/settings_download_auto_start_on_open_summary"
+            android:title="@string/settings_download_auto_start_on_open" />
 
         <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
@@ -341,6 +399,11 @@
             android:summary="@string/settings_download_resume_from_history_summary"
             android:title="@string/settings_download_resume_from_history" />
 
+        <com.hippo.ehviewer.preference.TidyDownloadHistoryPreference
+            android:key="tidy_download_history"
+            android:summary="@string/settings_download_tidy_download_history_summary"
+            android:title="@string/settings_download_tidy_download_history" />
+
         <com.hippo.preference.SwitchPreference
             android:defaultValue="false"
             android:key="auto_resume_from_history"
@@ -378,6 +441,11 @@
             android:key="view_download_logs"
             android:summary="@string/settings_download_view_logs_summary"
             android:title="@string/settings_download_view_logs" />
+
+        <Preference
+            android:key="export_download_logs"
+            android:summary="@string/settings_download_export_logs_summary"
+            android:title="@string/settings_download_export_logs" />
 
         <Preference
             android:key="clean_download_logs"

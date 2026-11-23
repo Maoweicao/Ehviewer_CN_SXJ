@@ -166,7 +166,7 @@ class RelayInvoker private constructor(context: Context) {
             override fun onUpdate(
                 info: DownloadInfo,
                 list: List<DownloadInfo>,
-                waitList: java.util.LinkedList<DownloadInfo>,
+                waitList: MutableList<DownloadInfo>,
             ) {
                 handleUpdate(info)
             }

@@ -181,6 +181,17 @@ public class EhEngine {
             throw new CancelledException();
         }
 
+        // 限流/封禁探测：使用服务器真实响应（状态码/响应头/正文）判断，
+        // 断网和连接超时由网络状态管理器处理，不在这里误判。
+        try {
+            EhApplication application = EhApplication.getInstance();
+            if (application != null) {
+                com.hippo.ehviewer.limit.RemoteLimitGuard.getInstance(application)
+                        .inspectHttp(code, headers, body, e, "eh_engine");
+            }
+        } catch (Throwable ignored) {
+        }
+
         // Check sad panda
         if (headers != null && SAD_PANDA_DISPOSITION.equals(headers.get("Content-Disposition")) &&
                 SAD_PANDA_TYPE.equals(headers.get("Content-Type")) &&
@@ -231,6 +242,18 @@ public class EhEngine {
         } catch (Throwable error) {
             error.printStackTrace();
             throw error;
+        }
+    }
+
+    /** 对 HTTP 200 但正文是限流/封禁页的响应也做一次探测。 */
+    private static void inspectLimitBody(int code, @Nullable Headers headers, @Nullable String body) {
+        try {
+            EhApplication application = EhApplication.getInstance();
+            if (application != null) {
+                com.hippo.ehviewer.limit.RemoteLimitGuard.getInstance(application)
+                        .inspectHttp(code, headers, body, null, "eh_engine_body");
+            }
+        } catch (Throwable ignored) {
         }
     }
 
@@ -348,6 +371,7 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            inspectLimitBody(code, headers, body);
             result = GalleryListParser.parse(body, mode);
         } catch (Throwable e) {
             ExceptionUtils.throwIfFatal(e);
@@ -468,6 +492,7 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            inspectLimitBody(code, headers, body);
             String html = EhEventParse.parse(body);
             if (html != null) {
                 EhApplication.getInstance().showEventPane(html);
@@ -1523,6 +1548,7 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            inspectLimitBody(code, headers, body);
             String html = EhEventParse.parse(body);
             if (html != null) {
                 EhApplication.getInstance().showEventPane(html);
@@ -1559,6 +1585,7 @@ public class EhEngine {
             headers = response.headers();
             assert response.body() != null;
             body = response.body().string();
+            inspectLimitBody(code, headers, body);
             String html = EhEventParse.parse(body);
             if (html != null) {
                 EhApplication.getInstance().showEventPane(html);

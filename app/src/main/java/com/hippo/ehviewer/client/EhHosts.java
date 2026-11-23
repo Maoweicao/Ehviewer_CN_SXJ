@@ -156,10 +156,14 @@ public class EhHosts implements Dns {
             }
         }
         if (NetworkSecurityManager.INSTANCE.isDoHEnabled()) {
-            inetAddresses = dnsOverHttps.lookup(hostname);
-            if (!inetAddresses.isEmpty()) {
-                Collections.shuffle(inetAddresses, new Random(System.currentTimeMillis()));
-                return inetAddresses;
+            try {
+                inetAddresses = dnsOverHttps.lookup(hostname);
+                if (!inetAddresses.isEmpty()) {
+                    Collections.shuffle(inetAddresses, new Random(System.currentTimeMillis()));
+                    return inetAddresses;
+                }
+            } catch (Exception ignored) {
+                // DoH 在代理/VPN 切换时可能暂时失败，继续回退到系统 DNS。
             }
         }
         try {

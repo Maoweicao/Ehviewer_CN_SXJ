@@ -2442,7 +2442,7 @@ public class GalleryDetailScene extends BaseScene implements View.OnClickListene
     }
 
     @Override
-    public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, LinkedList<DownloadInfo> mWaitList) {
+    public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, List<DownloadInfo> mWaitList) {
         updateDownloadState();
     }
 

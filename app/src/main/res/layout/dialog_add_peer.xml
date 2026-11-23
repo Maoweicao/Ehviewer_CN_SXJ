@@ -7,20 +7,14 @@
     android:paddingTop="@dimen/abc_dialog_padding_top_material"
     android:paddingRight="?attr/dialogPreferredPadding">
 
-    <com.google.android.material.textfield.TextInputLayout
+    <TextView
+        android:id="@+id/add_peer_hint"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp">
-
-        <com.hippo.widget.HackyTextInputEditText
-            android:id="@+id/input_peer_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/multi_device_add_name"
-            android:inputType="text"
-            android:maxLines="1"
-            android:singleLine="true" />
-    </com.google.android.material.textfield.TextInputLayout>
+        android:text="@string/multi_device_add_hint"
+        android:textSize="13sp"
+        android:textColor="?android:attr/textColorSecondary"
+        android:layout_marginBottom="12dp" />
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
@@ -39,8 +33,7 @@
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp">
+        android:layout_height="wrap_content">
 
         <com.hippo.widget.HackyTextInputEditText
             android:id="@+id/input_peer_port"
@@ -48,20 +41,6 @@
             android:layout_height="wrap_content"
             android:hint="@string/multi_device_add_port"
             android:inputType="number"
-            android:maxLines="1"
-            android:singleLine="true" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content">
-
-        <com.hippo.widget.HackyTextInputEditText
-            android:id="@+id/input_peer_id"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/multi_device_add_id_optional"
-            android:inputType="text"
             android:maxLines="1"
             android:singleLine="true" />
     </com.google.android.material.textfield.TextInputLayout>

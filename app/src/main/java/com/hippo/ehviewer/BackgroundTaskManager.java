@@ -189,6 +189,12 @@ public class BackgroundTaskManager {
             new com.hippo.ehviewer.task.ProgressiveScanTask(ctx));
         registerTaskFactory(com.hippo.ehviewer.task.ProgressiveMergeTask.class.getName(), (ctx, taskId, persistData) ->
             new com.hippo.ehviewer.task.ProgressiveMergeTask(ctx, -1L, java.util.Collections.emptyList(), taskId));
+        registerTaskFactory(com.hippo.ehviewer.task.LabMetadataSyncTask.class.getName(), (ctx, taskId, persistData) ->
+            com.hippo.ehviewer.task.LabMetadataSyncTask.restore(ctx, persistData));
+        registerTaskFactory(com.hippo.ehviewer.task.LabImageBackfillTask.class.getName(), (ctx, taskId, persistData) ->
+            com.hippo.ehviewer.task.LabImageBackfillTask.restore(ctx, persistData));
+        registerTaskFactory(com.hippo.ehviewer.task.LabLocalCheckTask.class.getName(), (ctx, taskId, persistData) ->
+            com.hippo.ehviewer.task.LabLocalCheckTask.restore(ctx, persistData));
         
         // CPU密集型任务线程池（用于文件扫描、压缩、合并等）
         // 使用 THREAD_PRIORITY_DEFAULT 确保非网络后台任务不被系统过度降速

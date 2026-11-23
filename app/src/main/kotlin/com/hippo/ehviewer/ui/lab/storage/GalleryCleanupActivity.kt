@@ -25,16 +25,17 @@ import android.widget.CheckBox
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
-import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.dao.DownloadInfo
 import com.hippo.ehviewer.download.DeleteProtectHelper
 import com.hippo.ehviewer.download.DownloadDeleteHelper
+import com.hippo.ehviewer.ui.EhActivity
 import com.hippo.lib.yorozuya.FileUtils
 
 /**
@@ -48,7 +49,13 @@ import com.hippo.lib.yorozuya.FileUtils
  * 删除完全复用下载管理器的逻辑（[DownloadDeleteHelper]），
  * 受保护的画廊默认锁定，不可被选中。
  */
-class GalleryCleanupActivity : AppCompatActivity() {
+class GalleryCleanupActivity : EhActivity() {
+
+    override fun getThemeResId(theme: Int): Int = when (theme) {
+        Settings.THEME_DARK -> R.style.AppTheme_Toolbar_Dark
+        Settings.THEME_BLACK -> R.style.AppTheme_Toolbar_Black
+        else -> R.style.AppTheme_Toolbar
+    }
 
     /** 一条待清理的画廊。 */
     class CleanupItem(

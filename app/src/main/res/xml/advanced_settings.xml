@@ -386,4 +386,28 @@
 
     </PreferenceCategory>
 
+    <PreferenceCategory
+        android:key="category_advanced_tag_categories"
+        android:title="@string/settings_category_tag_categories"
+        android:summary="@string/settings_category_tag_categories_summary">
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="download_tag_category_enabled"
+            android:summary="@string/settings_advanced_download_tag_category_summary"
+            android:title="@string/settings_advanced_download_tag_category" />
+
+        <com.hippo.preference.SwitchPreference
+            android:defaultValue="false"
+            android:key="favorites_tag_category_enabled"
+            android:summary="@string/settings_advanced_favorites_tag_category_summary"
+            android:title="@string/settings_advanced_favorites_tag_category" />
+
+        <Preference
+            android:key="backfill_gallery_tags"
+            android:summary="@string/settings_advanced_backfill_gallery_tags_summary"
+            android:title="@string/settings_advanced_backfill_gallery_tags" />
+
+    </PreferenceCategory>
+
 </PreferenceScreen>

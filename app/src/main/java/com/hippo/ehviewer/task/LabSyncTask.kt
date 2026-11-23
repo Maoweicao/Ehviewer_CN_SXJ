@@ -57,6 +57,9 @@ class LabSyncTask(context: Context) : BaseBackgroundTask(context), ParamAwareTas
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.SYNC
 
+    override fun getMutexGroup(): String? =
+        com.hippo.ehviewer.lab.sync.LabTasks.MUTEX_GROUP
+
     override suspend fun execute(): Result<Unit> = withContext(Dispatchers.IO) {
         updateState(TaskState.RUNNING)
         appendTaskLog("开始设备间同步")

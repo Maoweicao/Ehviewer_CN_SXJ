@@ -67,4 +67,72 @@
         <item>仅推送（本机 → 对端）</item>
     </string-array>
 
+    <string-array name="download_batch_size_entries">
+        <item>50</item>
+        <item>100</item>
+        <item>150</item>
+        <item>200</item>
+        <item>250</item>
+        <item>300</item>
+    </string-array>
+
+    <string-array name="download_batch_size_values" translatable="false">
+        <item>50</item>
+        <item>100</item>
+        <item>150</item>
+        <item>200</item>
+        <item>250</item>
+        <item>300</item>
+    </string-array>
+
+    <string-array name="download_batch_cooldown_entries">
+        <item>关闭</item>
+        <item>30 秒</item>
+        <item>1 分钟</item>
+        <item>5 分钟</item>
+        <item>10 分钟</item>
+        <item>30 分钟</item>
+        <item>45 分钟</item>
+        <item>1 小时</item>
+        <item>3 小时</item>
+        <item>5 小时</item>
+        <item>10 小时</item>
+        <item>15 小时</item>
+        <item>20 小时</item>
+        <item>24 小时</item>
+    </string-array>
+
+    <string-array name="download_batch_cooldown_values" translatable="false">
+        <item>0</item>
+        <item>30</item>
+        <item>60</item>
+        <item>300</item>
+        <item>600</item>
+        <item>1800</item>
+        <item>2700</item>
+        <item>3600</item>
+        <item>10800</item>
+        <item>18000</item>
+        <item>36000</item>
+        <item>54000</item>
+        <item>72000</item>
+        <item>86400</item>
+    </string-array>
+
+    <string-array name="limit_low_speed_seconds_entries">
+        <item>10 秒</item>
+        <item>30 秒</item>
+        <item>1 分钟</item>
+        <item>2 分钟</item>
+        <item>5 分钟</item>
+    </string-array>
+
+    <string-array name="limit_low_speed_seconds_values" translatable="false">
+        <item>10</item>
+        <item>30</item>
+        <item>60</item>
+        <item>120</item>
+        <item>300</item>
+    </string-array>
+
 </resources>

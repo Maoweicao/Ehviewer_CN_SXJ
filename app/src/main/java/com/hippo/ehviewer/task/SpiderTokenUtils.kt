@@ -167,15 +167,36 @@ object SpiderTokenUtils {
         context: Context,
         info: DownloadInfo,
         onPageFetched: suspend (page: Int, previewPages: Int) -> Unit = { _, _ -> }
+    ): SpiderInfo? = fetchSpiderInfoInternal(context, info, onPageFetched, false)
+
+    /**
+     * 与 [fetchSpiderInfoFromRemote] 相同，但网络异常原样抛出（不吞成 null）。
+     * 供预下载扫描识别限流并等待自动换 IP 后重试。
+     */
+    suspend fun fetchSpiderInfoFromRemoteStrict(
+        context: Context,
+        info: DownloadInfo,
+        onPageFetched: suspend (page: Int, previewPages: Int) -> Unit = { _, _ -> }
+    ): SpiderInfo? = fetchSpiderInfoInternal(context, info, onPageFetched, true)
+
+    private suspend fun fetchSpiderInfoInternal(
+        context: Context,
+        info: DownloadInfo,
+        onPageFetched: suspend (page: Int, previewPages: Int) -> Unit,
+        strict: Boolean
     ): SpiderInfo? {
         val token = info.token
         if (token.isNullOrEmpty()) return null
         val client = EhApplication.getOkHttpClient(context)
         val gid = info.gid
-        val gd = try {
+        val gd = if (strict) {
             EhEngine.getGalleryDetail(null, client, EhUrl.getGalleryDetailUrl(gid, token, 0, false))
-        } catch (_: Throwable) {
-            null
+        } else {
+            try {
+                EhEngine.getGalleryDetail(null, client, EhUrl.getGalleryDetailUrl(gid, token, 0, false))
+            } catch (_: Throwable) {
+                null
+            }
         } ?: return null
         val pages = if (gd.SpiderInfoPages > 0) gd.SpiderInfoPages else info.pages
         val previewPages = gd.SpiderInfoPreviewPages
@@ -193,14 +214,20 @@ object SpiderTokenUtils {
             accumulatePreviews(spi, firstSet)
         }
         for (i in 1 until previewPages) {
-            try {
-                val pair = EhEngine.getPreviewSet(
+            val pair = if (strict) {
+                EhEngine.getPreviewSet(
                     null, client, EhUrl.getGalleryDetailUrl(gid, token, i, false)
                 )
-                accumulatePreviews(spi, pair.first)
-            } catch (_: Throwable) {
-                return null
+            } else {
+                try {
+                    EhEngine.getPreviewSet(
+                        null, client, EhUrl.getGalleryDetailUrl(gid, token, i, false)
+                    )
+                } catch (_: Throwable) {
+                    return null
+                }
             }
+            accumulatePreviews(spi, pair.first)
             onPageFetched(i, previewPages)
         }
         if (spi.pTokenMap.size() == 0) return null

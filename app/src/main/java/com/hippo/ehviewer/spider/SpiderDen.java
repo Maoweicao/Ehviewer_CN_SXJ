@@ -102,9 +102,13 @@ public final class SpiderDen {
         String dirname = EhDB.getDownloadDirname(galleryInfo.gid);
         if (null != dirname) {
             // Some dirname may be invalid in some version
-            dirname = FileUtils.sanitizeFilename(dirname);
-            EhDB.putDownloadDirname(galleryInfo.gid, dirname);
-            return dirname;
+            String sanitized = FileUtils.sanitizeFilename(dirname);
+            // 只有真的被清洗过才写回：全库校验会对每个画廊走一次这里，
+            // 无条件 upsert 等于每个画廊多一次数据库写入。
+            if (!sanitized.equals(dirname)) {
+                EhDB.putDownloadDirname(galleryInfo.gid, sanitized);
+            }
+            return sanitized;
         }
 
         // Directory listing is slow on SAF and must not run on the main thread.

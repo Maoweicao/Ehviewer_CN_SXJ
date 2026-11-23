@@ -404,6 +404,21 @@ public final class MainActivity extends StageActivity
         return processAnnouncer(new Announcer(clazz).setArgs(args));
     }
 
+    /**
+     * 接力主机模式开启时，应用进程启动后自动拉起传输服务。
+     * 避免 MIUI 回收进程后前台服务无法恢复，导致 PC 端接力/回传中断。
+     */
+    private void maybeStartRelayHostService() {
+        try {
+            if (!Settings.isRelayAnyEnabled()) return;
+            Intent serviceIntent = new Intent(this,
+                    com.hippo.ehviewer.transfer.TransferService.class);
+            androidx.core.content.ContextCompat.startForegroundService(this, serviceIntent);
+        } catch (Throwable t) {
+            // 服务启动失败不应影响主界面
+        }
+    }
+
     @Override
     protected void onCreate2(@Nullable Bundle savedInstanceState) {
         Intent intent = getIntent();
@@ -413,6 +428,7 @@ public final class MainActivity extends StageActivity
                 savedInstanceState = null;
             }
         }
+        maybeStartRelayHostService();
         setContentView(R.layout.activity_main);
 
         mDrawerLayout = (EhDrawerLayout) ViewUtils.$$(this, R.id.draw_view);

@@ -391,7 +391,7 @@ public final class GalleryListScene extends BaseScene
             }
 
             @Override
-            public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, LinkedList<DownloadInfo> mWaitList) {
+            public void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, List<DownloadInfo> mWaitList) {
             }
 
             @Override

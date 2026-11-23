@@ -47,6 +47,7 @@
     <application
         android:name=".EhApplication"
         android:allowBackup="true"
+        android:extractNativeLibs="true"
         android:fullBackupContent="@xml/backup_scheme"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
@@ -211,6 +212,11 @@
             android:name=".ui.lab.ProgressiveManagerActivity"
             android:configChanges="screenSize|uiMode"
             android:label="@string/lab_progressive_manager"
+            android:theme="@style/AppTheme.Toolbar" />
+        <activity
+            android:name=".ui.DownloadSortOrderActivity"
+            android:configChanges="screenSize|uiMode"
+            android:label="@string/download_sort_rules_title"
             android:theme="@style/AppTheme.Toolbar" />
         <activity
             android:name=".ui.lab.MultiDeviceRelayActivity"
@@ -510,6 +516,11 @@
             android:grantUriPermissions="true">
             <meta-data
                 android:name="com.hippo.content.FILE_PROVIDER_PATHS"
+                android:resource="@xml/filepaths" />
+            <!-- androidx.core.content.FileProvider 只认 android.support 这个 key；
+                 代码里有多处用的是 androidx 版本，两个 key 必须同时声明 -->
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/filepaths" />
         </provider>
 

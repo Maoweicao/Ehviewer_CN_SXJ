@@ -174,6 +174,13 @@ public class TransferServerManager extends Observable {
     public int getPort() {
         return DEFAULT_PORT;
     }
+
+    /**
+     * 默认监听端口（供二维码/手动配对等 UI 复用）。
+     */
+    public static int getDefaultPort() {
+        return DEFAULT_PORT;
+    }
     
     /**
      * 获取HTTP服务器

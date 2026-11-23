@@ -188,6 +188,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
     private Button relayTabAll;
     private Button relayRefreshButton;
     private Button relayClearCompletedButton;
+    private Button relayPoolShowButton;
     private com.hippo.ehviewer.transfer.core.RelayTaskManager relayTaskManager;
     private String relayFilterDirection = "all";
 
@@ -643,6 +644,7 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         relayTabAll = findViewById(R.id.relay_tab_all);
         relayRefreshButton = findViewById(R.id.relay_refresh);
         relayClearCompletedButton = findViewById(R.id.relay_clear_completed);
+        relayPoolShowButton = findViewById(R.id.relay_pool_show);
 
         // Setup RecyclerView
         relayTaskAdapter = new RelayTaskAdapter();
@@ -692,6 +694,9 @@ public class TransferActivity extends ToolbarActivity implements TransferService
         });
         relayRefreshButton.setOnClickListener(v -> refreshRelayTaskList());
         relayClearCompletedButton.setOnClickListener(v -> handleClearCompleted());
+        if (relayPoolShowButton != null) {
+            relayPoolShowButton.setOnClickListener(v -> showRelayPoolDialog());
+        }
 
         // Register relay task listener
         relayTaskManager.addListener(new com.hippo.ehviewer.transfer.core.RelayTaskManager.RelayTaskListener() {
@@ -730,6 +735,85 @@ public class TransferActivity extends ToolbarActivity implements TransferService
             relayEmptyText.setVisibility(View.GONE);
             relayTaskListView.setVisibility(View.VISIBLE);
         }
+    }
+
+    /**
+     * 展示候选池（§5.17.3）并支持认领（§5.17.5）。
+     */
+    private void showRelayPoolDialog() {
+        if (!com.hippo.ehviewer.Settings.isRelayPoolEnabled()) {
+            Toast.makeText(this, R.string.relay_pool_disabled, Toast.LENGTH_LONG).show();
+            return;
+        }
+        final com.hippo.ehviewer.transfer.core.RelayPoolManager manager =
+                com.hippo.ehviewer.transfer.core.RelayPoolManager.getInstance(this);
+        Toast.makeText(this, R.string.refresh, Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            com.hippo.ehviewer.transfer.core.RelayPoolManager.PoolQuery query =
+                    com.hippo.ehviewer.transfer.core.RelayPoolManager.parseQuery(
+                            "downloading,waiting,failed", 50, null, false,
+                            "list", false, 0L, "none", "updatedAt:desc");
+            com.hippo.ehviewer.transfer.core.RelayPoolManager.PoolList list = manager.list(query);
+            final java.util.List<String> labels = new java.util.ArrayList<>();
+            final java.util.List<Long> gids = new java.util.ArrayList<>();
+            for (int i = 0; i < list.items.size(); i++) {
+                com.hippo.ehviewer.dao.DownloadInfo info = list.items.get(i);
+                com.hippo.ehviewer.transfer.core.RelayPoolManager.PageFacts facts = list.facts.get(i);
+                com.hippo.ehviewer.transfer.data.RelayTask leaseTask =
+                        relayTaskManager.getActiveLeaseTaskByGid(info.gid);
+                String title = info.title != null ? info.title : String.valueOf(info.gid);
+                String lease = leaseTask != null
+                        ? " · 已被 " + (leaseTask.getLeaseDeviceName() != null
+                        ? leaseTask.getLeaseDeviceName() : leaseTask.getLeaseDeviceId())
+                        : "";
+                labels.add(title + "\n缺 " + facts.missingPages.size() + "/"
+                        + facts.totalPages + " 页" + lease);
+                gids.add(info.gid);
+            }
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (labels.isEmpty()) {
+                    new androidx.appcompat.app.AlertDialog.Builder(this)
+                            .setTitle(R.string.relay_pool_show)
+                            .setMessage(R.string.relay_pool_empty)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                    return;
+                }
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle(R.string.relay_pool_show)
+                        .setItems(labels.toArray(new String[0]), (dialog, which) ->
+                                claimPoolGallery(gids.get(which)))
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .show();
+            });
+        }, "relay-pool-list").start();
+    }
+
+    private void claimPoolGallery(long gid) {
+        final com.hippo.ehviewer.transfer.core.RelayPoolManager manager =
+                com.hippo.ehviewer.transfer.core.RelayPoolManager.getInstance(this);
+        final com.hippo.ehviewer.lab.LabManager lab =
+                com.hippo.ehviewer.lab.LabManager.getInstance(this);
+        new Thread(() -> {
+            com.hippo.ehviewer.transfer.core.RelayPoolManager.ClaimResult result =
+                    manager.claim(java.util.Collections.singletonList(gid),
+                            lab.getSelfDeviceId(), lab.getSelfDeviceName(),
+                            com.hippo.ehviewer.Settings.getRelayLeaseSeconds(),
+                            true, "normal", null, "127.0.0.1", 0);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (!result.tasks.isEmpty()) {
+                    Toast.makeText(this,
+                            getString(R.string.relay_pool_claimed,
+                                    String.valueOf(gid)), Toast.LENGTH_SHORT).show();
+                    refreshRelayTaskList();
+                } else if (!result.errors.isEmpty()) {
+                    Toast.makeText(this,
+                            result.errors.get(0).error, Toast.LENGTH_LONG).show();
+                }
+            });
+        }, "relay-pool-claim").start();
     }
 
     /**

@@ -42,6 +42,10 @@ public class BackgroundTaskInfo {
     private volatile boolean isCancelled;
     private volatile boolean isPaused;
     private volatile boolean isQueued;
+    private volatile boolean isFailed;
+    private volatile boolean isRetrying;
+    private volatile int retryAttempt;
+    private volatile int retryMax;
     private volatile String errorMessage;
     private volatile File logFile;
     private final List<String> logMessages;
@@ -68,6 +72,10 @@ public class BackgroundTaskInfo {
         this.isCancelled = false;
         this.isPaused = false;
         this.isQueued = false;
+        this.isFailed = false;
+        this.isRetrying = false;
+        this.retryAttempt = 0;
+        this.retryMax = 0;
         this.errorMessage = null;
         this.logFile = null;
         this.logMessages = Collections.synchronizedList(new ArrayList<>());
@@ -206,6 +214,54 @@ public class BackgroundTaskInfo {
 
     public void setQueued(boolean queued) {
         isQueued = queued;
+    }
+
+    /** 任务是否以失败结束（区别于普通完成）。 */
+    public boolean isFailed() {
+        return isFailed;
+    }
+
+    public void setFailed(boolean failed) {
+        isFailed = failed;
+    }
+
+    /** 是否正在自动重试（任务仍在活跃表，但处于退避/重试阶段）。 */
+    public boolean isRetrying() {
+        return isRetrying;
+    }
+
+    public void setRetrying(boolean retrying) {
+        isRetrying = retrying;
+    }
+
+    public int getRetryAttempt() {
+        return retryAttempt;
+    }
+
+    public int getRetryMax() {
+        return retryMax;
+    }
+
+    public void setRetryInfo(int attempt, int max) {
+        this.retryAttempt = Math.max(0, attempt);
+        this.retryMax = Math.max(0, max);
+        this.isRetrying = attempt > 0 && (max <= 0 || attempt <= max);
+    }
+
+    /** 统一状态名，供后台任务列表与详情展示。 */
+    @NonNull
+    public String getStateName() {
+        if (isCancelled) return "cancelled";
+        if (isFailed) return "failed";
+        if (isRetrying) return "retrying";
+        if (isPaused) return "paused";
+        if (isQueued) return "queued";
+        if (isCompleted) return "completed";
+        return "running";
+    }
+
+    public boolean isFinished() {
+        return isCompleted || isCancelled || isFailed;
     }
 
     @Nullable

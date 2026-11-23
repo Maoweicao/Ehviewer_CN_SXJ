@@ -1,5 +1,6 @@
 package com.hippo.ehviewer.lab.ip;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -7,6 +8,8 @@ import android.util.Log;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.lab.ip.core.ClashProfileBuilder;
+import com.hippo.ehviewer.lab.ip.core.ClashProfileStore;
 import com.hippo.ehviewer.lab.ip.model.IpInfo;
 import com.hippo.ehviewer.lab.ip.model.Subscription;
 import com.hippo.ehviewer.lab.ip.parser.SubscriptionParser;
@@ -21,6 +24,7 @@ import java.util.concurrent.Executors;
 public class SubscriptionManager {
     private static final String TAG = "SubscriptionManager";
     private static SubscriptionManager instance;
+    private final Context appContext;
     private final List<Subscription> subscriptions;
     private final Object lock = new Object();
     private Timer autoRefreshTimer;
@@ -38,16 +42,25 @@ public class SubscriptionManager {
         void onError(Subscription sub, String error);
     }
 
-    private SubscriptionManager() {
+    private SubscriptionManager(Context context) {
+        appContext = context.getApplicationContext();
         subscriptions = new ArrayList<>();
         executor = Executors.newSingleThreadExecutor();
         mainHandler = new Handler(Looper.getMainLooper());
         loadFromSettings();
     }
 
+    public static synchronized SubscriptionManager getInstance(Context context) {
+        if (instance == null) {
+            instance = new SubscriptionManager(context);
+        }
+        return instance;
+    }
+
+    /** 旧调用兼容；没有 Context 时无法构建内核配置。 */
     public static synchronized SubscriptionManager getInstance() {
         if (instance == null) {
-            instance = new SubscriptionManager();
+            throw new IllegalStateException("SubscriptionManager not initialized with Context");
         }
         return instance;
     }
@@ -152,29 +165,19 @@ public class SubscriptionManager {
 
             try {
                 SubscriptionParser.ParseResult result = SubscriptionParser.parseWithHeaders(sub.url, sub.type);
-                List<IpInfo> ips = result.ips;
-
-                if (result.trafficUsed > 0) sub.trafficUsed = result.trafficUsed;
-                if (result.trafficTotal > 0) sub.trafficTotal = result.trafficTotal;
-                if (result.expiry > 0) sub.expiry = result.expiry;
-
-                if (ips != null && !ips.isEmpty()) {
-                    for (IpInfo ip : ips) {
-                        ip.source = sub.name;
-                    }
-                    IpPoolManager.getInstance().addIps(ips);
-                    sub.nodeCount = IpPoolManager.getInstance().getIpsBySource(sub.name).size();
-                }
+                List<IpInfo> ips = applyParseResult(sub, result);
                 sub.markRefreshed();
                 sub.updateStatus = Subscription.STATUS_SUCCESS;
-                Log.d(TAG, "Refreshed subscription: " + sub.name + " got " + ips.size() + " IPs");
+                Log.d(TAG, "Refreshed subscription: " + sub.name + " got "
+                        + (ips == null ? 0 : ips.size()) + " nodes");
 
                 synchronized (lock) {
                     saveToSettings();
                 }
 
+                final List<IpInfo> resultIps = ips;
                 if (callback != null) {
-                    mainHandler.post(() -> callback.onResult(sub, ips));
+                    mainHandler.post(() -> callback.onResult(sub, resultIps));
                 }
             } catch (Exception e) {
                 sub.markError(e.getMessage());
@@ -191,6 +194,62 @@ public class SubscriptionManager {
         });
     }
 
+    /**
+     * 应用一次订阅解析结果：Clash 订阅会生成内置内核配置并重建节点列表；
+     * 其它类型仍按旧的 IP 池处理。
+     */
+    private List<IpInfo> applyParseResult(Subscription sub, SubscriptionParser.ParseResult result)
+            throws Exception {
+        if (result.trafficUsed > 0) sub.trafficUsed = result.trafficUsed;
+        if (result.trafficTotal > 0) sub.trafficTotal = result.trafficTotal;
+        if (result.expiry > 0) sub.expiry = result.expiry;
+
+        if (isClashYaml(sub.type, result.rawContent)) {
+            ClashProfileBuilder.Result profile = ClashProfileBuilder.build(
+                    result.rawContent,
+                    ClashProfileStore.MIXED_PORT,
+                    ClashProfileStore.CONTROLLER_PORT);
+            ClashProfileStore.save(appContext, profile, sub.name);
+            sub.nodeCount = profile.nodes.size();
+            Log.i(TAG, "Built Clash profile for " + sub.name + ": "
+                    + profile.nodes.size() + " nodes, removed " + profile.removed);
+            if (Settings.getIpSwitchEnabled()) {
+                IpSwitchController.getInstance().restart(appContext);
+            }
+            List<IpInfo> ips = new ArrayList<>(profile.nodes.size());
+            for (String node : profile.nodes) {
+                IpInfo info = new IpInfo("clash", 0, "clash");
+                info.name = node;
+                info.actualProtocol = "clash";
+                info.source = sub.name;
+                ips.add(info);
+            }
+            return ips;
+        }
+
+        List<IpInfo> ips = result.ips;
+        if (ips != null && !ips.isEmpty()) {
+            for (IpInfo ip : ips) {
+                ip.source = sub.name;
+            }
+            IpPoolManager.getInstance().addIps(ips);
+            sub.nodeCount = IpPoolManager.getInstance().getIpsBySource(sub.name).size();
+        }
+        return ips;
+    }
+
+    private static boolean isClashYaml(String type, String content) {
+        if (content == null || content.isEmpty()) return false;
+        if (type != null) {
+            String t = type.toLowerCase(java.util.Locale.US);
+            if (t.equals("clash") || t.equals("mixed") || t.equals("auto")) {
+                return content.contains("proxies:");
+            }
+        }
+        return content.contains("proxies:") && content.contains("- {") ||
+                content.contains("\nproxies:") || content.trim().startsWith("proxies:");
+    }
+
     public void refreshAllSubscriptions(RefreshCallback callback) {
         executor.execute(() -> {
             int totalNewIps = 0;
@@ -203,18 +262,15 @@ public class SubscriptionManager {
                     }
 
                     try {
-                        List<IpInfo> ips = SubscriptionParser.parse(sub.url, sub.type);
+                        SubscriptionParser.ParseResult result =
+                                SubscriptionParser.parseWithHeaders(sub.url, sub.type);
+                        List<IpInfo> ips = applyParseResult(sub, result);
                         if (ips != null && !ips.isEmpty()) {
-                            for (IpInfo ip : ips) {
-                                ip.source = sub.name;
-                            }
-                            IpPoolManager.getInstance().addIps(ips);
                             totalNewIps += ips.size();
-                            sub.nodeCount = ips.size();
                             sub.markRefreshed();
                             sub.updateStatus = Subscription.STATUS_SUCCESS;
                             Log.d(TAG, "Refreshed subscription: " + sub.name +
-                                    " got " + ips.size() + " IPs");
+                                    " got " + ips.size() + " nodes");
                         }
                     } catch (Exception e) {
                         sub.markError(e.getMessage());

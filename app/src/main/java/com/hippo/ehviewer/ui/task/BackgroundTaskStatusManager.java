@@ -512,6 +512,8 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.setQueued(false);
             taskInfo.setCompleted(true);
+            taskInfo.setFailed(false);
+            taskInfo.setRetrying(false);
             clearProgressThrottle(taskId);
 
             // 添加到已完成任务列表
@@ -532,6 +534,8 @@ public class BackgroundTaskStatusManager {
         if (taskInfo != null) {
             taskInfo.setQueued(false);
             taskInfo.setCancelled(true);
+            taskInfo.setFailed(false);
+            taskInfo.setRetrying(false);
             clearProgressThrottle(taskId);
 
             // 添加到已完成任务列表
@@ -551,6 +555,8 @@ public class BackgroundTaskStatusManager {
         BackgroundTaskInfo taskInfo = mActiveTasks.remove(taskId);
         if (taskInfo != null) {
             taskInfo.setQueued(false);
+            taskInfo.setFailed(true);
+            taskInfo.setRetrying(false);
             taskInfo.setErrorMessage(errorMessage);
             clearProgressThrottle(taskId);
 
@@ -562,6 +568,47 @@ public class BackgroundTaskStatusManager {
             notifyTaskStateChanged(taskId);
             notifyUniqueSlotFreed();
         }
+    }
+
+    /**
+     * 明确标记任务失败。与 {@link #markTaskError} 相同，但语义更清楚，
+     * 供新增的失败/重试状态使用。
+     */
+    public void markTaskFailed(@NonNull String taskId, @Nullable String errorMessage) {
+        markTaskError(taskId, errorMessage);
+    }
+
+    /**
+     * 标记任务正在自动重试（任务保留在活跃表，状态从 running 变为 retrying）。
+     *
+     * @param attempt 第几次重试（从 1 开始）
+     * @param max     最大重试次数，&lt;=0 表示未知
+     */
+    public void markTaskRetrying(@NonNull String taskId, int attempt, int max,
+                                 @Nullable String detail) {
+        BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+        taskInfo.setQueued(false);
+        taskInfo.setFailed(false);
+        taskInfo.setRetryInfo(attempt, max);
+        if (detail != null) {
+            taskInfo.setProgressDetail(detail);
+        }
+        savePersistedTasksAsync();
+        notifyTaskStateChanged(taskId);
+    }
+
+    /** 重试成功后恢复普通运行状态。 */
+    public void markTaskRetryFinished(@NonNull String taskId) {
+        BackgroundTaskInfo taskInfo = mActiveTasks.get(taskId);
+        if (taskInfo == null) {
+            return;
+        }
+        taskInfo.setRetrying(false);
+        savePersistedTasksAsync();
+        notifyTaskStateChanged(taskId);
     }
 
     private void evictCompletedIfOverLimit() {
@@ -948,6 +995,10 @@ public class BackgroundTaskStatusManager {
             object.put("isCompleted", info.isCompleted());
             object.put("isCancelled", info.isCancelled());
             object.put("isQueued", info.isQueued());
+            object.put("isFailed", info.isFailed());
+            object.put("isRetrying", info.isRetrying());
+            object.put("retryAttempt", info.getRetryAttempt());
+            object.put("retryMax", info.getRetryMax());
             object.put("errorMessage", info.getErrorMessage());
             object.put("taskClassName", info.getTaskClassName());
             object.put("taskPersistData", info.getTaskPersistData());
@@ -1023,6 +1074,11 @@ public class BackgroundTaskStatusManager {
             taskInfo.setCompleted(object.optBoolean("isCompleted", false));
             taskInfo.setCancelled(object.optBoolean("isCancelled", false));
             taskInfo.setQueued(object.optBoolean("isQueued", false));
+            taskInfo.setFailed(object.optBoolean("isFailed", false));
+            taskInfo.setRetryInfo(object.optInt("retryAttempt", 0), object.optInt("retryMax", 0));
+            if (object.optBoolean("isRetrying", false)) {
+                taskInfo.setRetrying(true);
+            }
             taskInfo.setErrorMessage(object.optString("errorMessage", null));
             String logFileName = object.optString("logFileName", null);
             if (logFileName != null) {

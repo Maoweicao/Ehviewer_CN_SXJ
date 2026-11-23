@@ -5,6 +5,7 @@ import android.util.Log
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
 import com.hippo.ehviewer.client.data.GalleryInfo
@@ -14,17 +15,21 @@ import com.hippo.ehviewer.download.DownloadManager
 import com.hippo.ehviewer.spider.SpiderInfo
 import com.hippo.ehviewer.spider.SpiderQueen
 import com.hippo.ehviewer.task.impl.BaseBackgroundTask
-import com.hippo.ehviewer.Settings
-import com.hippo.lib.yorozuya.IOUtils
 import com.hippo.unifile.UniFile
 import com.hippo.util.ExceptionUtils
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import okhttp3.OkHttpClient
-import java.io.IOException
 import kotlin.coroutines.coroutineContext
 
+/**
+ * 扫描下载目录，把本地已有文件但不在下载列表里的画廊恢复成下载任务。
+ *
+ * 恢复前统一走 [RestoreCandidateValidator] 的四步过滤：
+ * ① 目录映射占用 → ④ 下载管理器已有 → ② 递进包含 → ③ 元数据齐全（必要时联网重建）。
+ * 只有全部通过的候选才会进入下载队列，避免恢复出重复/被包含的副本。
+ */
 class RestoreDownloadTask(
     context: Context
 ) : BaseBackgroundTask(context) {
@@ -70,78 +75,105 @@ class RestoreDownloadTask(
             val total = files.size
             appendTaskLog("扫描到 $total 个文件夹")
 
-            val restoreItemList = mutableListOf<RestoreItem>()
-            var scannedCount = 0
-
+            // ── 阶段一：解析目录，构建候选 ──
+            val candidates = ArrayList<RestoreCandidate>()
+            var scanned = 0
             for (file in files) {
-                if (isCancelled) {
-                    throw CancellationException("任务已取消")
-                }
-
-                val restoreItem = getRestoreItem(file)
-                if (restoreItem != null) {
-                    restoreItemList.add(restoreItem)
-                }
-                scannedCount++
-                if (scannedCount % 50 == 0) {
-                    updateProgress(scannedCount, total, "已扫描 $scannedCount/$total")
-                    appendTaskLog("已扫描 $scannedCount/$total，发现 ${restoreItemList.size} 个可恢复项")
+                if (isCancelled) throw CancellationException("任务已取消")
+                val candidate = buildCandidate(file)
+                if (candidate != null) candidates.add(candidate)
+                scanned++
+                if (scanned % 50 == 0) {
+                    updateProgress(scanned, total * 3, "已扫描 $scanned/$total")
+                    appendTaskLog("已扫描 $scanned/$total，识别出 ${candidates.size} 个画廊目录")
                 }
             }
+            appendTaskLog("扫描完成：$total 个文件夹中识别出 ${candidates.size} 个画廊目录")
 
-            appendTaskLog("扫描完成，发现 ${restoreItemList.size} 个可恢复的下载项")
-
-            if (restoreItemList.isEmpty()) {
+            if (candidates.isEmpty()) {
                 notifyCompleted()
                 return Result.success(Unit)
             }
 
-            updateProgress(-1, "正在获取画廊信息...")
-            appendTaskLog("正在从API获取 ${restoreItemList.size} 个画廊的详细信息...")
+            // ── 阶段二：四步过滤 ──
+            updateProgress(total, total * 3, "校验 ${candidates.size} 个候选…")
+            appendTaskLog("开始校验 ${candidates.size} 个候选…")
+            val validator = RestoreCandidateValidator(
+                context,
+                downloadManager,
+                httpClient,
+                log = { appendTaskLog(it) },
+                progress = { current, total, detail -> updateProgress(current, total, detail) }
+            )
+            val validation = validator.validate(candidates)
+            logRejections(validation.rejected)
 
+            val accepted = validation.accepted
+            appendTaskLog("校验完成：可恢复 ${accepted.size} 个，跳过 ${validation.rejected.size} 个")
+
+            if (accepted.isEmpty()) {
+                notifyCompleted()
+                return Result.success(Unit)
+            }
+
+            // ── 阶段三：补全画廊信息（只处理通过的候选） ──
+            updateProgress(total * 2, total * 3, "正在获取画廊信息…")
+            appendTaskLog("正在从 API 补全 ${accepted.size} 个画廊的信息…")
             coroutineContext[Job]?.ensureActive()
 
-            val galleryInfoList = mutableListOf<GalleryInfo>()
-            galleryInfoList.addAll(restoreItemList)
+            val items = ArrayList<RestoreItem>(accepted.size)
+            for (candidate in accepted) {
+                val item = candidate.payload as? RestoreItem ?: RestoreItem().apply {
+                    gid = candidate.gid
+                    token = candidate.token
+                    dirname = candidate.dirname
+                }
+                item.gid = candidate.gid
+                item.token = candidate.token ?: item.token
+                item.pages = candidate.pages
+                item.candidate = candidate
+                items.add(item)
+            }
 
             try {
-                // 分批容错：单批失败只记日志，不丢掉已经补上的信息
                 EhEngine.fillGalleryListByApiBestEffort(
                     null,
                     httpClient,
-                    ArrayList(galleryInfoList),
+                    ArrayList<GalleryInfo>(items),
                     EhUrl.getReferer()
                 )
             } catch (e: Throwable) {
+                ExceptionUtils.throwIfFatal(e)
                 Log.e(TAG, "Failed to fill gallery list", e)
                 appendTaskLog("获取画廊信息失败: ${e.message}")
-                notifyError(e)
-                return Result.failure(e)
             }
 
+            // ── 阶段四：写入下载队列 ──
             var successCount = 0
             var failCount = 0
-            val resultTotal = restoreItemList.size
-
-            for ((index, item) in restoreItemList.withIndex()) {
-                if (isCancelled) {
-                    throw CancellationException("任务已取消")
+            for ((index, item) in items.withIndex()) {
+                if (isCancelled) throw CancellationException("任务已取消")
+                val candidate = item.candidate
+                if (candidate == null) {
+                    failCount++
+                    continue
                 }
-
                 if (item.title.isNullOrEmpty()) {
-                    // 画廊已下架或接口没返回标题时，用目录名兜底，避免整个项目被丢弃
-                    item.title = item.dirname?.takeIf { it.isNotEmpty() }
+                    item.title = candidate.title?.takeIf { it.isNotEmpty() }
+                        ?: candidate.dirname.takeIf { it.isNotEmpty() }
                         ?: item.gid.toString()
                 }
-                try {
-                    downloadManager.addDownload(item, null)
-                    EhDB.putDownloadDirname(item.gid, item.dirname)
-                    successCount++
-                } catch (e: Exception) {
+
+                if (!RestoreSupport.commit(downloadManager, item, candidate) { appendTaskLog(it) }) {
                     failCount++
-                    appendTaskLog("添加下载失败: ${item.title} (GID: ${item.gid}): ${e.message}")
+                } else {
+                    successCount++
                 }
-                updateProgress(index + 1, resultTotal, "已处理 ${index + 1}/$resultTotal")
+
+                updateProgress(
+                    total * 2 + (index + 1), total * 3,
+                    "已处理 ${index + 1}/${items.size}"
+                )
             }
 
             appendTaskLog("恢复完成: 成功 $successCount，失败 $failCount")
@@ -153,11 +185,38 @@ class RestoreDownloadTask(
             notifyCancelled()
             Result.failure(e)
         } catch (e: Throwable) {
+            ExceptionUtils.throwIfFatal(e)
             Log.e(TAG, "Restore failed", e)
             appendTaskLog("任务失败: ${e.message}")
             notifyError(e)
             Result.failure(e)
         }
+    }
+
+    private fun logRejections(rejected: List<RestoreRejection>) {
+        if (rejected.isEmpty()) return
+        val byReason = rejected.groupBy { it.reason }
+        for ((reason, list) in byReason) {
+            appendTaskLog("跳过 ${list.size} 项：${describeReason(reason)}")
+            list.take(5).forEach { rejection ->
+                appendTaskLog("  · ${rejection.candidate.dirname}（GID: ${rejection.candidate.gid}）" +
+                    (rejection.detail?.let { " — $it" } ?: ""))
+            }
+            if (list.size > 5) {
+                appendTaskLog("  · …另有 ${list.size - 5} 项，详见任务日志")
+            }
+        }
+    }
+
+    private fun describeReason(reason: RestoreRejectReason): String = when (reason) {
+        RestoreRejectReason.DIR_CLAIMED_BY_OTHER -> "目录已被其他画廊占用"
+        RestoreRejectReason.GID_MAPPED_ELSEWHERE -> "该画廊已有其他目录"
+        RestoreRejectReason.ALREADY_DOWNLOADING -> "已在下载队列"
+        RestoreRejectReason.DUPLICATE_OF_OTHER -> "同一画廊的重复目录"
+        RestoreRejectReason.INCLUDED_BY_OTHER -> "被更完整的画廊递进包含"
+        RestoreRejectReason.NO_TOKEN -> "缺少 token，无法联网修复元数据"
+        RestoreRejectReason.METADATA_REPAIR_FAILED -> "联网修复元数据失败"
+        RestoreRejectReason.METADATA_INCOMPLETE -> "元数据仍不齐全"
     }
 
     override fun isPausable(): Boolean = false
@@ -168,23 +227,38 @@ class RestoreDownloadTask(
     }
 
     /**
-     * 从下载子目录取出 gid 和 token。
-     * 先读文本 .ehviewer，失败再读同一文件的 CBOR，仍失败则读 ComicInfo.xml。
-     * 目录无效、三种来源都没有 gid/token，或该画廊已在下载列表中时返回 null。
+     * 解析一个下载子目录，得到 gid / token / pToken 集。
+     * 依次尝试 .ehviewer（文本 + CBOR）、ComicInfo.xml，最后从目录名前缀取 gid。
      */
-    private fun getRestoreItem(file: UniFile): RestoreItem? {
+    private fun buildCandidate(file: UniFile): RestoreCandidate? {
         if (!file.isDirectory) return null
+        val dirname = file.name ?: return null
+        if (dirname.startsWith(".") || dirname == "thumb") return null
 
         var gid = -1L
         var token: String? = null
-        val siFile = file.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
-        if (siFile != null) {
-            val spiderInfo = SpiderInfo.readHeader(siFile) ?: SpiderInfo.readCborHeader(siFile)
-            if (spiderInfo != null && spiderInfo.gid >= 0 && !spiderInfo.token.isNullOrEmpty()) {
-                gid = spiderInfo.gid
-                token = spiderInfo.token
+        var pages = 0
+        var hashes: Set<String> = emptySet()
+
+        val meta = EhviewerMetaParser.parse(file)
+        if (meta != null) {
+            gid = meta.gid
+            token = meta.token
+            pages = meta.pages
+            hashes = meta.hashes.toHashSet()
+        } else {
+            val siFile = file.findFile(SpiderQueen.SPIDER_INFO_FILENAME)
+            if (siFile != null) {
+                val spiderInfo = SpiderInfo.read(siFile) ?: SpiderInfo.readCborHeader(siFile)
+                if (spiderInfo != null && spiderInfo.gid >= 0 && !spiderInfo.token.isNullOrEmpty()) {
+                    gid = spiderInfo.gid
+                    token = spiderInfo.token
+                    pages = spiderInfo.pages
+                    hashes = SpiderTokenUtils.toHashSet(spiderInfo)
+                }
             }
         }
+
         if (gid < 0L || token.isNullOrEmpty()) {
             val comicInfo = readComicInfo(file)
             if (comicInfo != null && comicInfo.gid >= 0 && !comicInfo.token.isNullOrEmpty()) {
@@ -192,22 +266,31 @@ class RestoreDownloadTask(
                 token = comicInfo.token
             }
         }
-        if (gid < 0L || token.isNullOrEmpty()) {
-            return null
+
+        if (gid < 0L) {
+            gid = RestoreSupport.parseGidFromDirName(dirname) ?: return null
         }
-        if (downloadManager.containDownloadInfo(gid)) {
-            return null
-        }
-        return RestoreItem().apply {
+
+        val candidate = RestoreCandidate(
+            gid = gid,
+            dirname = dirname,
+            dir = file,
+            token = token,
+            pages = pages,
+            hashes = hashes,
+            fileCount = RestoreSupport.countImageFiles(file),
+            modifiedAt = file.lastModified()
+        )
+        candidate.payload = RestoreItem().apply {
             this.gid = gid
             this.token = token
-            this.dirname = file.name
+            this.dirname = dirname
         }
+        return candidate
     }
 
     /**
      * 读取目录中的 ComicInfo.xml，并从 Web 地址解析 gid 和 token。
-     * 文件不存在、超过大小上限或地址无法解析时返回 null。
      */
     private fun readComicInfo(dir: UniFile): GalleryDetailUrlParser.Result? {
         val comicFile = dir.findFile(ComicInfoParser.FILENAME) ?: return null
@@ -221,5 +304,6 @@ class RestoreDownloadTask(
 
     private class RestoreItem : GalleryInfo() {
         var dirname: String? = null
+        var candidate: RestoreCandidate? = null
     }
 }

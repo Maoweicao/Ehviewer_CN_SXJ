@@ -28,14 +28,18 @@ import java.util.UUID;
  */
 public class RelayTask {
 
-    // 任务状态
+    // 任务状态（§5.17.17）
+    /** 池内可认领（派生态，通常不落库，释放后会写回任务） */
+    public static final String STATUS_OFFERED = "offered";
     public static final String STATUS_PENDING = "pending";
     public static final String STATUS_ACCEPTED = "accepted";
     public static final String STATUS_DOWNLOADING = "downloading";
+    public static final String STATUS_PARTIAL = "partial";
     public static final String STATUS_COMPLETED = "completed";
     public static final String STATUS_RETURNED = "returned";
     public static final String STATUS_REJECTED = "rejected";
     public static final String STATUS_CANCELLED = "cancelled";
+    public static final String STATUS_EXPIRED = "expired";
     public static final String STATUS_FAILED = "failed";
 
     // 任务方向
@@ -94,6 +98,19 @@ public class RelayTask {
 
     // 错误信息
     private String errorMessage;
+
+    // ===== §5.17 v2：租约与页级进度 =====
+    private String leaseDeviceId;
+    private String leaseDeviceName;
+    private long leaseExpiresAt;
+    private boolean missingOnly = true;
+    private String basePagesBitmap;
+    private String pagesBitmap;
+    private int missingCount = -1;
+    private int receivedPages;
+    private int failedPages;
+    /** 次数统计：本次租约内成功回传的页数（用于 receivedPages 口径）。 */
+    private boolean poolClaim;
 
     public RelayTask() {
         this.taskId = "relay-" + UUID.randomUUID().toString();
@@ -402,10 +419,106 @@ public class RelayTask {
         this.errorMessage = errorMessage;
     }
 
+    public String getLeaseDeviceId() {
+        return leaseDeviceId;
+    }
+
+    public void setLeaseDeviceId(String leaseDeviceId) {
+        this.leaseDeviceId = leaseDeviceId;
+    }
+
+    public String getLeaseDeviceName() {
+        return leaseDeviceName;
+    }
+
+    public void setLeaseDeviceName(String leaseDeviceName) {
+        this.leaseDeviceName = leaseDeviceName;
+    }
+
+    public long getLeaseExpiresAt() {
+        return leaseExpiresAt;
+    }
+
+    public void setLeaseExpiresAt(long leaseExpiresAt) {
+        this.leaseExpiresAt = leaseExpiresAt;
+    }
+
+    public boolean hasActiveLease() {
+        return leaseExpiresAt > System.currentTimeMillis();
+    }
+
+    public boolean isMissingOnly() {
+        return missingOnly;
+    }
+
+    public void setMissingOnly(boolean missingOnly) {
+        this.missingOnly = missingOnly;
+    }
+
+    public String getBasePagesBitmap() {
+        return basePagesBitmap;
+    }
+
+    public void setBasePagesBitmap(String basePagesBitmap) {
+        this.basePagesBitmap = basePagesBitmap;
+    }
+
+    public String getPagesBitmap() {
+        return pagesBitmap;
+    }
+
+    public void setPagesBitmap(String pagesBitmap) {
+        this.pagesBitmap = pagesBitmap;
+    }
+
+    public int getMissingCount() {
+        return missingCount;
+    }
+
+    public void setMissingCount(int missingCount) {
+        this.missingCount = missingCount;
+    }
+
+    public int getReceivedPages() {
+        return receivedPages;
+    }
+
+    public void setReceivedPages(int receivedPages) {
+        this.receivedPages = receivedPages;
+    }
+
+    public int getFailedPages() {
+        return failedPages;
+    }
+
+    public void setFailedPages(int failedPages) {
+        this.failedPages = failedPages;
+    }
+
+    public boolean isPoolClaim() {
+        return poolClaim;
+    }
+
+    public void setPoolClaim(boolean poolClaim) {
+        this.poolClaim = poolClaim;
+    }
+
     // ==================== 状态检查方法 ====================
 
     public boolean isPending() {
         return STATUS_PENDING.equals(status);
+    }
+
+    public boolean isOffered() {
+        return STATUS_OFFERED.equals(status);
+    }
+
+    public boolean isPartial() {
+        return STATUS_PARTIAL.equals(status);
+    }
+
+    public boolean isExpired() {
+        return STATUS_EXPIRED.equals(status);
     }
 
     public boolean isAccepted() {
@@ -436,6 +549,11 @@ public class RelayTask {
         return STATUS_FAILED.equals(status);
     }
 
+    /** 是否处于可写回传的活跃状态（§5.17.17）。 */
+    public boolean isReturnWritable() {
+        return isAccepted() || isDownloading() || isPartial();
+    }
+
     public boolean isIncoming() {
         return DIRECTION_INCOMING.equals(direction);
     }
@@ -448,14 +566,14 @@ public class RelayTask {
      * 检查任务是否处于终态（不可再变更）
      */
     public boolean isTerminal() {
-        return isReturned() || isRejected() || isCancelled() || isFailed();
+        return isReturned() || isRejected() || isCancelled() || isFailed() || isExpired();
     }
 
     /**
      * 检查任务是否可以取消
      */
     public boolean isCancellable() {
-        return isPending() || isAccepted() || isDownloading();
+        return isPending() || isAccepted() || isDownloading() || isPartial();
     }
 
     /**
@@ -471,13 +589,16 @@ public class RelayTask {
      */
     public String getStatusDisplayName() {
         switch (status) {
+            case STATUS_OFFERED: return "待认领";
             case STATUS_PENDING: return "等待接受";
             case STATUS_ACCEPTED: return "已接受";
             case STATUS_DOWNLOADING: return "下载中";
+            case STATUS_PARTIAL: return "部分完成";
             case STATUS_COMPLETED: return "已完成";
             case STATUS_RETURNED: return "已取回";
             case STATUS_REJECTED: return "已拒绝";
             case STATUS_CANCELLED: return "已取消";
+            case STATUS_EXPIRED: return "租约过期";
             case STATUS_FAILED: return "失败";
             default: return status;
         }

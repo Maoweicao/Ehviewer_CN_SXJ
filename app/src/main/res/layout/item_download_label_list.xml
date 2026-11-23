@@ -7,17 +7,20 @@
 
     <TextView
         android:id="@+id/text1"
-        android:layout_width="wrap_content"
+        android:layout_width="0dp"
         android:layout_height="wrap_content"
+        android:layout_weight="1"
         android:textAppearance="?attr/textAppearanceListItemSmall"
         android:gravity="center_vertical"
+        android:maxLines="1"
+        android:ellipsize="end"
         android:paddingStart="?attr/listPreferredItemPaddingLeft"
         android:paddingEnd="?attr/listPreferredItemPaddingRight"
         android:minHeight="?attr/listPreferredItemHeightSmall" />
 
     <TextView
         android:id="@+id/text2"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textAppearance="?attr/textAppearanceListItemSmall"
         android:gravity="center_vertical|end"

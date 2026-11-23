@@ -385,10 +385,15 @@ public class TransferHttpServer {
             boolean auxLanBypass = uri.startsWith("/api/v1/aux-download")
                     && Settings.isAuxDownloadTrustLan()
                     && AuthManager.isLocalNetwork(session.getRemoteIpAddress());
+            // §5.17.1 允许匿名局域网认领（可由设置关闭）
+            boolean relayLanBypass = uri.startsWith("/api/v1/relay")
+                    && Settings.isRelayAnonymousLanClaim()
+                    && AuthManager.isLocalNetwork(session.getRemoteIpAddress());
             // §5.30 已配对设备使用 presharedKey 做 HMAC 签名，免传输服务 Token
             boolean peerSyncBypass = LabSyncAuth.isSyncPath(uri)
                     && LabSyncAuth.verify(context, session);
-            if (!auxLanBypass && !peerSyncBypass && !AuthManager.isWhitelisted(uri) && !authManager.authenticate(session)) {
+            if (!auxLanBypass && !relayLanBypass && !peerSyncBypass
+                    && !AuthManager.isWhitelisted(uri) && !authManager.authenticate(session)) {
                 return ResponseBuilder.unauthorized();
             }
             

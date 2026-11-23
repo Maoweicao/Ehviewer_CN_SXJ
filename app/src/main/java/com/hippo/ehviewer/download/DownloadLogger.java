@@ -6,6 +6,7 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.Settings;
 import com.hippo.ehviewer.client.EhUtils;
 import com.hippo.ehviewer.dao.DownloadInfo;
@@ -61,6 +62,12 @@ public class DownloadLogger {
         }
         return sInstance;
     }
+
+    /** 未初始化时返回 null，供高频日志调用点安全使用。 */
+    @Nullable
+    public static DownloadLogger peek() {
+        return sInstance;
+    }
     
     private DownloadLogger(@NonNull Context context) {
         this(context, false);
@@ -87,6 +94,69 @@ public class DownloadLogger {
     }
     
     /**
+     * 记录单页下载的链接级日志，供事后分析失败/限流/切节点。
+     * 一行一个事件，键值对格式，URL 不带空格，可直接用脚本解析。
+     */
+    public void logPageEvent(@Nullable String gid, int pageIndex, int totalPages, int attempt,
+                             @NonNull String phase, @Nullable String result,
+                             @Nullable String pageUrl, @Nullable String imageUrl,
+                             int httpCode, long bytes, long elapsedMs,
+                             @Nullable String node, @Nullable String detail) {
+        if (!mIsLoggingEnabled) return;
+
+        StringBuilder sb = new StringBuilder(320);
+        sb.append("phase=").append(phase);
+        if (result != null && !result.isEmpty()) {
+            sb.append(" result=").append(result);
+        }
+        if (pageIndex >= 0) {
+            sb.append(" page=").append(pageIndex + 1);
+            if (totalPages > 0) sb.append('/').append(totalPages);
+        }
+        if (attempt >= 0) {
+            sb.append(" try=").append(attempt);
+        }
+        if (httpCode > 0) {
+            sb.append(" http=").append(httpCode);
+        }
+        if (bytes >= 0) {
+            sb.append(" bytes=").append(bytes);
+        }
+        if (elapsedMs >= 0) {
+            sb.append(" ms=").append(elapsedMs);
+        }
+        if (node != null && !node.isEmpty()) {
+            sb.append(" node=\"").append(node).append('"');
+        }
+        if (pageUrl != null && !pageUrl.isEmpty()) {
+            sb.append(" pageUrl=").append(pageUrl);
+        }
+        if (imageUrl != null && !imageUrl.isEmpty()) {
+            sb.append(" imageUrl=").append(imageUrl);
+        }
+        if (detail != null && !detail.isEmpty()) {
+            String oneLine = detail.replace('\r', ' ').replace('\n', ' ');
+            if (oneLine.length() > 400) oneLine = oneLine.substring(0, 400) + "...";
+            sb.append(" detail=\"").append(oneLine).append('"');
+        }
+        log(LogLevel.INFO, "DownloadPage", sb.toString(), gid, null);
+    }
+
+    /** 记录节点切换，便于把下载失败与换 IP 对齐。 */
+    public void logSwitchEvent(@Nullable String gid, @Nullable String from, @Nullable String to,
+                               @Nullable String reason, int generation, long elapsedMs) {
+        if (!mIsLoggingEnabled) return;
+        StringBuilder sb = new StringBuilder(160);
+        sb.append("phase=SWITCH");
+        sb.append(" from=\"").append(from == null ? "" : from).append('"');
+        sb.append(" to=\"").append(to == null ? "" : to).append('"');
+        sb.append(" reason=").append(reason == null ? "unknown" : reason);
+        sb.append(" generation=").append(generation);
+        if (elapsedMs >= 0) sb.append(" ms=").append(elapsedMs);
+        log(LogLevel.INFO, "NodeSwitch", sb.toString(), gid, null);
+    }
+
+    /**
      * 记录下载开始日志（包含完整下载信息）
      */
     public void logDownloadStart(@NonNull DownloadInfo info) {
@@ -96,16 +166,17 @@ public class DownloadLogger {
         String ratingStr = String.format(Locale.getDefault(), "%.1f", info.rating);
         String titleSuitable = EhUtils.getSuitableTitle(info);
         String message = String.format(Locale.getDefault(),
-            "下载开始 | GID:%d | Token:%s | 标题:%s | 标题(JPN):%s | 分类:%s | 上传者:%s | 评分:%s | 页数:%d | 发布时间:%s | 标签:%s | 缩略图:%s",
+            "下载开始 | GID:%d | Token:%s | 标题:%s | 标题(JPN):%s | 分类:%s | 上传者:%s | 评分:%s | 页数:%s | 发布时间:%s | 标签:%s | 缩略图:%s | 节点:%s",
             info.gid, info.token, titleSuitable, 
             info.titleJpn != null ? info.titleJpn : "N/A",
             categoryStr != null ? categoryStr : "N/A",
             info.uploader != null ? info.uploader : "N/A",
             ratingStr,
-            info.pages,
+            info.pages > 0 ? String.valueOf(info.pages) : "待定",
             info.posted != null ? info.posted : "N/A",
             info.label != null ? info.label : "默认",
-            info.thumb != null ? info.thumb : "N/A");
+            info.thumb != null ? info.thumb : "N/A",
+            currentNodeLabel() != null ? currentNodeLabel() : "N/A");
         log(LogLevel.INFO, "DownloadStart", message, String.valueOf(info.gid), titleSuitable);
     }
 
@@ -349,10 +420,24 @@ public class DownloadLogger {
     }
 
     private String buildLogFileName(@NonNull LogEntry entry) {
-        String gid = entry.gid == null ? "session" : entry.gid.replaceAll("[^0-9]", "");
-        if (gid.isEmpty()) gid = "session";
-        String minute = new SimpleDateFormat("yyyyMMddHHmm", Locale.getDefault()).format(new Date(entry.timestamp));
-        return gid + "_" + minute + LOG_FILE_EXTENSION;
+        String gid = entry.gid == null ? null : entry.gid.replaceAll("[^0-9]", "");
+        if (gid == null || gid.isEmpty()) {
+            // 没有 GID 的事件（后台任务、切节点）按天汇总。
+            String day = new SimpleDateFormat("yyyyMMdd", Locale.getDefault())
+                    .format(new Date(entry.timestamp));
+            return "session_" + day + LOG_FILE_EXTENSION;
+        }
+        // 同一个画廊始终写同一个文件，避免跨分钟/跨小时被拆成多个文件。
+        return gid + LOG_FILE_EXTENSION;
+    }
+
+    @Nullable
+    private static String currentNodeLabel() {
+        try {
+            return com.hippo.ehviewer.lab.ip.IpSwitchController.getInstance().getCurrentNodeName();
+        } catch (Throwable t) {
+            return null;
+        }
     }
     
     /**
@@ -360,6 +445,12 @@ public class DownloadLogger {
      */
     @Nullable
     public File getLogDirectory() {
+        // 固定放在 /sdcard/EhViewer/logs/download，方便用文件管理器或 USB 取出。
+        try {
+            File dir = AppConfig.getDirInExternalAppDir("logs/download");
+            if (dir != null) return dir;
+        } catch (Throwable ignored) {
+        }
         UniFile downloadLocation = Settings.getDownloadLocation();
         if (downloadLocation != null) {
             String path = downloadLocation.getUri().getPath();
@@ -372,6 +463,53 @@ public class DownloadLogger {
         return null;
     }
     
+    /**
+     * 把全部下载链接日志打包成 ZIP，便于导出到电脑分析。
+     */
+    @Nullable
+    public File exportLogsZip() {
+        File dir = getLogDirectory();
+        if (dir == null) return null;
+        File[] files = getLogFiles();
+        if (files.length == 0) return null;
+
+        String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                .format(new Date());
+        File outDir = AppConfig.getDirInExternalAppDir("logs");
+        if (outDir == null) outDir = dir;
+        File zip = new File(outDir, "download-logs-" + stamp + ".zip");
+
+        try (java.util.zip.ZipOutputStream zos =
+                     new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(zip))) {
+            byte[] buffer = new byte[8192];
+            for (File file : files) {
+                if (file == null || !file.isFile()) continue;
+                zos.putNextEntry(new java.util.zip.ZipEntry(file.getName()));
+                try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
+                    int len;
+                    while ((len = in.read(buffer)) > 0) {
+                        zos.write(buffer, 0, len);
+                    }
+                }
+                zos.closeEntry();
+            }
+            zos.putNextEntry(new java.util.zip.ZipEntry("README.txt"));
+            String readme = "EhViewer 下载链接日志\n"
+                    + "每行一个事件，键值对格式：phase=... page=... http=... bytes=... ms=... node=... pageUrl=... imageUrl=...\n"
+                    + "phase 含义：START 开始 / PAGE_REQ 取页面 / PAGE_OK 页面成功 / PAGE_ERR 页面失败 / PAGE_509 封禁\n"
+                    + "IMG_REQ 图片请求 / IMG_RESP 图片响应 / IMG_OK 图片成功 / IMG_ERR 图片失败 / IMG_WARN 大小异常\n"
+                    + "SWITCH 换节点 / SWITCH_RETRY 换节点后重试 / FAIL 该页最终失败 / LAN_OK 局域网命中 / SKIP 跳过\n";
+            zos.write(readme.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            zos.closeEntry();
+        } catch (IOException e) {
+            Log.e(TAG, "导出下载日志失败", e);
+            //noinspection ResultOfMethodCallIgnored
+            zip.delete();
+            return null;
+        }
+        return zip;
+    }
+
     /**
      * 获取所有日志文件
      */

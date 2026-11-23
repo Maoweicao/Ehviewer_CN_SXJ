@@ -39,14 +39,31 @@ public class IpPoolManager {
     private void loadFromSettings() {
         synchronized (lock) {
             ipPool.clear();
-            String json = Settings.getIpSubscriptionList();
+            String json = Settings.getIpPoolList();
+            if (json == null || json.equals("[]")) {
+                // 兼容旧版本：旧版把节点缓存写在 ip_subscription_list 里。
+                String legacy = Settings.getIpSubscriptionList();
+                if (legacy != null && !legacy.equals("[]")) {
+                    JSONArray old = null;
+                    try {
+                        old = JSONArray.parseArray(legacy);
+                    } catch (Exception ignored) {
+                    }
+                    if (old != null && old.size() > 0 && !old.getJSONObject(0).containsKey("url")) {
+                        Settings.putIpPoolList(legacy);
+                        Settings.putIpSubscriptionList("[]");
+                        json = legacy;
+                    }
+                }
+            }
             try {
                 JSONArray array = JSONArray.parseArray(json);
                 if (array != null) {
                     for (int i = 0; i < array.size(); i++) {
                         JSONObject obj = array.getJSONObject(i);
                         IpInfo info = IpInfo.fromJson(obj);
-                        if (info != null && info.ip != null && !info.ip.isEmpty()) {
+                        if (info != null && info.ip != null && !info.ip.isEmpty()
+                                && !ipPool.contains(info)) {
                             ipPool.add(info);
                         }
                     }
@@ -63,7 +80,24 @@ public class IpPoolManager {
             for (IpInfo info : ipPool) {
                 array.add(info.toJson());
             }
-            Settings.putIpSubscriptionList(array.toJSONString());
+            Settings.putIpPoolList(array.toJSONString());
+        }
+    }
+
+    /** 用新的节点列表替换缓存（订阅刷新后调用）。 */
+    public void replaceAll(List<IpInfo> ips) {
+        synchronized (lock) {
+            ipPool.clear();
+            if (ips != null) {
+                java.util.LinkedHashMap<String, IpInfo> unique = new java.util.LinkedHashMap<>();
+                for (IpInfo info : ips) {
+                    if (info == null) continue;
+                    unique.put(info.uniqueKey(), info);
+                }
+                ipPool.addAll(unique.values());
+            }
+            currentIndex = 0;
+            saveToSettings();
         }
     }
 
@@ -107,7 +141,11 @@ public class IpPoolManager {
 
     public List<IpInfo> getAllIps() {
         synchronized (lock) {
-            return new ArrayList<>(ipPool);
+            java.util.LinkedHashMap<String, IpInfo> unique = new java.util.LinkedHashMap<>();
+            for (IpInfo info : ipPool) {
+                unique.put(info.uniqueKey(), info);
+            }
+            return new ArrayList<>(unique.values());
         }
     }
 
@@ -272,6 +310,24 @@ public class IpPoolManager {
             saveToSettings();
             Log.d(TAG, "Marked IP as blocked: " + ip.getDisplayName() +
                     " for " + blockDuration + " minutes");
+        }
+    }
+
+    /** 按节点名标记风控冷却；0 分钟表示立即解封。 */
+    public void markNodeBlocked(String name, int minutes) {
+        synchronized (lock) {
+            for (IpInfo info : ipPool) {
+                if (name != null && name.equals(info.name)) {
+                    if (minutes <= 0) {
+                        info.resetStatus();
+                    } else {
+                        info.markBlocked(minutes);
+                    }
+                    saveToSettings();
+                    Log.d(TAG, "Node " + name + " cooldown " + minutes + " min");
+                    return;
+                }
+            }
         }
     }
 

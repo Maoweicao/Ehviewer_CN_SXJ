@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <item
+        android:id="@+id/action_lab_sync"
+        android:title="@string/lab_sync_title"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_check_local"
+        android:title="@string/multi_device_check_local"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_stop_backfill"
+        android:title="@string/multi_device_stop_backfill"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/action_clear_peers"
+        android:title="@string/multi_device_clear_all"
+        app:showAsAction="never" />
+
+</menu>

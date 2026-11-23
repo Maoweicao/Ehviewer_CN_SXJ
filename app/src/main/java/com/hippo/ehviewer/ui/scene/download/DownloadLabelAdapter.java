@@ -19,9 +19,29 @@ public class DownloadLabelAdapter extends ArrayAdapter<DownloadLabelItem> {
 
     private List<DownloadLabelItem> mData;
 
+    private int mSelectedPosition = -1;
+    private int mAccentColor = 0;
+    private int mDefaultColor = 0;
+
     public DownloadLabelAdapter(@NonNull Context context, int resource, @NonNull List<DownloadLabelItem> objects) {
         super(context, resource, objects);
         this.mData = objects;
+    }
+
+    /**
+     * 高亮当前生效的分类（书签分类范围）。
+     *
+     * @param position    列表位置，-1 表示不高亮
+     * @param accentColor 强调色
+     */
+    public void setSelection(int position, int accentColor) {
+        mSelectedPosition = position;
+        mAccentColor = accentColor;
+        notifyDataSetChanged();
+    }
+
+    public void clearSelection() {
+        setSelection(-1, 0);
     }
 
     /**
@@ -29,9 +49,12 @@ public class DownloadLabelAdapter extends ArrayAdapter<DownloadLabelItem> {
      * @param newData 新的标签列表
      */
     public void updateData(List<DownloadLabelItem> newData) {
-        this.mData = newData;
+        // newData 可能与适配器内部的列表是同一个对象（调用方复用了字段列表），
+        // 先复制再 clear，否则会把自己清空成空列表。
+        List<DownloadLabelItem> copy = new java.util.ArrayList<>(newData);
+        this.mData = copy;
         clear();
-        addAll(newData);
+        addAll(copy);
         notifyDataSetChanged();
     }
 
@@ -54,8 +77,14 @@ public class DownloadLabelAdapter extends ArrayAdapter<DownloadLabelItem> {
             viewHolder = (ViewHolder) view.getTag();
         }
 
+        if (mDefaultColor == 0) {
+            mDefaultColor = viewHolder.textView1.getCurrentTextColor();
+        }
+        boolean selected = position == mSelectedPosition;
         viewHolder.textView1.setText(item.label);
         viewHolder.textView2.setText(item.count());
+        viewHolder.textView1.setTypeface(null, selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
+        viewHolder.textView1.setTextColor(selected ? mAccentColor : mDefaultColor);
 
         return view;
     }

@@ -38,7 +38,6 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -54,6 +53,7 @@ import com.hippo.ehviewer.client.wifi.WiFiDownloadMigrationHelper;
 import com.hippo.ehviewer.dao.DownloadInfo;
 import com.hippo.ehviewer.dao.QuickSearch;
 import com.hippo.ehviewer.download.DownloadManager;
+import com.hippo.ehviewer.ui.EhActivity;
 import com.hippo.unifile.UniFile;
 import com.hippo.util.PermissionRequester;
 
@@ -70,7 +70,20 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-public class WiFiClientActivity extends AppCompatActivity {
+public class WiFiClientActivity extends EhActivity {
+
+    @Override
+    protected int getThemeResId(int theme) {
+        switch (theme) {
+            case com.hippo.ehviewer.Settings.THEME_DARK:
+                return R.style.AppTheme_Toolbar_Dark;
+            case com.hippo.ehviewer.Settings.THEME_BLACK:
+                return R.style.AppTheme_Toolbar_Black;
+            case com.hippo.ehviewer.Settings.THEME_LIGHT:
+            default:
+                return R.style.AppTheme_Toolbar;
+        }
+    }
 
     private final int pCode = 88888;
 

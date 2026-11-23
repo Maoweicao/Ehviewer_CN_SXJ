@@ -28,6 +28,7 @@ import com.hippo.ehviewer.download.DownloadManager;
 import com.hippo.ehviewer.transfer.auth.AuthManager;
 import com.hippo.ehviewer.transfer.auth.AuthMode;
 import com.hippo.ehviewer.transfer.core.DataChangeBus;
+import com.hippo.ehviewer.transfer.core.RelayPoolManager;
 import com.hippo.ehviewer.transfer.core.ResponseCache;
 import com.hippo.ehviewer.transfer.index.BucketLayout;
 import com.hippo.ehviewer.transfer.index.GalleryIndexStore;
@@ -190,15 +191,42 @@ public class SystemApiHandler extends BaseApiHandler {
      * 因此在缓存体之外拼接。
      */
     private String appendIndexFields(String baseJson) {
-        StringBuilder sb = new StringBuilder(baseJson.length() + 160);
+        StringBuilder sb = new StringBuilder(baseJson.length() + 400);
         if (baseJson.endsWith("}")) {
             sb.append(baseJson, 0, baseJson.length() - 1);
         } else {
             sb.append(baseJson);
         }
         GalleryIndexStore store = GalleryIndexStore.get(context);
-        sb.append(",\"capabilities\":[\"").append(BucketLayout.CAPABILITY)
-                .append("\",\"lab-sync-v1\"]");
+        String relayModeName;
+        if (Settings.isRelayPoolEnabled()) {
+            relayModeName = "pool";
+        } else if (Settings.isRelayAnyEnabled()) {
+            relayModeName = "targeted";
+        } else {
+            relayModeName = "off";
+        }
+        RelayPoolManager poolManager = RelayPoolManager.getInstance(context);
+        sb.append(",\"relayMode\":\"").append(relayModeName).append('"');
+        sb.append(",\"relayPoolVersion\":").append(poolManager.getPoolVersion());
+        sb.append(",\"relayPoolEnabled\":").append(Settings.isRelayPoolEnabled());
+        sb.append(",\"capabilities\":[")
+                .append("\"").append(BucketLayout.CAPABILITY).append("\"")
+                .append(",\"lab-sync-v1\"")
+                .append(",\"relay\"")
+                .append(",\"relay-v2\"")
+                .append(",\"relay-pool-v1\"")
+                .append(",\"relay-partial-return\"")
+                .append(",\"page-bitmap-v1\"")
+                .append(",\"payload-compress:gzip\"")
+                .append(",\"gallery_list\"")
+                .append(",\"page_read\"")
+                .append(",\"download\"")
+                .append(",\"thumbnail\"");
+        if (Settings.isAuxDownloadEnabled()) {
+            sb.append(",\"aux_download\"");
+        }
+        sb.append("]");
         sb.append(",\"dataVersion\":").append(DataChangeBus.getVersion());
         sb.append(",\"dataEpoch\":\"").append(store.getEpoch()).append("\"");
         sb.append(",\"indexBucketSize\":").append(store.getBucketSize());

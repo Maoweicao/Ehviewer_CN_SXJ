@@ -133,6 +133,12 @@ public class ConnectApiHandler extends BaseApiHandler {
             response.put("message", "Connected");
             response.put("deviceId", deviceId);
             response.put("serverTime", System.currentTimeMillis());
+            // §5.23 心跳携带待投递事件（relay_pool_changed / page_received 等）
+            String labEvents = com.hippo.ehviewer.transfer.core.DataChangeBus
+                    .drainLabEventsJson();
+            if (labEvents != null) {
+                response.put("labEvents", com.alibaba.fastjson.JSON.parseArray(labEvents));
+            }
 
             return ResponseBuilder.jsonSuccess(response.toJSONString());
 

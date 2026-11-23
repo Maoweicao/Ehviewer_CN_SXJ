@@ -29,7 +29,7 @@ object TransferPortHelper {
      */
     @JvmStatic
     fun getPort(@Suppress("UNUSED_PARAMETER") context: android.content.Context?): Int {
-        // 与 com.hippo.ehviewer.transfer.core.TransferServerManager.DEFAULT_PORT 保持一致
-        return 8080
+        // 与 com.hippo.ehviewer.transfer.core.TransferServerManager.DEFAULT_PORT 保持单一来源
+        return com.hippo.ehviewer.transfer.core.TransferServerManager.getDefaultPort()
     }
 }

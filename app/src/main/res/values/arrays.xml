@@ -200,34 +200,6 @@
         <item>14</item>
     </string-array>
 
-    <string-array name="download_queue_order_entries" translatable="false">
-        <item>@string/download_queue_order_default</item>
-        <item>@string/download_queue_order_fewest_first</item>
-        <item>@string/download_queue_order_most_first</item>
-        <item>@string/download_queue_order_category_priority</item>
-    </string-array>
-
-    <string-array name="download_queue_order_entry_values" translatable="false">
-        <item>0</item>
-        <item>1</item>
-        <item>2</item>
-        <item>3</item>
-    </string-array>
-
-    <string-array name="download_queue_secondary_order_entries" translatable="false">
-        <item>@string/download_queue_secondary_none</item>
-        <item>@string/download_queue_secondary_fewest_first</item>
-        <item>@string/download_queue_secondary_most_first</item>
-        <item>@string/download_queue_secondary_category_priority</item>
-    </string-array>
-
-    <string-array name="download_queue_secondary_order_entry_values" translatable="false">
-        <item>0</item>
-        <item>1</item>
-        <item>2</item>
-        <item>3</item>
-    </string-array>
-
     <string-array name="preload_image_entries" translatable="false">
         <item>3</item>
         <item>5</item>
@@ -539,6 +511,15 @@
 
     <!-- IP风控解封时间 -->
     <string-array name="ip_block_duration_entries">
+        <item>立即</item>
+        <item>3分钟</item>
+        <item>5分钟</item>
+        <item>10分钟</item>
+        <item>30分钟</item>
+        <item>45分钟</item>
+        <item>1小时</item>
+        <item>2小时</item>
+        <item>3小时</item>
         <item>4小时</item>
         <item>6小时</item>
         <item>12小时</item>
@@ -546,6 +527,15 @@
     </string-array>
 
     <string-array name="ip_block_duration_values">
+        <item>0</item>
+        <item>3</item>
+        <item>5</item>
+        <item>10</item>
+        <item>30</item>
+        <item>45</item>
+        <item>60</item>
+        <item>120</item>
+        <item>180</item>
         <item>240</item>
         <item>360</item>
         <item>720</item>
@@ -862,6 +852,111 @@
         <item>bidirectional</item>
         <item>pull</item>
         <item>push</item>
+    </string-array>
+
+    <string-array name="download_batch_size_entries">
+        <item>50</item>
+        <item>100</item>
+        <item>150</item>
+        <item>200</item>
+        <item>250</item>
+        <item>300</item>
+    </string-array>
+
+    <string-array name="download_batch_size_values" translatable="false">
+        <item>50</item>
+        <item>100</item>
+        <item>150</item>
+        <item>200</item>
+        <item>250</item>
+        <item>300</item>
+    </string-array>
+
+    <string-array name="download_batch_cooldown_entries">
+        <item>Off</item>
+        <item>30 seconds</item>
+        <item>1 minute</item>
+        <item>5 minutes</item>
+        <item>10 minutes</item>
+        <item>30 minutes</item>
+        <item>45 minutes</item>
+        <item>1 hour</item>
+        <item>3 hours</item>
+        <item>5 hours</item>
+        <item>10 hours</item>
+        <item>15 hours</item>
+        <item>20 hours</item>
+        <item>24 hours</item>
+    </string-array>
+
+    <string-array name="download_batch_cooldown_values" translatable="false">
+        <item>0</item>
+        <item>30</item>
+        <item>60</item>
+        <item>300</item>
+        <item>600</item>
+        <item>1800</item>
+        <item>2700</item>
+        <item>3600</item>
+        <item>10800</item>
+        <item>18000</item>
+        <item>36000</item>
+        <item>54000</item>
+        <item>72000</item>
+        <item>86400</item>
+    </string-array>
+
+    <string-array name="limit_low_speed_seconds_entries">
+        <item>10 seconds</item>
+        <item>30 seconds</item>
+        <item>1 minute</item>
+        <item>2 minutes</item>
+        <item>5 minutes</item>
+    </string-array>
+
+    <string-array name="limit_low_speed_seconds_values" translatable="false">
+        <item>10</item>
+        <item>30</item>
+        <item>60</item>
+        <item>120</item>
+        <item>300</item>
+    </string-array>
+
+    <string-array name="relay_mode_entries">
+        <item>Off</item>
+        <item>Targeted relay only</item>
+        <item>Open candidate pool</item>
+    </string-array>
+    <string-array name="relay_mode_values">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
+    <string-array name="relay_lease_seconds_entries">
+        <item>60 seconds</item>
+        <item>5 minutes</item>
+        <item>10 minutes</item>
+        <item>30 minutes</item>
+        <item>60 minutes</item>
+    </string-array>
+    <string-array name="relay_lease_seconds_values">
+        <item>60</item>
+        <item>300</item>
+        <item>600</item>
+        <item>1800</item>
+        <item>3600</item>
+    </string-array>
+
+    <string-array name="relay_pool_max_items_entries">
+        <item>50</item>
+        <item>100</item>
+        <item>200</item>
+    </string-array>
+    <string-array name="relay_pool_max_items_values">
+        <item>50</item>
+        <item>100</item>
+        <item>200</item>
     </string-array>
 
 </resources>

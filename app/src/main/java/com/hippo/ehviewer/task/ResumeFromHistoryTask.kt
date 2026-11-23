@@ -5,10 +5,10 @@ import android.util.Log
 import com.hippo.ehviewer.EhApplication
 import com.hippo.ehviewer.EhDB
 import com.hippo.ehviewer.R
+import com.hippo.ehviewer.Settings
 import com.hippo.ehviewer.cache.GalleryCacheManager
 import com.hippo.ehviewer.client.EhEngine
 import com.hippo.ehviewer.client.EhUrl
-import com.hippo.ehviewer.client.data.GalleryDetail
 import com.hippo.ehviewer.client.data.GalleryInfo
 import com.hippo.ehviewer.dao.DownloadHistory
 import com.hippo.ehviewer.download.DownloadManager
@@ -21,15 +21,13 @@ import okhttp3.OkHttpClient
 import kotlin.coroutines.coroutineContext
 
 /**
- * 从下载历史恢复下载任务
+ * 从下载历史恢复下载任务。
  *
- * 功能：
- * 1. 查询 DownloadHistory 表获取所有历史记录
- * 2. 过滤掉当前已在下载列表中的
- * 3. 检查本地目录是否存在（磁盘上的画廊）
- * 4. 对于本地存在的：读取 .ehviewer.extra.json 获取完整信息（包括缩略图）
- * 5. 对于本地不存在的：完整下载
- * 6. 批量添加到下载队列
+ * 只恢复“当前有效”（[DownloadHistory.DELETION_NONE]）的历史，且与 [RestoreDownloadTask]
+ * 共用同一套四步过滤（[RestoreCandidateValidator]），避免把已被下载列表、目录映射、
+ * 重复目录或递进包含的画廊重新恢复成副本。
+ *
+ * 本地目录仍在的候选走“只补缺失文件”的恢复；目录已消失的候选走完整下载。
  */
 class ResumeFromHistoryTask(
     context: Context
@@ -37,7 +35,6 @@ class ResumeFromHistoryTask(
 
     companion object {
         private const val TAG = "ResumeFromHistoryTask"
-        private const val API_REQUEST_DELAY_MS = 1500L
     }
 
     @Volatile
@@ -45,6 +42,7 @@ class ResumeFromHistoryTask(
 
     private val downloadManager: DownloadManager = EhApplication.getDownloadManager(context)
     private val httpClient: OkHttpClient = EhApplication.getOkHttpClient(context)
+    private val downloadRoot by lazy { Settings.getDownloadLocation() }
 
     private var totalAdded = 0
     private var totalFailed = 0
@@ -57,7 +55,8 @@ class ResumeFromHistoryTask(
 
     override fun getTaskType(): BackgroundTask.TaskType = BackgroundTask.TaskType.IMPORT
 
-    override fun getTaskDescription(): String? = context.getString(R.string.settings_download_resume_from_history_summary)
+    override fun getTaskDescription(): String? =
+        context.getString(R.string.settings_download_resume_from_history_summary)
 
     override suspend fun execute(): Result<Unit> {
         return try {
@@ -66,149 +65,135 @@ class ResumeFromHistoryTask(
 
             coroutineContext[Job]?.ensureActive()
 
-            // Phase 1: 获取所有下载历史
+            // ── 阶段一：读取有效历史并构建候选 ──
             val allHistory = EhDB.getAllDownloadHistory()
             appendTaskLog("下载历史中共 ${allHistory.size} 条记录")
 
-            // Phase 2: 过滤出不在当前下载列表中的记录
-            // 仅恢复当前有效（deletionType == DELETION_NONE）的历史，跳过用户主动删除或合并掉的记录，
-            // 避免误把用户故意删除/合并的画廊重新下载。
-            val candidates = allHistory.filter { history ->
-                history.deletionType == DownloadHistory.DELETION_NONE &&
-                    !downloadManager.containDownloadInfo(history.gid)
-            }
-            appendTaskLog("不在当前下载列表中的: ${candidates.size} 条")
-
-            if (candidates.isEmpty()) {
+            val histories = allHistory.filter { it.deletionType == DownloadHistory.DELETION_NONE }
+            appendTaskLog("其中有效记录 ${histories.size} 条")
+            if (histories.isEmpty()) {
                 appendTaskLog("没有需要恢复的下载历史")
                 notifyCompleted()
                 return Result.success(Unit)
             }
 
-            updateProgress(-1, "分析 ${candidates.size} 条历史记录...")
-
-            // Phase 3: 分析每条记录
+            val candidates = ArrayList<RestoreCandidate>(histories.size)
             onDiskCount = 0
             fullDownloadCount = 0
-            val galleriesToAdd = mutableListOf<GalleryInfo>()
-            val needApiInfo = mutableListOf<DownloadHistory>()
-
-            for (history in candidates) {
-                if (isCancelled) {
-                    throw CancellationException("任务已取消")
+            for ((index, history) in histories.withIndex()) {
+                if (isCancelled) throw CancellationException("任务已取消")
+                val candidate = buildCandidate(history)
+                if (candidate != null) {
+                    candidates.add(candidate)
+                    if (candidate.dir != null) onDiskCount++ else fullDownloadCount++
                 }
-
-                // 检查本地目录是否存在
-                val dirname = history.filePath
-                val dirInfo = checkLocalFilesExist(history.gid, dirname)
-
-                if (dirInfo != null) {
-                    onDiskCount++
-                    // 本地有文件，读取 .ehviewer.extra.json 获取完整信息（包括缩略图）
-                    val galleryInfo = createGalleryInfoFromHistory(history, dirInfo)
-                    if (galleryInfo != null) {
-                        galleriesToAdd.add(galleryInfo)
-                    }
-                } else {
-                    // 本地没有文件，需要完整下载
-                    fullDownloadCount++
-                    needApiInfo.add(history)
+                if ((index + 1) % 50 == 0) {
+                    updateProgress(index + 1, histories.size, "已分析 ${index + 1}/${histories.size}")
                 }
             }
-
             appendTaskLog("分析完成: $onDiskCount 个在磁盘上, $fullDownloadCount 个需要完整下载")
 
-            // Phase 4: 从 API 获取需要完整下载的画廊信息
-            if (needApiInfo.isNotEmpty()) {
-                updateProgress(-1, "从 API 获取 ${needApiInfo.size} 个画廊信息...")
-                appendTaskLog("正在从 API 获取 ${needApiInfo.size} 个画廊的详细信息...")
-
-                coroutineContext[Job]?.ensureActive()
-
-                val galleryInfoList = mutableListOf<GalleryInfo>()
-                for (history in needApiInfo) {
-                    val gi = GalleryInfo()
-                    gi.gid = history.gid
-                    gi.token = history.token ?: ""
-                    gi.title = history.title
-                    gi.titleJpn = history.titleJpn
-                    galleryInfoList.add(gi)
-                }
-
-                try {
-                    EhEngine.fillGalleryListByApi(
-                        null,
-                        httpClient,
-                        ArrayList(galleryInfoList),
-                        EhUrl.getReferer()
-                    )
-                    // 用 API 获取到的信息补充列表
-                    for (gi in galleryInfoList) {
-                        if (gi.title != null && gi.token != null) {
-                            galleriesToAdd.add(gi)
-                        }
-                    }
-                } catch (e: Throwable) {
-                    Log.e(TAG, "Failed to fill gallery list from API", e)
-                    appendTaskLog("API 获取失败: ${e.message}")
-                    // 仍然添加能用的记录
-                    for (gi in galleryInfoList) {
-                        if (gi.title != null && gi.token != null) {
-                            galleriesToAdd.add(gi)
-                        }
-                    }
-                }
-            }
-
-            if (galleriesToAdd.isEmpty()) {
+            if (candidates.isEmpty()) {
                 appendTaskLog("没有可恢复的画廊")
                 notifyCompleted()
                 return Result.success(Unit)
             }
 
-            // Phase 5: 添加到下载队列
-            appendTaskLog("开始添加 ${galleriesToAdd.size} 个画廊到下载队列...")
-            updateProgress(-1, "添加 ${galleriesToAdd.size} 个画廊到下载队列...")
+            // ── 阶段二：四步过滤 ──
+            updateProgress(-1, "校验 ${candidates.size} 个候选…")
+            appendTaskLog("开始校验 ${candidates.size} 个候选…")
+            val validator = RestoreCandidateValidator(
+                context,
+                downloadManager,
+                httpClient,
+                log = { appendTaskLog(it) },
+                progress = { current, total, detail -> updateProgress(current, total, detail) }
+            )
+            val validation = validator.validate(candidates)
+            logRejections(validation.rejected)
 
+            val accepted = validation.accepted
+            appendTaskLog("校验完成：可恢复 ${accepted.size} 个，跳过 ${validation.rejected.size} 个")
+            if (accepted.isEmpty()) {
+                appendTaskLog("没有可恢复的画廊")
+                notifyCompleted()
+                return Result.success(Unit)
+            }
+
+            // ── 阶段三：构建 GalleryInfo（磁盘项优先用本地缓存） ──
+            val items = ArrayList<GalleryInfo>(accepted.size)
+            val needApi = ArrayList<GalleryInfo>()
+            for (candidate in accepted) {
+                val history = candidate.payload as? DownloadHistory
+                val info = buildGalleryInfo(candidate, history)
+                items.add(info)
+                // 只有缺标题或 token 时才联网：缩略图缺了可以稍后按需加载，
+                // 不能因为 thumb 为空就给上万个画廊逐个发详情请求。
+                if (info.title.isNullOrEmpty() || info.token.isNullOrEmpty()) {
+                    needApi.add(info)
+                }
+            }
+
+            if (needApi.isNotEmpty()) {
+                appendTaskLog("正在从 API 补全 ${needApi.size} 个画廊的信息…")
+                var apiDone = 0
+                for (chunk in needApi.chunked(25)) {
+                    coroutineContext[Job]?.ensureActive()
+                    try {
+                        EhEngine.fillGalleryListByApiBestEffort(
+                            null,
+                            httpClient,
+                            chunk,
+                            EhUrl.getReferer()
+                        )
+                    } catch (e: Throwable) {
+                        com.hippo.util.ExceptionUtils.throwIfFatal(e)
+                        Log.e(TAG, "Failed to fill gallery list from API", e)
+                        appendTaskLog("API 获取失败: ${e.message}")
+                    }
+                    apiDone += chunk.size
+                    updateProgress(apiDone, needApi.size, "补全画廊信息 $apiDone/${needApi.size}")
+                    // 逐批节流，避免 1.5 万条时连续几百个请求触发限流
+                    kotlinx.coroutines.delay(800)
+                }
+            }
+
+            // ── 阶段四：写入下载队列 ──
+            appendTaskLog("开始添加 ${items.size} 个画廊到下载队列…")
             var successCount = 0
             var failCount = 0
-
-            for ((index, galleryInfo) in galleriesToAdd.withIndex()) {
-                if (isCancelled) {
-                    throw CancellationException("任务已取消")
+            for ((index, info) in items.withIndex()) {
+                if (isCancelled) throw CancellationException("任务已取消")
+                val candidate = accepted[index]
+                if (info.title.isNullOrEmpty()) {
+                    info.title = candidate.title?.takeIf { it.isNotEmpty() }
+                        ?: candidate.dirname.takeIf { it.isNotEmpty() }
+                        ?: info.gid.toString()
                 }
-
-                try {
-                    downloadManager.addDownload(galleryInfo, null)
-                    // 如果有目录名信息，保存到 DownloadDirname
-                    val history = candidates.find { it.gid == galleryInfo.gid }
-                    if (history != null && history.filePath != null) {
-                        EhDB.putDownloadDirname(history.gid, history.filePath)
-                    }
+                if (RestoreSupport.commit(downloadManager, info, candidate) { appendTaskLog(it) }) {
                     successCount++
-                } catch (e: Exception) {
+                } else {
                     failCount++
-                    appendTaskLog("添加失败: ${galleryInfo.title} (GID: ${galleryInfo.gid}): ${e.message}")
                 }
-
-                updateProgress(index + 1, galleriesToAdd.size, "已处理 ${index + 1}/${galleriesToAdd.size}")
+                updateProgress(index + 1, items.size, "已处理 ${index + 1}/${items.size}")
             }
 
             totalAdded = successCount
             totalFailed = failCount
 
-            val summary = "恢复完成: 成功 $successCount，失败 $failCount (磁盘: $onDiskCount，完整下载: $fullDownloadCount)"
+            val summary = "恢复完成: 成功 $successCount，失败 $failCount " +
+                "(磁盘: $onDiskCount，完整下载: $fullDownloadCount)"
             Log.d(TAG, summary)
             appendTaskLog(summary)
             notifyCompleted()
-            return Result.success(Unit)
-
+            Result.success(Unit)
         } catch (e: CancellationException) {
             Log.d(TAG, "Resume from history cancelled")
             appendTaskLog("任务已取消")
             notifyCancelled()
             Result.failure(e)
         } catch (e: Throwable) {
+            com.hippo.util.ExceptionUtils.throwIfFatal(e)
             Log.e(TAG, "Resume from history failed", e)
             appendTaskLog("任务失败: ${e.message}")
             notifyError(e)
@@ -224,121 +209,154 @@ class ResumeFromHistoryTask(
     }
 
     /**
-     * 目录信息数据类
+     * 把一条历史记录转换成恢复候选：目录仍在时补上 pages / pToken / 文件数，
+     * 目录已消失时只保留 gid / token，走完整下载。
+     *
+     * 目录里的 `.ehviewer` 属于别的 gid 时，以磁盘内容为准（历史记录是陈旧的）：
+     * 否则会拿这条历史去补元数据，把别的画廊的 `.ehviewer` 覆盖掉。
      */
-    private data class DirInfo(
-        val dir: UniFile,
-        val dirname: String
-    )
+    private fun buildCandidate(history: DownloadHistory): RestoreCandidate? {
+        val dirname = history.filePath?.takeIf { it.isNotEmpty() } ?: ""
+        val dir = findLocalDir(dirname)
 
-    /**
-     * 检查本地是否存在画廊文件，返回目录信息
-     */
-    private fun checkLocalFilesExist(gid: Long, dirname: String?): DirInfo? {
-        if (dirname.isNullOrEmpty()) return null
+        var gid = history.gid
+        var token = history.token?.takeIf { it.isNotEmpty() }
+        var pages = 0
+        var hashes: Set<String> = emptySet()
+        var fileCount = 0
+        var modifiedAt = 0L
+        // 磁盘上的 gid 与历史不一致时，这条历史不再适用于该目录
+        var historyMatchesDir = true
 
-        try {
-            val downloadDir = com.hippo.ehviewer.Settings.getDownloadLocation() ?: return null
-            val dir = downloadDir.findFile(dirname) ?: return null
-            if (!dir.isDirectory) return null
+        if (dir != null) {
+            fileCount = RestoreSupport.countImageFiles(dir)
+            modifiedAt = dir.lastModified()
 
-            // 检查是否有非元数据文件
-            val files = dir.listFiles()
-            if (files.isNullOrEmpty()) return null
+            val meta = EhviewerMetaParser.parse(dir)
+            if (meta != null) {
+                if (meta.gid != history.gid) {
+                    historyMatchesDir = false
+                    gid = meta.gid
+                    appendTaskLog(
+                        "目录 $dirname 的 .ehviewer 属于 GID ${meta.gid}，" +
+                            "与历史记录的 GID ${history.gid} 不符，按磁盘内容恢复"
+                    )
+                }
+                if (token.isNullOrEmpty()) token = meta.token.takeIf { it.isNotEmpty() }
+                pages = meta.pages
+                hashes = meta.hashes.toHashSet()
+            }
 
-            for (file in files) {
-                val name = file.name
-                if (file.isFile && name != null && !name.startsWith(".")) {
-                    return DirInfo(dir, dirname)
+            if (token.isNullOrEmpty() || pages <= 0) {
+                try {
+                    val cached = GalleryCacheManager.getInstance(context)
+                        .readGalleryCache(gid, dir)
+                    if (cached != null) {
+                        if (token.isNullOrEmpty()) token = cached.token?.takeIf { it.isNotEmpty() }
+                        if (pages <= 0) pages = cached.pages
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "读取画廊缓存失败: GID=$gid", e)
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Error checking local files for gid=$gid", e)
+        }
+
+        return RestoreCandidate(
+            gid = gid,
+            dirname = dirname,
+            dir = dir,
+            token = token,
+            title = if (historyMatchesDir) history.title else null,
+            pages = pages,
+            hashes = hashes,
+            fileCount = fileCount,
+            modifiedAt = modifiedAt
+        ).apply {
+            payload = if (historyMatchesDir) history else null
+        }
+    }
+
+    /** 目录存在且有非元数据文件才算“本地已有” */
+    private fun findLocalDir(dirname: String): UniFile? {
+        if (dirname.isEmpty()) return null
+        val root = downloadRoot ?: return null
+        val dir = root.findFile(dirname) ?: return null
+        if (!dir.isDirectory) return null
+        val files = dir.listFiles() ?: return null
+        if (files.isEmpty()) return null
+        for (file in files) {
+            val name = file.name
+            if (file.isFile && name != null && !name.startsWith(".")) {
+                return dir
+            }
         }
         return null
     }
 
     /**
-     * 从 DownloadHistory 创建 GalleryInfo，优先读取 .ehviewer.extra.json 获取完整信息
+     * 构建下载项基础信息：历史字段 + 本地缓存补充（缩略图、分类、页数等）。
      */
-    private fun createGalleryInfoFromHistory(history: DownloadHistory, dirInfo: DirInfo): GalleryInfo? {
-        // 如果 token 为空，尝试从缓存读取
-        if (history.token.isNullOrEmpty()) {
-            // 尝试读取 .ehviewer.extra.json
-            val cacheManager = GalleryCacheManager.getInstance(context)
-            val cachedDetail = cacheManager.readGalleryCache(history.gid, dirInfo.dir)
-            if (cachedDetail != null) {
-                Log.d(TAG, "从缓存恢复画廊信息: ${cachedDetail.title} (GID: ${history.gid})")
-                return cachedDetail
-            }
-            // 如果缓存也没有，返回 null（无法恢复没有有效 token 的记录）
-            Log.w(TAG, "无法恢复画廊: GID=${history.gid}, token 为空且无缓存")
-            return null
-        }
+    private fun buildGalleryInfo(candidate: RestoreCandidate, history: DownloadHistory?): GalleryInfo {
+        val info = GalleryInfo()
+        info.gid = candidate.gid
+        info.token = candidate.token ?: history?.token ?: ""
+        info.title = history?.title
+        info.titleJpn = history?.titleJpn
+        info.pages = candidate.pages
 
-        // 有 token，创建 GalleryInfo
-        val galleryInfo = GalleryInfo()
-        galleryInfo.gid = history.gid
-        galleryInfo.token = history.token
-        galleryInfo.title = history.title
-        galleryInfo.titleJpn = history.titleJpn
-
-        // 尝试从 .ehviewer.extra.json 补充更多信息
+        val dir = candidate.dir ?: return info
         try {
-            val cacheManager = GalleryCacheManager.getInstance(context)
-            val cachedDetail = cacheManager.readGalleryCache(history.gid, dirInfo.dir)
-            if (cachedDetail != null) {
-                // 补充缓存中的信息（缩略图、分类等）
-                if (galleryInfo.thumb.isNullOrEmpty() && !cachedDetail.thumb.isNullOrEmpty()) {
-                    galleryInfo.thumb = cachedDetail.thumb
-                }
-                if (galleryInfo.category == 0 && cachedDetail.category != 0) {
-                    galleryInfo.category = cachedDetail.category
-                }
-                if (galleryInfo.pages == 0 && cachedDetail.pages > 0) {
-                    galleryInfo.pages = cachedDetail.pages
-                }
-                // 补充其他信息
-                if (galleryInfo.title.isNullOrEmpty() && !cachedDetail.title.isNullOrEmpty()) {
-                    galleryInfo.title = cachedDetail.title
-                }
-                if (galleryInfo.titleJpn.isNullOrEmpty() && !cachedDetail.titleJpn.isNullOrEmpty()) {
-                    galleryInfo.titleJpn = cachedDetail.titleJpn
-                }
-                if (galleryInfo.posted.isNullOrEmpty() && !cachedDetail.posted.isNullOrEmpty()) {
-                    galleryInfo.posted = cachedDetail.posted
-                }
-                if (galleryInfo.uploader.isNullOrEmpty() && !cachedDetail.uploader.isNullOrEmpty()) {
-                    galleryInfo.uploader = cachedDetail.uploader
-                }
-                if (galleryInfo.rating == 0f && cachedDetail.rating > 0) {
-                    galleryInfo.rating = cachedDetail.rating
-                }
-                if (galleryInfo.simpleLanguage.isNullOrEmpty() && !cachedDetail.simpleLanguage.isNullOrEmpty()) {
-                    galleryInfo.simpleLanguage = cachedDetail.simpleLanguage
-                }
-                if (galleryInfo.simpleTags == null && cachedDetail.simpleTags != null) {
-                    galleryInfo.simpleTags = cachedDetail.simpleTags
-                }
-                if (galleryInfo.tgList == null && cachedDetail.tgList != null) {
-                    galleryInfo.tgList = cachedDetail.tgList
-                }
-                Log.d(TAG, "从缓存补充画廊信息: ${galleryInfo.title} (GID: ${history.gid})")
-            }
+            val cached = GalleryCacheManager.getInstance(context)
+                .readGalleryCache(candidate.gid, dir) ?: return info
+            if (info.thumb.isNullOrEmpty()) info.thumb = cached.thumb
+            if (info.category == 0 && cached.category != 0) info.category = cached.category
+            if (info.pages <= 0 && cached.pages > 0) info.pages = cached.pages
+            if (info.title.isNullOrEmpty()) info.title = cached.title
+            if (info.titleJpn.isNullOrEmpty()) info.titleJpn = cached.titleJpn
+            if (info.posted.isNullOrEmpty()) info.posted = cached.posted
+            if (info.uploader.isNullOrEmpty()) info.uploader = cached.uploader
+            if (info.rating == 0f && cached.rating > 0) info.rating = cached.rating
+            if (info.simpleLanguage.isNullOrEmpty()) info.simpleLanguage = cached.simpleLanguage
+            if (info.simpleTags == null) info.simpleTags = cached.simpleTags
+            if (info.tgList == null) info.tgList = cached.tgList
         } catch (e: Exception) {
-            Log.w(TAG, "读取画廊缓存失败: GID=${history.gid}", e)
+            Log.w(TAG, "读取画廊缓存失败: GID=${candidate.gid}", e)
         }
-
-        return galleryInfo
+        return info
     }
 
-    /**
-     * 获取成功添加的数量
-     */
+    private fun logRejections(rejected: List<RestoreRejection>) {
+        if (rejected.isEmpty()) return
+        val byReason = rejected.groupBy { it.reason }
+        for ((reason, list) in byReason) {
+            appendTaskLog("跳过 ${list.size} 项：${describeReason(reason)}")
+            list.take(5).forEach { rejection ->
+                appendTaskLog(
+                    "  · ${rejection.candidate.dirname.ifEmpty { rejection.candidate.gid.toString() }}" +
+                        "（GID: ${rejection.candidate.gid}）" +
+                        (rejection.detail?.let { " — $it" } ?: "")
+                )
+            }
+            if (list.size > 5) {
+                appendTaskLog("  · …另有 ${list.size - 5} 项，详见任务日志")
+            }
+        }
+    }
+
+    private fun describeReason(reason: RestoreRejectReason): String = when (reason) {
+        RestoreRejectReason.DIR_CLAIMED_BY_OTHER -> "目录已被其他画廊占用"
+        RestoreRejectReason.GID_MAPPED_ELSEWHERE -> "该画廊已有其他目录"
+        RestoreRejectReason.ALREADY_DOWNLOADING -> "已在下载队列"
+        RestoreRejectReason.DUPLICATE_OF_OTHER -> "同一画廊的重复目录"
+        RestoreRejectReason.INCLUDED_BY_OTHER -> "被更完整的画廊递进包含"
+        RestoreRejectReason.NO_TOKEN -> "缺少 token，无法联网修复元数据"
+        RestoreRejectReason.METADATA_REPAIR_FAILED -> "联网修复元数据失败"
+        RestoreRejectReason.METADATA_INCOMPLETE -> "元数据仍不齐全"
+    }
+
+    /** 获取成功添加的数量 */
     fun getTotalAdded(): Int = totalAdded
 
-    /**
-     * 获取失败的数量
-     */
+    /** 获取失败的数量 */
     fun getTotalFailed(): Int = totalFailed
 }

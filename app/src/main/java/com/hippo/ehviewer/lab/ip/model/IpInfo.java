@@ -138,21 +138,27 @@ public class IpInfo {
         return info;
     }
 
+    /**
+     * 唯一标识：Clash 内核节点的 ip/port 都是占位值，必须用 name 区分，
+     * 否则所有节点会被当成同一个，测速/启用状态会全部改到第一个节点。
+     */
+    public String uniqueKey() {
+        if (name != null && !name.isEmpty()) {
+            return "n:" + name;
+        }
+        return "a:" + ip + ":" + port + ":" + protocol;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         IpInfo ipInfo = (IpInfo) o;
-        return port == ipInfo.port &&
-                ip != null && ip.equals(ipInfo.ip) &&
-                protocol != null && protocol.equals(ipInfo.protocol);
+        return uniqueKey().equals(ipInfo.uniqueKey());
     }
 
     @Override
     public int hashCode() {
-        int result = ip != null ? ip.hashCode() : 0;
-        result = 31 * result + port;
-        result = 31 * result + (protocol != null ? protocol.hashCode() : 0);
-        return result;
+        return uniqueKey().hashCode();
     }
 }

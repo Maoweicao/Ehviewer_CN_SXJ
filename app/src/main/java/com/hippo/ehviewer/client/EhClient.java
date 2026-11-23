@@ -226,6 +226,15 @@ public class EhClient {
                 //noinspection StatementWithEmptyBody
                 if (!(result instanceof CancelledException)) {
                     if (result instanceof Throwable) {
+                        try {
+                            com.hippo.ehviewer.EhApplication app =
+                                    com.hippo.ehviewer.EhApplication.getInstance();
+                            if (app != null) {
+                                com.hippo.ehviewer.limit.RemoteLimitGuard.getInstance(app)
+                                        .inspectThrowable((Throwable) result, "eh_client");
+                            }
+                        } catch (Throwable ignored) {
+                        }
                         mCallback.onFailure((Exception) result);
                         Analytics.recordException((Throwable) result);
                     } else {

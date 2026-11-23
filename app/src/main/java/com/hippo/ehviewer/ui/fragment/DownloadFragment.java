@@ -33,13 +33,13 @@ import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.app.NotificationCompat;
 import androidx.preference.Preference;
-import com.hippo.preference.ListPreference;
 
 import com.hippo.ehviewer.AppConfig;
 import com.hippo.ehviewer.EhApplication;
 import com.hippo.ehviewer.EhDB;
 import com.hippo.ehviewer.R;
 import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.preference.DownloadSortOrderPreference;
 import com.hippo.ehviewer.download.filter.ExcludeRule;
 import com.hippo.ehviewer.download.filter.FilterSettingsStore;
 import com.hippo.ehviewer.download.filter.LowRatingConfig;
@@ -108,6 +108,7 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
     public static final String KEY_REPAIR_DOWNLOADED_THUMBNAIL = "repair_downloaded_thumbnail";
     public static final String KEY_VERIFY_DOWNLOAD_INTEGRITY = "verify_download_integrity";
     public static final String KEY_VIEW_DOWNLOAD_LOGS = "view_download_logs";
+    public static final String KEY_EXPORT_DOWNLOAD_LOGS = "export_download_logs";
     public static final String KEY_CLEAN_DOWNLOAD_LOGS = "clean_download_logs";
     public static final String KEY_RESET_MEDIA_SCAN = "reset_media_scan";
     // 筛选与快捷筛选
@@ -159,6 +160,7 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         Preference mergeDuplicateGallery = findPreference("merge_duplicate_gallery");
         Preference scanDownloadFiles = findPreference("scan_download_files");
         Preference viewDownloadLogs = findPreference(KEY_VIEW_DOWNLOAD_LOGS);
+        Preference exportDownloadLogs = findPreference(KEY_EXPORT_DOWNLOAD_LOGS);
         Preference cleanDownloadLogs = findPreference(KEY_CLEAN_DOWNLOAD_LOGS);
         Preference resetMediaScan = findPreference(KEY_RESET_MEDIA_SCAN);
         Preference preloadImage = findPreference("preload_image");
@@ -182,6 +184,26 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         }
         if(imageResolutionPref != null){
             imageResolutionPref.setSummary(getString(R.string.settings_download_image_resolution_summary, Settings.getImageResolution()));
+        }
+
+        // 自动换 IP 需要限流检测来触发节点切换，此模式下强制开启。
+        Preference limitDetection = findPreference(Settings.KEY_LIMIT_DETECTION_ENABLED);
+        if (limitDetection != null && Settings.getIpSwitchEnabled()) {
+            if (!Settings.isLimitDetectionEnabled()) {
+                Settings.putLimitDetectionEnabled(true);
+            }
+            limitDetection.setEnabled(false);
+            limitDetection.setSummary(R.string.settings_download_limit_detection_disabled_by_ip_switch);
+        }
+
+        // 自动换 IP 负责处理限流，冷却/暂停下载开关在此模式下不可用。
+        Preference limitCooldown = findPreference(Settings.KEY_LIMIT_COOLDOWN_ENABLED);
+        if (limitCooldown != null && Settings.getIpSwitchEnabled()) {
+            if (Settings.isLimitCooldownEnabled()) {
+                Settings.putLimitCooldownEnabled(false);
+            }
+            limitCooldown.setEnabled(false);
+            limitCooldown.setSummary(R.string.settings_download_limit_cooldown_disabled_by_ip_switch);
         }
 
 
@@ -268,9 +290,6 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         if (repairUnknownCategoryGallery != null) {
             repairUnknownCategoryGallery.setOnPreferenceClickListener(this);
         }
-        if (rebuildDownloadRecords != null) {
-            rebuildDownloadRecords.setOnPreferenceClickListener(this);
-        }
         if (repairDownloadedThumbnail != null) {
             repairDownloadedThumbnail.setOnPreferenceClickListener(this);
         }
@@ -289,6 +308,9 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         if (viewDownloadLogs != null) {
             viewDownloadLogs.setOnPreferenceClickListener(this);
         }
+        if (exportDownloadLogs != null) {
+            exportDownloadLogs.setOnPreferenceClickListener(this);
+        }
         if (cleanDownloadLogs != null) {
             cleanDownloadLogs.setOnPreferenceClickListener(this);
         }
@@ -303,16 +325,24 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         }
         updateFilterConfigSummaries();
 
-        // Secondary sort depends on primary sort being non-default
-        ListPreference queueOrder = findPreference("download_queue_order");
-        Preference secondaryOrder = findPreference("download_queue_secondary_order");
-        if (queueOrder != null && secondaryOrder != null) {
-            String currentValue = queueOrder.getValue();
-            secondaryOrder.setEnabled(!"0".equals(currentValue));
-            queueOrder.setOnPreferenceChangeListener((pref, newValue) -> {
-                secondaryOrder.setEnabled(!"0".equals(String.valueOf(newValue)));
+        // 高级排序开关变化后立即刷新排序摘要（开关值在监听器返回后才写入）。
+        Preference advancedSort = findPreference(Settings.KEY_ADVANCED_DOWNLOAD_SORT_ENABLED);
+        Preference sortOrder = findPreference("download_sort_order_v2");
+        if (advancedSort != null && sortOrder instanceof DownloadSortOrderPreference) {
+            advancedSort.setOnPreferenceChangeListener((pref, newValue) -> {
+                ((DownloadSortOrderPreference) sortOrder)
+                        .refresh(Boolean.TRUE.equals(newValue));
                 return true;
             });
+        }
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        Preference sortOrder = findPreference("download_sort_order_v2");
+        if (sortOrder instanceof DownloadSortOrderPreference) {
+            ((DownloadSortOrderPreference) sortOrder).refresh();
         }
     }
 
@@ -445,51 +475,6 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
                     .setNegativeButton(android.R.string.cancel, null)
                     .show();
             return true;
-        } else if (KEY_REBUILD_DOWNLOAD_RECORDS.equals(key)) {
-            // 显示Toast并开始预检查
-            Toast.makeText(requireActivity(), R.string.settings_download_rebuilding, Toast.LENGTH_SHORT).show();
-            
-            // 在后台线程执行预检查
-            ExecutorManager.getBackgroundExecutor().execute(() -> {
-                try {
-                    UniFile downloadDir = Settings.getDownloadLocation();
-                    if (downloadDir == null || !downloadDir.isDirectory()) {
-                        showCheckResultOnMainThread("下载目录不存在或无效，无法重建下载记录");
-                        return;
-                    }
-                    
-                    UniFile[] files = downloadDir.listFiles();
-                    if (files == null || files.length == 0) {
-                        showCheckResultOnMainThread("下载目录为空，没有找到任何画廊文件夹");
-                        return;
-                    }
-                    
-                    // 检查是否有.ehviewer文件
-                    boolean hasEhViewerFiles = false;
-                    for (UniFile file : files) {
-                        if (file.isDirectory()) {
-                            UniFile ehViewerFile = file.findFile(DownloadManager.DOWNLOAD_INFO_FILENAME);
-                            if (ehViewerFile != null) {
-                                hasEhViewerFiles = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    if (!hasEhViewerFiles) {
-                        showCheckResultOnMainThread("下载目录中没有找到任何.ehviewer文件，无法重建下载记录");
-                        return;
-                    }
-                    
-                    // 预检查通过，显示确认对话框
-                    showConfirmDialogOnMainThread();
-                    
-                } catch (Exception e) {
-                    Log.e(TAG, "[REBUILD] 预检查时发生错误", e);
-                    showCheckResultOnMainThread("检查下载目录时发生错误: " + e.getMessage());
-                }
-            });
-            return true;
         } else if (KEY_REPAIR_DOWNLOADED_THUMBNAIL.equals(key)) {
             new AlertDialog.Builder(requireActivity())
                     .setTitle(R.string.settings_download_repair_thumbnail)
@@ -537,6 +522,9 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
             return true;
         } else if (KEY_VIEW_DOWNLOAD_LOGS.equals(key)) {
             showViewDownloadLogsDialog();
+            return true;
+        } else if (KEY_EXPORT_DOWNLOAD_LOGS.equals(key)) {
+            exportDownloadLogs();
             return true;
         } else if (KEY_CLEAN_DOWNLOAD_LOGS.equals(key)) {
             showCleanDownloadLogsDialog();
@@ -1138,32 +1126,46 @@ public class DownloadFragment extends BasePreferenceFragmentCompat implements
         }
     }
     
-    // 重建下载记录预检查的辅助方法
-    private void showCheckResultOnMainThread(String message) {
-        ExecutorManager.runOnMainThread(() -> {
-            if (isAdded() && getActivity() != null) {
-                Toast.makeText(getActivity(), message, Toast.LENGTH_LONG).show();
-            }
-        });
-    }
+
     
-    private void showConfirmDialogOnMainThread() {
-        ExecutorManager.runOnMainThread(() -> {
-            if (isAdded() && getActivity() != null) {
-                new AlertDialog.Builder(requireActivity())
-                        .setTitle(R.string.settings_download_rebuild_download_records)
-                        .setMessage(R.string.settings_download_rebuild_confirm)
-                        .setPositiveButton(android.R.string.ok, (dialog, which) -> {
-                            com.hippo.ehviewer.task.RebuildDownloadRecordsTask task =
-                                    new com.hippo.ehviewer.task.RebuildDownloadRecordsTask(requireContext());
-                            com.hippo.ehviewer.BackgroundTaskManager.getInstance().submitBackgroundTask(task);
-                        })
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show();
-            }
-        });
-    }
+
     
+    private void exportDownloadLogs() {
+        if (getContext() == null) return;
+        Toast.makeText(requireContext(), R.string.settings_download_export_logs_started,
+                Toast.LENGTH_SHORT).show();
+        new Thread(() -> {
+            final File zip = mDownloadLogger.exportLogsZip();
+            ExecutorManager.runOnMainThread(() -> {
+                if (!isAdded() || getActivity() == null) return;
+                if (zip == null) {
+                    Toast.makeText(requireContext(),
+                            R.string.settings_download_export_logs_failed,
+                            Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                Toast.makeText(requireContext(),
+                        getString(R.string.settings_download_export_logs_done,
+                                zip.getAbsolutePath()),
+                        Toast.LENGTH_LONG).show();
+                try {
+                    Uri uri = com.hippo.content.FileProvider.getUriForFile(
+                            requireContext(),
+                            requireContext().getPackageName() + ".fileprovider",
+                            zip);
+                    Intent intent = new Intent(Intent.ACTION_SEND);
+                    intent.setType("application/zip");
+                    intent.putExtra(Intent.EXTRA_STREAM, uri);
+                    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(Intent.createChooser(intent,
+                            getString(R.string.settings_download_export_logs)));
+                } catch (Exception e) {
+                    Log.w(TAG, "分享下载日志失败", e);
+                }
+            });
+        }, "download-log-export").start();
+    }
+
     private void showViewDownloadLogsDialog() {
         File[] logFiles = mDownloadLogger.getLogFiles();
         if (logFiles.length == 0) {

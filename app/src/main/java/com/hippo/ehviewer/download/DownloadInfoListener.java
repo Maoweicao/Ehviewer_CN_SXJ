@@ -4,7 +4,6 @@ import androidx.annotation.NonNull;
 
 import com.hippo.ehviewer.dao.DownloadInfo;
 
-import java.util.LinkedList;
 import java.util.List;
 
 public interface DownloadInfoListener {
@@ -22,7 +21,7 @@ public interface DownloadInfoListener {
     /**
      * The special info is changed
      */
-    void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, LinkedList<DownloadInfo> mWaitList);
+    void onUpdate(@NonNull DownloadInfo info, @NonNull List<DownloadInfo> list, List<DownloadInfo> mWaitList);
 
     /**
      * Maybe all data is changed, but size is the same

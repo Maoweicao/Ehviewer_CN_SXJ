@@ -3,6 +3,8 @@ package com.hippo.ehviewer.lab.ip.parser;
 import android.util.Base64;
 import android.util.Log;
 
+import com.hippo.ehviewer.Settings;
+import com.hippo.ehviewer.lab.ip.IpSwitchController;
 import com.hippo.ehviewer.lab.ip.model.IpInfo;
 
 import java.io.ByteArrayOutputStream;
@@ -21,6 +23,8 @@ public class SubscriptionParser {
         public long trafficUsed;
         public long trafficTotal;
         public long expiry;
+        /** 原始订阅内容，Clash 内核配置需要。 */
+        public String rawContent;
 
         public ParseResult(List<IpInfo> ips) {
             this.ips = ips;
@@ -40,7 +44,13 @@ public class SubscriptionParser {
         HttpURLConnection conn = null;
         try {
             URL urlObj = new URL(url);
-            conn = (HttpURLConnection) urlObj.openConnection();
+            java.net.Proxy proxy = null;
+            if (Settings.getIpSwitchEnabled()) {
+                proxy = IpSwitchController.getInstance().getCurrentProxy();
+            }
+            conn = (HttpURLConnection) (proxy == null
+                    ? urlObj.openConnection()
+                    : urlObj.openConnection(proxy));
             conn.setRequestMethod("GET");
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(15000);
@@ -59,6 +69,7 @@ public class SubscriptionParser {
             }
 
             ParseResult result = new ParseResult(new ArrayList<>());
+            result.rawContent = content;
 
             String userInfoHeader = conn.getHeaderField("subscription-userinfo");
             if (userInfoHeader != null && !userInfoHeader.isEmpty()) {
